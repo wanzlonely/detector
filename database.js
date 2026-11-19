@@ -110,6 +110,7 @@ async function consumeQuota(telegramId, count = 1) {
     user.total_checks = Number(user.total_checks || 0) + count;
     await redis.set(userKey, user);
     await redis.incrby('stats:total_checks', count);
+    await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
 
@@ -123,6 +124,7 @@ async function consumeQuota(telegramId, count = 1) {
     user.total_checks = Number(user.total_checks || 0) + count;
     await redis.set(userKey, user);
     await redis.incrby('stats:total_checks', count);
+    await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
 
@@ -225,6 +227,68 @@ async function getGlobalStats() {
   };
 }
 
+
+async function registerReferral(inviteeId, inviterId) {
+  const invitee = String(inviteeId);
+  const inviter = String(inviterId || '').replace(/^ref_/, '');
+  if (!/^\\d+$/.test(inviter) || inviter === invitee) return false;
+  const inviterUser = await redis.get('user:' + inviter);
+  if (!inviterUser) return false;
+  const already = await redis.get('referral:invited_by:' + invitee);
+  if (already) return false;
+  const count = Number(await redis.scard('referrals:' + inviter) || 0);
+  if (count >= 10) return false;
+  const saved = await redis.set('referral:invited_by:' + invitee, inviter, { nx: true });
+  if (!saved) return false;
+  await redis.sadd('referrals:' + inviter, invitee);
+  return true;
+}
+
+async function qualifyReferral(inviteeId) {
+  const invitee = String(inviteeId);
+  const inviter = await redis.get('referral:invited_by:' + invitee);
+  if (!inviter) return { rewarded: false };
+  const completed = Number(await redis.incr('referral:completed:' + invitee));
+  if (completed < 3) return { rewarded: false, completed };
+  const claimed = await redis.set('referral:rewarded:' + invitee, '1', { nx: true });
+  if (!claimed) return { rewarded: false, completed };
+  const result = await activateVip(Number(inviter), 1, 'PREMIUM', 'HADIAH REFERRAL · 1 HARI');
+  await redis.incr('referral:rewards:' + inviter);
+  return { rewarded: true, inviter: Number(inviter), expiry: result.expiry };
+}
+
+async function getReferralStats(telegramId) {
+  const id = String(telegramId);
+  const invitees = await redis.smembers('referrals:' + id);
+  const rewarded = Number(await redis.get('referral:rewards:' + id) || 0);
+  return { total: (invitees || []).length, rewarded };
+}
+
+async function getLeaderboard(limit = 10) {
+  let ids = await redis.zrange('leaderboard:checks', 0, Math.max(0, limit - 1), { rev: true });
+  if (!ids || !ids.length) {
+    const all = await redis.smembers('users:all');
+    ids = [];
+    for (const id of all || []) {
+      const user = await redis.get('user:' + id);
+      if (!user) continue;
+      const score = Number(user.total_checks || 0);
+      if (score > 0) {
+        await redis.zadd('leaderboard:checks', { score, member: String(id) });
+        ids.push(String(id));
+      }
+    }
+    ids.sort(async () => 0);
+    ids = await redis.zrange('leaderboard:checks', 0, Math.max(0, limit - 1), { rev: true });
+  }
+  const rows = [];
+  for (const id of ids || []) {
+    const user = await redis.get('user:' + id);
+    if (user) rows.push({ telegram_id: String(id), full_name: user.full_name || 'Pengguna', username: user.username || '-', total_checks: Number(user.total_checks || 0) });
+  }
+  return rows;
+}
+
 module.exports = {
   redis,
   getPackagesByTier,
@@ -240,7 +304,11 @@ module.exports = {
   getGlobalStats,
   getCachedCheckResult,
   setCachedCheckResult,
-  incrementUserChecks
+  incrementUserChecks,
+  registerReferral,
+  qualifyReferral,
+  getReferralStats,
+  getLeaderboard
 };
 
 async function incrementUserChecks(telegramId, count = 1) {
@@ -250,5 +318,6 @@ async function incrementUserChecks(telegramId, count = 1) {
   user.total_checks = Number(user.total_checks || 0) + Number(count || 0);
   await redis.set(key, user);
   await redis.incrby('stats:total_checks', Number(count || 0));
+  await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
   return true;
 }
