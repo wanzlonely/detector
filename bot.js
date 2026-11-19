@@ -128,7 +128,7 @@ bot.start(async (ctx) => {
   return showHome(ctx);
 });
 bot.command('detect', (ctx) => ctx.reply(
-  '⌕ <b>MODE DETECT SIAP</b>\nKirim nomor WhatsApp dengan kode negara, contoh <code>6282298902274</code>.\nUntuk beberapa nomor, pisahkan setiap nomor dengan baris baru.',
+  '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n⚠︎ ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴊɪᴋᴀ ʙᴀɴʏᴀᴋ ⚠︎\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>6282298902274\n6281234567890</code>',
   { parse_mode: 'HTML' }
 ));
 bot.command('store', (ctx) => showStore(ctx, false));
@@ -187,7 +187,7 @@ bot.hears('♛ OWNER CONSOLE', async (ctx) => {
 bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES OWNER DIPERLUKAN</b>\\nFitur ini hanya dapat digunakan oleh pemilik bot yang telah terverifikasi.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'activate');
-  return ctx.reply(`✚ <b>AKTIVASI PREMIUM</b>\nKirim dengan format <code>ID_TELEGRAM DURASI_HARI</code>.\nContoh: <code>123456789 7</code>.\nKirim <code>BATAL</code> untuk membatalkan.`, { parse_mode: 'HTML' });
+  return ctx.reply(`✦ ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ ✦\n\nᴍᴀsᴜᴋᴋᴀɴ ɪᴅ ᴛᴇʟᴇɢʀᴀᴍ & ᴅᴜʀᴀsɪ ʜᴀʀɪ\nᴅᴇɴɢᴀɴ ᴘᴇᴍɪsᴀʜ sᴘᴀsɪ.\n\nᴄᴏɴᴛᴏʜ ⦂ <code>123456789 7</code>\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ`, { parse_mode: 'HTML' });
 });
 bot.hears('▤ BROADCAST', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES OWNER DIPERLUKAN</b>\\nFitur ini hanya dapat digunakan oleh pemilik bot yang telah terverifikasi.', { parse_mode: 'HTML' });
@@ -350,7 +350,7 @@ bot.on('text', async (ctx) => {
   if (!text || text.startsWith('/')) return;
   if (text === '⌕ DETECT' || text === '⌕ Detect' || text === 'Detect') {
     return ctx.reply(
-      '⌕ <b>MODE DETECT SIAP</b>\nKirim nomor WhatsApp dengan kode negara, contoh <code>6282298902274</code>.\nBeberapa nomor? Pisahkan dengan baris baru.',
+      '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n⚠︎ ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴊɪᴋᴀ ʙᴀɴʏᴀᴋ ⚠︎\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>6282298902274\n6281234567890</code>',
       { parse_mode: 'HTML' }
     );
   }
