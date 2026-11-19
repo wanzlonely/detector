@@ -26,7 +26,7 @@ async function stopActiveDetection(ctx) {
 bot.use(async (ctx, next) => {
   const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
   const callbackData = ctx.callbackQuery && ctx.callbackQuery.data || '';
-  const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
+  const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
   if (navigationText || navigationCallback) await stopActiveDetection(ctx);
   return next();
@@ -36,13 +36,13 @@ const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
 const USER_KEYBOARD = Markup.keyboard([
   [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
   [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
-  [{ text: '♧ REFERRAL' }, { text: '✉ HUBUNGI ADMIN' }]
+  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }]
 ]).resize().persistent().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
   [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
   [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
-  [{ text: '♧ REFERRAL' }, { text: '✉ HUBUNGI ADMIN' }],
+  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }],
   [{ text: '♛ OWNER CONSOLE' }],
   [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
 ]).resize().persistent().placeholder('Pilih fungsi owner…');
@@ -166,7 +166,7 @@ async function startContact(ctx) {
   await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
   return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\nᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ, ʙᴏᴛ ᴀᴋᴀɴ ᴍᴇɴᴇʀᴜsᴋᴀɴɴʏᴀ ʟᴀɴɢsᴜɴɢ ᴋᴇ ᴀᴅᴍɪɴ ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ.\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('× BATALKAN', 'contact:cancel')]]) });
 }
-bot.hears('✉ HUBUNGI ADMIN', startContact);
+bot.hears('✉︎ HUBUNGI ADMIN', startContact);
 bot.action(/^contact:(?!cancel$|reply:)([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   return startContact(ctx);
@@ -292,15 +292,17 @@ function buildProgressText(done, total, stage, stats, frame = 0) {
   const filled = Math.floor(percent / 10);
   const bar = '●'.repeat(filled) + '○'.repeat(10 - filled);
   const spinner = ['◐', '◓', '◑', '◒'][frame % 4];
-  const counts = stats || { ready: 0, cooldown: 0, banned: 0, error: 0 };
-  return '⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>\n\n' + bar + ' <b>' + percent + '%</b>' +
-    '\nᴛᴀʀɢᴇᴛ ⟿ <b>' + done + ' / ' + total + '</b>' +
-    '\n\n✧ ʙᴇʀʜᴀsɪʟ — <b>' + counts.ready + '</b>' +
-    '\n✕ ɢᴀɢᴀʟ — <b>' + (counts.error + counts.banned) + '</b>' +
-    '\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ — <b>' + counts.cooldown + '</b>' +
-    '\n  ⊘ ᴅɪʙᴀᴛᴀsɪ — <b>' + counts.banned + '</b>' +
-    '\n\n' + spinner + ' ' + stage;
+  const counts = stats || { ready: 0, cooldown: 0, banned: 0, error: 0, failed: 0 };
+  const failed = Number(counts.failed ?? counts.error ?? 0);
+  return '⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>\\n\\n' + bar + ' <b>' + percent + '%</b>' +
+    '\\nᴛᴀʀɢᴇᴛ ⟿ <b>' + done + ' / ' + total + '</b>' +
+    '\\n\\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + counts.ready + '</b>' +
+    '\\n✕ ɢᴀɢᴀʟ ⦂ <b>' + failed + '</b>' +
+    '\\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + counts.cooldown + '</b>' +
+    '\\n  ⊘ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + counts.banned + '</b>' +
+    (stage ? '\\n\\n' + spinner + ' ' + stage : '');
 }
+
 bot.action(/^detect:stop:(\d+):(\d+)$/, async (ctx) => {
   if (Number(ctx.from.id) !== Number(ctx.match[1])) return ctx.answerCbQuery('Sesi ini bukan milikmu.', { show_alert: true });
   await redis.set('detect:stop:' + ctx.match[1] + ':' + ctx.match[2], '1', { ex: 600 });
@@ -355,12 +357,12 @@ async function processNumbers(ctx, numbersList) {
   let stage = 'ᴍᴇɴʏɪᴀᴘᴋᴀɴ sᴇsɪ ᴅᴇᴛᴇᴄᴛ';
   let frame = 0;
   const stopMarkup = Markup.inlineKeyboard([[Markup.button.callback('× HENTIKAN DETEKSI', 'detect:stop:' + ctx.from.id + ':' + jobId)]]);
-  const progress = await ctx.reply(buildProgressText(0, numbersList.length, stage, { ready: 0, cooldown: 0, banned: 0, error: 0 }), { parse_mode: 'HTML', ...stopMarkup });
+  const progress = await ctx.reply(buildProgressText(0, numbersList.length, stage, { ready: 0, cooldown: 0, banned: 0, error: 0, failed: 0, clone: 0, smsUnavailable: 0 }), { parse_mode: 'HTML', ...stopMarkup });
   const timer = setInterval(() => {
     frame = (frame + 1) % 4;
     ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, stats, frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
   }, 2200);
-  const stats = { ready: 0, cooldown: 0, banned: 0, error: 0 };
+  const stats = { ready: 0, cooldown: 0, banned: 0, error: 0, failed: 0, clone: 0, smsUnavailable: 0 };
   const detectionResults = [];
   let lastReaction = '👀';
   let stopped = false;
@@ -369,25 +371,27 @@ async function processNumbers(ctx, numbersList) {
     if (await redis.get(stopKey)) { stopped = true; break; }
     stage = 'Memeriksa target ' + (completed + 1) + ' dari ' + numbersList.length;
     try {
-      let result = await getCachedCheckResult(rawNumber);
-      const fromCache = Boolean(result);
-      if (!result) {
-        result = await checkWhatsAppCooldown(rawNumber, { isPremium: premiumAccess });
-        if (!result || typeof result !== 'object') throw new Error('Engine mengembalikan hasil kosong atau format tidak valid.');
-        await setCachedCheckResult(rawNumber, result);
-      }
-      if (fromCache) result.proxyInfo = String(result.proxyInfo || '') + ' · CACHE';
-      const status = result.isBanned ? 'DIBLOKIR' : result.anyCooldown ? 'COOLDOWN' : 'SIAP';
+      const result = await checkWhatsAppCooldown(rawNumber);
+      if (!result || typeof result !== 'object') throw new Error('Engine mengembalikan hasil kosong atau format tidak valid.');
+      const status = result.isBanned ? 'DIBLOKIR'
+        : result.isCloneBlocked ? 'CLONE_UNSUPPORTED'
+          : result.anyCooldown ? 'COOLDOWN'
+            : result.smsAvailable === false ? 'SMS_UNAVAILABLE'
+              : result.isReady ? 'SIAP' : 'STATUS_TIDAK_DIKENALI';
       if (result.isBanned) stats.banned += 1;
+      else if (result.isCloneBlocked) { stats.clone += 1; stats.failed += 1; }
       else if (result.anyCooldown) stats.cooldown += 1;
-      else stats.ready += 1;
-      lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
+      else if (result.smsAvailable === false) { stats.smsUnavailable += 1; stats.failed += 1; }
+      else if (result.isReady) stats.ready += 1;
+      else stats.failed += 1;
+      lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';      lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
       await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
       const reward = await qualifyReferral(ctx.from.id);
       if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '♧ <b>ᴋᴏɪɴ ʀᴇғᴇʀᴀʟ ʙᴇʀᴛᴀᴍʙᴀʜ!</b>\n\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+5 ᴋᴏɪɴ</b>', { parse_mode: 'HTML' }).catch(() => {});
-      detectionResults.push({ number: result.formattedNumber, result });
+      detectionResults.push({ number: result.formattedNumber, result, status });
     } catch (err) {
       stats.error += 1;
+      stats.failed += 1;
       lastReaction = '⚠️';
       console.error('[detect] target failed:', rawNumber, err && err.stack || err);
       const detail = /timeout|timed out/i.test(err && err.message || '')
@@ -412,7 +416,18 @@ async function processNumbers(ctx, numbersList) {
     await ctx.telegram.deleteMessage(ctx.chat.id, progress.message_id).catch(() => {});
     return;
   }
-  const finalText = (stopped ? '× <b>ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ</b>' : '✓ <b>ᴅᴇᴛᴇᴄᴛ sᴇʟᴇsᴀɪ</b>') + '\n\n' + buildProgressText(completed, numbersList.length, stopped ? 'ᴅɪʜᴇɴᴛɪᴋᴀɴ ᴘᴇɴɢɢᴜɴᴀ' : 'sᴇʟᴜʀᴜʜ ᴛᴀʀɢᴇᴛ sᴇʟᴇsᴀɪ', stats);
+  const finalPercent = Math.min(100, Math.floor(completed / Math.max(1, numbersList.length) * 100));
+  const filled = Math.floor(finalPercent / 10);
+  const finalBar = '●'.repeat(filled) + '○'.repeat(10 - filled);
+  const finalText = (stopped ? '× <b>ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ</b>' : '✓ <b>ᴅᴇᴛᴇᴄᴛ sᴇʟᴇsᴀɪ</b>') +
+    '\\n\\n⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>' +
+    '\\n\\n' + finalBar + ' <b>' + finalPercent + '%</b>' +
+    '\\nᴛᴀʀɢᴇᴛ ⟿ <b>' + completed + ' / ' + numbersList.length + '</b>' +
+    '\\n\\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + stats.ready + '</b>' +
+    '\\n✕ ɢᴀɢᴀʟ ⦂ <b>' + Number(stats.failed || stats.error || 0) + '</b>' +
+    '\\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + stats.cooldown + '</b>' +
+    '\\n  ⊘ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + stats.banned + '</b>' +
+    '\\n\\n◐ ' + (stopped ? 'ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ' : 'sᴇʟᴜʀᴜʜ ᴛᴀʀɢᴇᴛ sᴇʟᴇsᴀɪ');
   await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, finalText, { parse_mode: 'HTML' }).catch(() => {});
   await ctx.reply(renderDetectionSummary({
     results: detectionResults,
