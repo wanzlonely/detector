@@ -118,10 +118,7 @@ bot.action('home', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   return showHome(ctx);
 });
-bot.action(/^store:(standard|ultra)$/, async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  return showStore(ctx, ctx.match[1], true);
-});
+bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {\n  await ctx.answerCbQuery().catch(() => {});\n  return showStore(ctx, true);\n});
 bot.action(/^pkg:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
@@ -152,7 +149,7 @@ bot.command('admin', async (ctx) => {
     '</code>\nPremium aktif: <code>' + stats.activeVip +
     '</code>\nTotal pemeriksaan: <code>' + stats.totalChecks +
     '</code>\nDataImpulse: <code>' + (isDataImpulseConfigured() ? 'TERHUBUNG' : 'BELUM DIATUR') +
-    '</code>\n\n<code>/addvip USER_ID STANDARD|ULTRA HARI</code>\n<code>/broadcast PESAN</code>',
+    '</code>\n\n<code>/addvip USER_ID HARI</code>\n<code>/broadcast PESAN</code>',
     { parse_mode: 'HTML' }
   );
 });
@@ -161,8 +158,7 @@ bot.command('addvip', async (ctx) => {
   if (!isOwner(ctx)) return;
   const parts = ctx.message.text.trim().split(/\s+/);
   const uid = Number(parts[1]);
-  const tier = String(parts[2] || 'STANDARD').toUpperCase() === 'ULTRA' ? 'ULTRA' : 'STANDARD';
-  const days = Number(parts[3] || parts[2]);
+  const hasLegacyTier = ['STANDARD', 'ULTRA', 'PREMIUM'].includes(String(parts[2] || '').toUpperCase());\n  const days = Number(hasLegacyTier ? parts[3] : parts[2]);
   if (!uid || !Number.isFinite(days) || days <= 0) {
     return ctx.reply('Format: <code>/addvip USER_ID HARI</code>', { parse_mode: 'HTML' });
   }
@@ -191,8 +187,7 @@ async function processNumbers(ctx, numbersList) {
   const owner = isOwner(ctx);
   const user = await getEffectiveUser(ctx);
   const vip = owner || isUserVip(user);
-  const ultra = owner || (vip && String(user.vip_tier).toUpperCase() === 'ULTRA');
-  const maxBatch = owner ? 30 : (!vip ? 1 : Number(user.bulk_limit || 10));
+  const maxBatch = owner ? 30 : (!vip ? 1 : Math.min(10, Number(user.bulk_limit || 10)));\n  const premiumAccess = vip;
 
   if (numbersList.length > maxBatch) {
     return ctx.reply('◈ <b>BATAS PEMERIKSAAN</b>\nAkun ini dapat memeriksa maksimal <b>' + maxBatch + ' nomor</b> dalam satu kiriman.', { parse_mode: 'HTML' });
