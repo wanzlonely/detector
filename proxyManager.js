@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { ProxyAgent: UndiciProxyAgent } = require('undici');
 
-const DEFAULT_RETRIES = Number(process.env.PROXY_MAX_RETRIES || 5);
+const DEFAULT_RETRIES = Math.min(3, Math.max(1, Number(process.env.PROXY_MAX_RETRIES || 2)));
 
 function buildDataImpulseProxyUrl() {
   const host = process.env.DATAIMPULSE_HOST || 'gw.dataimpulse.com';
@@ -87,7 +87,15 @@ async function executeWithProxyRotation(taskFn, maxRetries = DEFAULT_RETRIES) {
     }
   }
 
-  throw lastError || new Error('Seluruh percobaan rotasi IP DataImpulse gagal terhubung ke server WhatsApp.');
+  // Jika seluruh sesi proxy gagal, lakukan satu percobaan langsung agar gangguan proxy tidak mematikan fitur.
+  try {
+    const output = await taskFn({ agent: undefined, dispatcher: undefined, sessionTag: 'DIRECT-FALLBACK', mode: 'DIRECT_FALLBACK' });
+    return { data: output, proxyMode: 'DIRECT_FALLBACK', sessionTag: 'DIRECT-FALLBACK', attempts: maxRetries + 1 };
+  } catch (directError) {
+    const proxyMessage = lastError && lastError.message ? lastError.message : 'Proxy gagal';
+    const directMessage = directError && directError.message ? directError.message : 'Koneksi langsung gagal';
+    throw new Error('Semua jalur koneksi gagal. Proxy: ' + proxyMessage + '. Jalur langsung: ' + directMessage);
+  }
 }
 
 function isDataImpulseConfigured() {
