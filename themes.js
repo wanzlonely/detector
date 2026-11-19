@@ -130,7 +130,7 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
     'ᴘɪʟɪʜ ᴍᴇɴᴜ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴜʟᴀɪ ᴍᴇɴᴅᴇᴛᴇᴋsɪ, ᴍᴇʟɪʜᴀᴛ sᴛᴀᴛɪsᴛɪᴋ, ᴀᴛᴀᴜ ᴍᴇɴɢᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ.',
     '',
     '◈ sɪsᴛᴇᴍ ᴀᴋᴛɪꜰ'
-  ].join('\\n');
+  ].join('\n');
 }
 
 function renderStatus({ user, isVip, isOwner = false, referralStats }) {
@@ -166,8 +166,8 @@ function renderLeaderboard(rows) {
         const medal = medals[index] || rank;
         const name = escapeHtml(row.full_name || 'Pengguna');
         const count = Number(row.total_checks || 0).toLocaleString('id-ID');
-        return medal + ' ✧ <b>' + name + '</b>\\n      └ <b>' + count + '</b> ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
-      }).join('\\n\\n')
+        return medal + ' ✧ <b>' + name + '</b>\n      └ <b>' + count + '</b> ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
+      }).join('\n\n')
     : 'Belum ada data pemeriksaan. Jadilah pengguna pertama di papan peringkat!';
   return [
     '♛ <b>𝗧𝗢𝗣 𝟭𝟬 𝗗𝗘𝗧𝗘𝗖𝗧𝗢𝗥 • 𝗠𝗘𝗧𝗔𝗗𝗘𝗧𝗘𝗖𝗧</b> ♛',
@@ -175,7 +175,7 @@ function renderLeaderboard(rows) {
     lines,
     '',
     '♧ sᴛᴀᴛᴜs ᴅɪ ᴀᴛᴀs ᴀᴅᴀʟᴀʜ ᴜsᴇʀ ʏᴀɴɢ ᴘᴀʟɪɴɢ ɢᴏᴋɪʟ 🥴'
-  ].join('\\n');
+  ].join('\n');
 }function renderReferral({ link, stats }) {
   return [
     '🎁 <b>PROGRAM REFERAL & HADIAH</b>',
