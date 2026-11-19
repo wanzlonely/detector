@@ -16,11 +16,15 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
 const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
 const USER_KEYBOARD = Markup.keyboard([
-  [{ text: '⌕ DETECT' }, { text: '✧ BELI PREMIUM' }]
-]).resize().persistent().placeholder('Pilih menu atau kirim nomor…');
+  [{ text: '⌕ DETECT' }, { text: '✧ BELI PREMIUM' }],
+  [{ text: '◈ STATUS' }, { text: '🏆 LEADERBOARD' }],
+  [{ text: '🎁 REFERRAL' }]
+]).resize().persistent().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
   [{ text: '⌕ DETECT' }, { text: '✧ BELI PREMIUM' }],
+  [{ text: '◈ STATUS' }, { text: '🏆 LEADERBOARD' }],
+  [{ text: '🎁 REFERRAL' }],
   [{ text: '⌂ DASHBOARD' }, { text: '♛ OWNER CONSOLE' }],
   [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
 ]).resize().persistent().placeholder('Pilih fungsi owner…');
@@ -118,7 +122,14 @@ async function showCheckout(ctx, pkg, edit) {
 // Semua navigasi tersedia melalui Reply Keyboard sesuai peran akun.
 bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
 
-bot.start(showHome);
+bot.start(async (ctx) => {
+  const payload = String(ctx.startPayload || '');
+  if (payload.startsWith('ref_')) {
+    const registered = await registerReferral(ctx.from.id, payload.slice(4));
+    if (registered) await ctx.reply('🎁 Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh hadiah 1 hari Premium.');
+  }
+  return showHome(ctx);
+});
 bot.command('detect', (ctx) => ctx.reply(
   '⌕ <b>MODE DETECT SIAP</b>\nKirim nomor WhatsApp dengan kode negara, contoh <code>6282298902274</code>.\nUntuk beberapa nomor, pisahkan setiap nomor dengan baris baru.',
   { parse_mode: 'HTML' }
@@ -154,6 +165,26 @@ bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
     { parse_mode: 'HTML' }
   );
 });
+
+
+async function showStatus(ctx) {
+  const user = await getEffectiveUser(ctx);
+  const referralStats = await getReferralStats(ctx.from.id);
+  return ctx.reply(require('./themes').renderStatus({ user, isVip: isOwner(ctx) || isUserVip(user), isOwner: isOwner(ctx), referralStats }), { parse_mode: 'HTML' });
+}
+async function showLeaderboard(ctx) {
+  return ctx.reply(require('./themes').renderLeaderboard(await getLeaderboard(10)), { parse_mode: 'HTML' });
+}
+async function showReferral(ctx) {
+  const me = await bot.telegram.getMe();
+  const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
+  const stats = await getReferralStats(ctx.from.id);
+  const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect melalui tautan undanganku!');
+  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('↗ BAGIKAN TAUTAN', shareUrl)]]) });
+}
+bot.hears('◈ STATUS', showStatus);
+bot.hears('🏆 LEADERBOARD', showLeaderboard);
+bot.hears('🎁 REFERRAL', showReferral);
 
 bot.hears('⌂ DASHBOARD', showHome);
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
@@ -214,6 +245,23 @@ bot.command('broadcast', async (ctx) => {
   return ctx.reply('Pengumuman berhasil dikirim ke ' + sent + ' pengguna.');
 });
 
+
+function buildProgressText(done, total, stage, frame = 0) {
+  const percent = Math.min(100, Math.floor(done / Math.max(1, total) * 100));
+  const filled = Math.floor(percent / 10);
+  const bar = '▰'.repeat(filled) + '▱'.repeat(10 - filled);
+  const spinner = ['◐', '◓', '◑', '◒'][frame % 4];
+  return '⚡ <b>DETECT SEDANG BERJALAN</b>\\n' + spinner + ' ' + stage +
+    '\\n\\n<code>' + bar + '</code> <b>' + percent + '%</b>' +
+    '\\nProgres: <b>' + done + ' / ' + total + '</b> nomor' +
+    '\\n<i>Hasil akan ditampilkan otomatis.</i>';
+}
+bot.action(/^detect:stop:(\\d+):(\\d+)$/, async (ctx) => {
+  if (Number(ctx.from.id) !== Number(ctx.match[1])) return ctx.answerCbQuery('Sesi ini bukan milikmu.', { show_alert: true });
+  await redis.set('detect:stop:' + ctx.match[1] + ':' + ctx.match[2], '1', { ex: 600 });
+  return ctx.answerCbQuery('Permintaan berhenti diterima.');
+});
+
 async function processNumbers(ctx, numbersList) {
   const owner = isOwner(ctx);
   const user = await getEffectiveUser(ctx);
@@ -231,11 +279,24 @@ async function processNumbers(ctx, numbersList) {
     await incrementUserChecks(ctx.from.id, numbersList.length);
   }
 
-  const progress = await ctx.reply('◌ <b>SEDANG MEMERIKSA</b>\nMenyiapkan koneksi dan memproses nomor…', { parse_mode: 'HTML' });
+  const jobId = String(Date.now());
+  const stopKey = 'detect:stop:' + ctx.from.id + ':' + jobId;
+  let completed = 0;
+  let stage = 'Menyiapkan sesi pemeriksaan';
+  let frame = 0;
+  const stopMarkup = Markup.inlineKeyboard([[Markup.button.callback('⏹ HENTIKAN DETEKSI', 'detect:stop:' + ctx.from.id + ':' + jobId)]]);
+  const progress = await ctx.reply(buildProgressText(0, numbersList.length, stage), { parse_mode: 'HTML', ...stopMarkup });
+  const timer = setInterval(() => {
+    frame = (frame + 1) % 4;
+    ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
+  }, 2200);
   const stats = { ready: 0, cooldown: 0, banned: 0, error: 0 };
   let lastReaction = '👀';
+  let stopped = false;
 
   for (const rawNumber of numbersList) {
+    if (await redis.get(stopKey)) { stopped = true; break; }
+    stage = 'Memeriksa target ' + (completed + 1) + ' dari ' + numbersList.length;
     try {
       let result = await getCachedCheckResult(rawNumber);
       const fromCache = Boolean(result);
@@ -251,6 +312,8 @@ async function processNumbers(ctx, numbersList) {
       else stats.ready += 1;
       lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
       await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
+      const reward = await qualifyReferral(ctx.from.id);
+      if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '🎁 <b>HADIAH REFERRAL!</b> Teman undanganmu menyelesaikan 3 pemeriksaan. Kamu mendapat tambahan <b>1 hari Premium</b>.', { parse_mode: 'HTML' }).catch(() => {});
       const currentUser = await getEffectiveUser(ctx);
       await ctx.reply(renderCooldownCard({
         result,
@@ -268,6 +331,9 @@ async function processNumbers(ctx, numbersList) {
           : 'Pemeriksaan gagal diproses. Silakan coba lagi nanti.';
       await ctx.reply('⚠️ <b>PEMERIKSAAN GAGAL</b>\nNomor: <code>' + escapeHtml(rawNumber) + '</code>\n' + detail, { parse_mode: 'HTML' });
     }
+    completed += 1;
+    stage = 'Memperbarui hasil pemeriksaan';
+    await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, ++frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
   }
 
   if (vip && numbersList.length > 1) {
@@ -278,7 +344,10 @@ async function processNumbers(ctx, numbersList) {
       { parse_mode: 'HTML' }
     );
   }
-  await ctx.telegram.deleteMessage(ctx.chat.id, progress.message_id).catch(() => {});
+  clearInterval(timer);
+  await redis.del(stopKey).catch(() => {});
+  const finalText = (stopped ? '⏹ <b>PEMERIKSAAN DIHENTIKAN</b>' : '✓ <b>PEMERIKSAAN SELESAI</b>') + '\n\n' + buildProgressText(completed, numbersList.length, stopped ? 'Dihentikan oleh pengguna' : 'Seluruh target selesai') + '\n\n✧ Berhasil: <b>' + (stats.ready + stats.cooldown + stats.banned) + '</b> · ⚠ Gagal: <b>' + stats.error + '</b>';
+  await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, finalText, { parse_mode: 'HTML' }).catch(() => {});
   if (ctx.message && ctx.message.message_id) {
     ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, [{ type: 'emoji', emoji: lastReaction }]).catch(() => {});
   }
