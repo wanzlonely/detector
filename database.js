@@ -6,11 +6,11 @@ const redis = new Redis({
 });
 
 const PACKAGES = [
-  { id: 'std_1d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 1, durationLabel: '1 Hari', price: 3000, tag: 'STARTER', bulk_limit: 10, highlight: 'Akses Premium penuh selama 24 jam.' },
-  { id: 'std_3d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 3, durationLabel: '3 Hari', price: 5000, tag: 'HEMAT', bulk_limit: 10, highlight: 'Pilihan hemat untuk penggunaan beberapa hari.' },
-  { id: 'std_7d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 7, durationLabel: '7 Hari', price: 10000, tag: 'POPULER', bulk_limit: 10, highlight: 'Pilihan populer untuk aktivitas mingguan.' },
-  { id: 'std_15d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 15, durationLabel: '15 Hari', price: 13000, tag: 'PRO VALUE', bulk_limit: 10, highlight: 'Lebih hemat untuk penggunaan jangka menengah.' },
-  { id: 'std_20d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 20, durationLabel: '20 Hari', price: 25000, tag: 'LONG PASS', bulk_limit: 10, highlight: 'Akses Premium untuk durasi lebih panjang.' }
+  { id: 'std_1d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 1, durationLabel: '1 Hari', price: 3000, tag: 'STARTER', bulk_limit: 30, highlight: 'Akses Premium penuh selama 24 jam.' },
+  { id: 'std_3d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 3, durationLabel: '3 Hari', price: 5000, tag: 'HEMAT', bulk_limit: 30, highlight: 'Pilihan hemat untuk penggunaan beberapa hari.' },
+  { id: 'std_7d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 7, durationLabel: '7 Hari', price: 10000, tag: 'POPULER', bulk_limit: 30, highlight: 'Pilihan populer untuk aktivitas mingguan.' },
+  { id: 'std_15d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 15, durationLabel: '15 Hari', price: 13000, tag: 'PRO VALUE', bulk_limit: 30, highlight: 'Lebih hemat untuk penggunaan jangka menengah.' },
+  { id: 'std_20d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 20, durationLabel: '20 Hari', price: 25000, tag: 'LONG PASS', bulk_limit: 30, highlight: 'Akses Premium untuk durasi lebih panjang.' }
 ];
 
 function getTodayWIB() {
@@ -174,7 +174,7 @@ async function activateVip(telegramId, days, tier = 'STANDARD', planName = null)
   user.vip_until = expiry;
   user.vip_tier = normalizedTier;
   user.vip_plan = planName || `${normalizedTier} · ${days} Hari`;
-  user.bulk_limit = 10;
+  user.bulk_limit = 30;
 
   await redis.set(userKey, user);
   await redis.sadd('users:vip', String(telegramId));
