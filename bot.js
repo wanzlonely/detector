@@ -164,9 +164,7 @@ bot.hears('♛ OWNER CONSOLE', async (ctx) => {
 bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
   await setOwnerAction(ctx.from.id, 'activate');
-  return ctx.reply('✚ <b>AKTIVASI PREMIUM</b>\nKirim dengan format <code>ID_TELEGRAM DURASI_HARI</code>.
-Contoh: <code>123456789 7</code>.
-Kirim <code>BATAL</code> untuk membatalkan.', { parse_mode: 'HTML' });
+  return ctx.reply(`✚ <b>AKTIVASI PREMIUM</b>\nKirim dengan format <code>ID_TELEGRAM DURASI_HARI</code>.\nContoh: <code>123456789 7</code>.\nKirim <code>BATAL</code> untuk membatalkan.`, { parse_mode: 'HTML' });
 });
 bot.hears('▤ BROADCAST', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
@@ -305,7 +303,7 @@ bot.on('text', async (ctx) => {
   if (isOwner(ctx)) {
     const action = await getOwnerAction(ctx.from.id);
     if (action === 'activate') {
-      const [uidText, daysText] = text.trim().split(/\\s+/);
+      const [uidText, daysText] = text.trim().split(/\s+/);
       const uid = Number(uidText);
       const days = Number(daysText);
       if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isFinite(days) || days <= 0 || days > 3650) {
@@ -321,7 +319,7 @@ bot.on('text', async (ctx) => {
       let sent = 0;
       for (const uid of stats.allUserIds) {
         try {
-          await bot.telegram.sendMessage(Number(uid), '✦ <b>INFO META DETECT</b>\\n\\n' + escapeHtml(text), { parse_mode: 'HTML' });
+          await bot.telegram.sendMessage(Number(uid), '✦ <b>INFO META DETECT</b>\n\n' + escapeHtml(text), { parse_mode: 'HTML' });
           sent += 1;
         } catch (err) {
           console.error('[broadcast]', uid, err && err.message || err);
