@@ -135,27 +135,27 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
 }
 
 function renderStatus({ user, isVip, isOwner = false, referralStats }) {
-  const used = Number(user.free_used_today || 0);
-  const remaining = Math.max(0, 3 - used);
-  const expiry = isOwner ? 'Tidak terbatas' : isVip ? formatDateWIB(user.vip_until) : 'Belum berlangganan';
+  const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
+  const expiry = isOwner ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : isVip ? formatDateWIB(user.vip_until) : 'ʙᴇʟᴜᴍ ʙᴇʀʟᴀɴɢɢᴀɴᴀɴ';
   return [
-    '◈ <b>RINGKASAN AKUN</b>',
-    '<i>Informasi keanggotaan dan aktivitasmu</i>',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '◈ <b>ʀɪɴɢᴋᴀsᴀɴ sᴛᴀᴛᴜs ᴀᴋᴜɴ</b> ◈',
+    '<i>ɪɴғᴏʀᴍᴀsɪ ᴋᴇᴀɴɢɢᴏᴛᴀᴀɴ & ᴀᴋᴛɪᴠɪᴛᴀs</i>',
     '',
-    '╭─ <b>AKSES & PEMAKAIAN</b>',
-    '├ ✧ Nama        : <b>' + escapeHtml(user.full_name || 'Pengguna') + '</b>',
-    '├ ⌁ ID Telegram : <code>' + user.telegram_id + '</code>',
-    '├ ♛ Keanggotaan : <b>' + (isOwner ? 'OWNER' : isVip ? 'PREMIUM' : 'GRATIS') + '</b>',
-    '├ ◉ Kuota hari ini: <b>' + (isVip ? 'Tanpa batas' : remaining + ' dari 3 tersisa') + '</b>',
-    '├ ⌗ Total deteksi: <b>' + Number(user.total_checks || 0).toLocaleString('id-ID') + ' nomor</b>',
-    '╰ ⌛ Masa aktif  : <b>' + expiry + '</b>',
+    '⚙ <b>ᴘʀᴏғɪʟ ᴀᴋᴜɴ</b>',
+    '▸ ɴᴀᴍᴀ ⦂ <b>' + escapeHtml(user.full_name || 'Pengguna') + '</b>',
+    '▸ ɪᴅ ⦂ <code>' + user.telegram_id + '</code>',
+    '▸ ᴀᴋsᴇs ⦂ <b>' + (isOwner ? 'ᴏᴡɴᴇʀ ᴀᴄᴄᴇss' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : 'ғʀᴇᴇ ᴍᴇᴍʙᴇʀ') + '</b>',
+    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3 ᴛᴇʀsɪsᴀ') + '</b>',
+    '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + Number(user.total_checks || 0).toLocaleString('id-ID') + ' ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>',
+    '▸ ᴍᴀsᴀ ᴀᴋᴛɪғ ⦂ <b>' + escapeHtml(expiry) + '</b>',
     '',
-    '╭─ <b>PROGRAM REFERAL</b>',
-    '├ Teman terdaftar : <b>' + Number(referralStats.total || 0) + ' / 10</b>',
-    '╰ Hadiah diterima : <b>' + Number(referralStats.rewarded || 0) + ' hari Premium</b>',
+    '🎁 <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀᴀʟ</b>',
+    '▸ ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ⦂ <b>' + Number(referralStats.total || 0) + ' / 10</b>',
+    '▸ ʜᴀᴅɪᴀʜ ᴅɪᴛᴇʀɪᴍᴀ ⦂ <b>' + Number(referralStats.rewarded || 0) + ' ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>',
     '',
-    '<i>Terus gunakan MetaDetect untuk meningkatkan aktivitas akunmu.</i>'
+    '⌁ ᴛᴇʀᴜs ɢᴜɴᴀᴋᴀɴ ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ ᴜɴᴛᴜᴋ ᴍᴇɴɪɴɢᴋᴀᴛᴋᴀɴ ᴀᴋᴛɪᴠɪᴛᴀs ᴀᴋᴜɴᴍᴜ.',
+    '',
+    '◈ sɪsᴛᴇᴍ ᴀᴋᴛɪꜰ'
   ].join('\n');
 }
 
@@ -179,25 +179,24 @@ function renderLeaderboard(rows) {
   ].join('\n');
 }function renderReferral({ link, stats }) {
   return [
-    '🎁 <b>PROGRAM REFERAL & HADIAH</b>',
-    '<i>Bagikan MetaDetect. Ajak teman. Kumpulkan Premium.</i>',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '🎁 <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀᴀʟ & ʜᴀᴅɪᴀʜ</b>',
+    '<i>ᴀᴊᴀᴋ ᴛᴇᴍᴀɴ · ᴋᴜᴍᴘᴜʟᴋᴀɴ ᴘʀᴇᴍɪᴜᴍ</i>',
     '',
-    '╭─ <b>MEKANISME HADIAH</b>',
-    '├ ✦ Undang teman melalui tautan pribadimu',
-    '├ ✦ Teman menyelesaikan 3 pemeriksaan pertama',
-    '├ 🎁 Kamu memperoleh 1 hari Premium',
-    '├ ◈ Maksimal 10 undangan yang memenuhi syarat',
-    '╰ ⛨ Satu akun hanya dihitung satu kali',
+    '✦ <b>ᴄᴀʀᴀ ᴍᴇɴᴅᴀᴘᴀᴛᴋᴀɴ ʜᴀᴅɪᴀʜ</b>',
+    '① ʙᴀɢɪᴋᴀɴ ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴᴍᴜ.',
+    '② ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ᴍᴇʟᴀʟᴜɪ ᴛᴀᴜᴛᴀɴ.',
+    '③ ᴛᴇᴍᴀɴ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.',
+    '④ ᴋᴀᴍᴜ ᴍᴇɴᴅᴀᴘᴀᴛᴋᴀɴ 1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ.',
     '',
-    '╭─ <b>TAUTAN UNDANGAN PRIBADI</b>',
+    '◈ <b>sᴛᴀᴛɪsᴛɪᴋ ᴜɴᴅᴀɴɢᴀɴ</b>',
+    '▸ ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ⦂ <b>' + Number(stats.total || 0) + ' / 10</b>',
+    '▸ ʜᴀᴅɪᴀʜ ᴅɪᴛᴇʀɪᴍᴀ ⦂ <b>' + Number(stats.rewarded || 0) + ' ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>',
+    '',
+    '⌁ <b>ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴ ᴘʀɪʙᴀᴅɪ</b>',
     '<code>' + escapeHtml(link) + '</code>',
-    '╰ Tekan tombol bagikan untuk mengirim tautan ke teman.',
+    'ᴛᴇᴋᴀɴ ᴛᴏᴍʙᴏʟ ʙᴀɢɪᴋᴀɴ ᴜɴᴛᴜᴋ ᴍᴇɴɢɪʀɪᴍ ᴛᴀᴜᴛᴀɴ ᴋᴇ ᴛᴇᴍᴀɴ.',
     '',
-    '◉ Teman bergabung : <b>' + Number(stats.total || 0) + ' / 10</b>',
-    '🎁 Hadiah terkumpul: <b>' + Number(stats.rewarded || 0) + ' hari Premium</b>',
-    '',
-    '<i>Ajak temanmu mulai hari ini dan pantau progres hadiah melalui menu Status.</i>'
+    '◈ ᴍᴀᴋsɪᴍᴀʟ 10 ᴜɴᴅᴀɴɢᴀɴ ʙᴇʀʜᴀᴅɪᴀʜ'
   ].join('\n');
 }
 
@@ -205,67 +204,65 @@ function renderStoreCatalog({ packages }) {
   const packageLines = packages.map((pkg, index) => {
     const perDay = Math.round(pkg.price / pkg.duration_days);
     const marker = ['✦', '◈', '✧', '◆', '♛'][index] || '▪';
-    return marker + ' <b>' + escapeHtml(pkg.durationLabel) + '</b>  ·  <b>' + formatIDR(pkg.price) + '</b>  <i>' + escapeHtml(pkg.tag) + '</i>\n   <i>Setara ' + formatIDR(perDay) + ' per hari</i>';
+    return marker + ' <b>' + escapeHtml(pkg.durationLabel) + '</b> · <b>' + formatIDR(pkg.price) + '</b> <i>' + escapeHtml(pkg.tag) + '</i>\n   <i>sᴇᴛᴀʀᴀ ' + formatIDR(perDay) + ' ᴘᴇʀ ʜᴀʀɪ</i>';
   }).join('\n\n');
   return [
-    '✧ <b>PREMIUM MEMBERSHIP</b>',
-    '<i>Tingkatkan pengalaman deteksi dengan akses yang lebih leluasa.</i>',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '✦ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ · ᴘʀᴇᴍɪᴜᴍ</b> ✦',
+    '<i>ᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ᴘᴇɴɢɢᴜɴᴀᴀɴ ʏᴀɴɢ ʟᴇʙɪʜ ʟᴇʟᴜᴀsᴀ.</i>',
     '',
-    '╭─ <b>KEUNTUNGAN PREMIUM</b>',
-    '├ ⚡ Pemeriksaan tanpa batas selama masa aktif',
-    '├ ◈ Hingga 10 nomor dalam satu kiriman',
-    '├ ⛨ Rotasi proxy otomatis',
-    '├ ✦ Akses fitur Premium dan antrean prioritas',
-    '╰ ♛ Dukungan untuk penggunaan rutin',
+    '♛ <b>ᴋᴇᴜɴɢɢᴜʟᴀɴ ᴘʀᴇᴍɪᴜᴍ</b>',
+    '✦ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛᴀɴᴘᴀ ʙᴀᴛᴀs sᴇʟᴀᴍᴀ ᴍᴀsᴀ ᴀᴋᴛɪғ',
+    '✦ ᴍᴀᴋsɪᴍᴀʟ 10 ɴᴏᴍᴏʀ ᴅᴀʟᴀᴍ sᴀᴛᴜ ᴋɪʀɪᴍᴀɴ',
+    '✦ ʀᴏᴛᴀsɪ ᴘʀᴏxʏ ᴏᴛᴏᴍᴀᴛɪs',
+    '✦ ᴀᴋsᴇs ғɪᴛᴜʀ ᴘʀᴇᴍɪᴜᴍ',
     '',
-    '╭─ <b>PILIH DURASI KEANGGOTAAN</b>',
+    '▤ <b>ᴘɪʟɪʜ ᴅᴜʀᴀsɪ ᴘᴀᴋᴇᴛ</b>',
+    '━━━━━━━━━━━━━━━━━━━━',
     packageLines,
-    '╰─',
+    '━━━━━━━━━━━━━━━━━━━━',
     '',
-    '<i>Pilih durasi melalui tombol paket. Rincian harga dan masa aktif akan ditampilkan sebelum melanjutkan.</i>'
+    'ᴘɪʟɪʜ sᴀʟᴀʜ sᴀᴛᴜ ᴘᴀᴋᴇᴛ ᴍᴇʟᴀʟᴜɪ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ.',
+    'ᴅᴇᴛᴀɪʟ ʜᴀʀɢᴀ ᴅᴀɴ ᴍᴀsᴀ ᴀᴋᴛɪғ ᴀᴋᴀɴ ᴅɪᴛᴀᴍᴘɪʟᴋᴀɴ sᴇʙᴇʟᴜᴍ ᴘᴇᴍʙᴀʏᴀʀᴀɴ.'
   ].join('\n');
 }
 
 function renderPackageDetailCard({ pkg }) {
   const perDay = Math.round(pkg.price / pkg.duration_days);
   return [
-    '✧ <b>KONFIRMASI PAKET PREMIUM</b>',
-    '<i>Periksa kembali rincian keanggotaan pilihanmu.</i>',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '✧ <b>ᴅᴇᴛᴀɪʟ ᴘᴀᴋᴇᴛ ᴘʀᴇᴍɪᴜᴍ</b> ✧',
+    '<i>ᴘᴇʀɪᴋsᴀ ʀɪɴᴄɪᴀɴ ᴘᴀᴋᴇᴛ sᴇʙᴇʟᴜᴍ ᴍᴇʟᴀɴᴊᴜᴛᴋᴀɴ.</i>',
     '',
-    '╭─ <b>RINCIAN PAKET</b>',
-    '├ ◈ Masa aktif    : <b>' + escapeHtml(pkg.durationLabel) + '</b>',
-    '├ ✦ Harga        : <b>' + formatIDR(pkg.price) + '</b>',
-    '├ ⌁ Biaya harian : <code>' + formatIDR(perDay) + '</code>',
-    '╰ ◉ Kapasitas    : <code>10 nomor / kiriman</code>',
+    '◈ <b>ʀɪɴᴄɪᴀɴ ᴘᴇsᴀɴᴀɴ</b>',
+    '▸ ᴍᴀsᴀ ᴀᴋᴛɪғ ⦂ <b>' + escapeHtml(pkg.durationLabel) + '</b>',
+    '▸ ʜᴀʀɢᴀ ⦂ <b>' + formatIDR(pkg.price) + '</b>',
+    '▸ ʙɪᴀʏᴀ ʜᴀʀɪᴀɴ ⦂ <code>' + formatIDR(perDay) + '</code>',
+    '▸ ᴋᴀᴘᴀsɪᴛᴀs ⦂ <b>10 ɴᴏᴍᴏʀ / ᴋɪʀɪᴍᴀɴ</b>',
     '',
-    '╭─ <b>FITUR PREMIUM</b>',
-    '├ ⚡ Pemeriksaan tanpa batas selama masa aktif',
-    '├ ⛨ Rotasi proxy otomatis',
-    '╰ ✧ Akses seluruh fitur Premium',
+    '♛ <b>ғɪᴛᴜʀ ᴘʀᴇᴍɪᴜᴍ</b>',
+    '✦ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛᴀɴᴘᴀ ʙᴀᴛᴀs sᴇʟᴀᴍᴀ ᴍᴀsᴀ ᴀᴋᴛɪғ',
+    '✦ ʀᴏᴛᴀsɪ ᴘʀᴏxʏ ᴏᴛᴏᴍᴀᴛɪs',
+    '✦ ᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ ᴅᴇɴɢᴀɴ ʙᴜʟᴋ ᴄʜᴇᴄᴋ',
     '',
     '<i>' + escapeHtml(pkg.highlight) + '</i>',
     '',
-    '<i>Lanjutkan melalui tombol konfirmasi untuk melihat petunjuk pembayaran.</i>'
+    'ᴛᴇᴋᴀɴ ᴛᴏᴍʙᴏʟ ʙᴇʟɪ ᴜɴᴛᴜᴋ ᴍᴇʟɪʜᴀᴛ ᴘᴇᴛᴜɴᴊᴜᴋ ᴘᴇᴍʙᴀʏᴀʀᴀɴ.'
   ].join('\n');
 }
 
 function renderPaymentMaintenanceCard({ pkg }) {
   return [
-    '▣ <b>RINGKASAN PEMESANAN</b>',
-    '<i>Pastikan pilihan paket sudah sesuai.</i>',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '▣ <b>ᴋᴏɴғɪʀᴍᴀsɪ ᴘᴇᴍʙᴇʟɪᴀɴ</b>',
+    '<i>ᴘᴀsᴛɪᴋᴀɴ ᴅᴇᴛᴀɪʟ ᴘᴀᴋᴇᴛ sᴜᴅᴀʜ sᴇsᴜᴀɪ.</i>',
     '',
-    '╭─ <b>DETAIL PESANAN</b>',
-    '├ ✧ Produk       : <b>PREMIUM META DETECT</b>',
-    '├ ◈ Masa aktif   : <b>' + escapeHtml(pkg.durationLabel) + '</b>',
-    '╰ 💳 Total bayar : <b>' + formatIDR(pkg.price) + '</b>',
+    '◈ <b>ʀɪɴᴄɪᴀɴ ᴘᴇsᴀɴᴀɴ</b>',
+    '▸ ᴘʀᴏᴅᴜᴋ ⦂ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ ᴘʀᴇᴍɪᴜᴍ</b>',
+    '▸ ᴅᴜʀᴀsɪ ⦂ <b>' + escapeHtml(pkg.durationLabel) + '</b>',
+    '▸ ᴛᴏᴛᴀʟ ʙᴀʏᴀʀ ⦂ <b>' + formatIDR(pkg.price) + '</b>',
     '',
-    '⚠️ <b>PEMBAYARAN OTOMATIS BELUM TERSEDIA</b>',
-    'Untuk menyelesaikan pembelian, hubungi admin melalui tombol di bawah. Admin akan memberikan instruksi pembayaran dan mengaktifkan Premium setelah pembayaran dikonfirmasi.',
+    '⚠️ <b>ᴘᴇᴍʙᴀʏᴀʀᴀɴ ᴏᴛᴏᴍᴀᴛɪs ʙᴇʟᴜᴍ ᴛᴇʀsᴇᴅɪᴀ</b>',
+    'ᴜɴᴛᴜᴋ ᴍᴇʟᴀɴᴊᴜᴛᴋᴀɴ ᴘᴇᴍʙᴇʟɪᴀɴ, ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ ᴍᴇʟᴀʟᴜɪ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ. ᴀᴋsᴇs ᴀᴋᴀɴ ᴅɪᴀᴋᴛɪғᴋᴀɴ sᴇᴛᴇʟᴀʜ ᴘᴇᴍʙᴀʏᴀʀᴀɴ ᴅɪᴋᴏɴғɪʀᴍᴀsɪ.',
     '',
-    '<i>⛨ Demi keamanan, jangan membayar ke rekening atau QRIS selain yang diberikan melalui kanal resmi admin.</i>'
+    '⛨ ᴘᴀsᴛɪᴋᴀɴ ᴘᴇᴍʙᴀʏᴀʀᴀɴ ʜᴀɴʏᴀ ᴅɪʟᴀᴋᴜᴋᴀɴ ᴍᴇʟᴀʟᴜɪ ᴋᴀɴᴀʟ ʀᴇsᴍɪ ᴀᴅᴍɪɴ.'
   ].join('\n');
 }
 
