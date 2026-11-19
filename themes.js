@@ -108,136 +108,97 @@ function formatDateWIB(unixSec) {
 
 function renderDashboard({ user, isVip, isOwner = false, brandName }) {
   const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
-  const tier = isOwner ? 'OWNER ACCESS' : !isVip
-    ? 'AKSES GRATIS'
-    : String(user.vip_tier).toUpperCase() === 'ULTRA'
-      ? 'PREMIUM ULTRA'
-      : 'PREMIUM STANDARD';
+  const tier = isOwner ? 'OWNER ACCESS' : isVip ? 'PREMIUM MEMBER' : 'FREE ACCESS';
   const quota = isOwner
-    ? 'TANPA BATAS · AKSES OWNER'
+    ? 'UNLIMITED · OWNER PRIVILEGES'
     : isVip
-      ? 'TANPA BATAS · MAKS. ' + (user.bulk_limit || 10) + ' NOMOR / KIRIM · AKTIF S/D ' + formatDateWIB(user.vip_until)
-      : remaining + '/3 PEMERIKSAAN TERSISA · RESET 00.00 WIB';
+      ? 'UNLIMITED · 10 NOMOR / KIRIM'
+      : remaining + ' DARI 3 PEMERIKSAAN TERSISA';
   const identity = escapeHtml(user.full_name || 'Pengguna');
+  const total = Number(user.total_checks || 0);
   return [
-    '✧ <b>' + escapeHtml(brandName || 'META DETECT') + '</b>',
-    '<i>ADVANCED WHATSAPP TELEMETRY</i>',
+    '✦ <b>' + escapeHtml(brandName || 'META DETECT') + '</b>',
+    '<i>WHATSAPP TELEMETRY PLATFORM</i>',
     '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
     '',
-    '◈ <b>PROFIL AKUN</b>',
-    '✦ Nama        <b>' + identity + '</b>',
-    '⌁ ID Telegram <code>' + user.telegram_id + '</code>',
-    '♛ Akses       <b>' + tier + '</b>',
-    '◉ Kuota       <code>' + escapeHtml(quota) + '</code>',
-    '⌗ Aktivitas   <code>' + Number(user.total_checks || 0) + ' pemeriksaan</code>',
+    '◈ <b>ACCOUNT PROFILE</b>',
+    '✧ Identitas   <b>' + identity + '</b>',
+    '⌁ Telegram    <code>' + user.telegram_id + '</code>',
+    (isOwner ? '♛' : isVip ? '✦' : '◇') + ' Akses       <b>' + tier + '</b>',
+    '◉ Kuota       <b>' + escapeHtml(quota) + '</b>',
+    '⌗ Aktivitas   <b>' + total + ' pemeriksaan</b>',
     '',
-    '⌁ <b>PANDUAN SINGKAT</b>',
+    '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '⌁ <b>PANDUAN PENGGUNAAN</b>',
     '① Tekan <b>DETECT</b> atau kirim nomor langsung.',
-    '② Gunakan kode negara, contoh <code>6282298902274</code>.',
-    '③ Untuk pemeriksaan massal, pisahkan nomor dengan baris baru sesuai batas akun.',
-    '④ Hasil akan dikirim otomatis setelah pemeriksaan selesai.',
+    '② Gunakan format internasional, contoh <code>6282298902274</code>.',
+    '③ Kirim beberapa nomor dengan memisahkan setiap nomor ke baris baru sesuai batas akun.',
+    '④ Hasil pemeriksaan akan muncul otomatis setelah proses selesai.',
     '',
-    '<i>◈ SISTEM AKTIF · ' + (isOwner ? 'MODE OWNER' : 'SESI PENGGUNA') + '</i>'
+    '<i>◈ CONNECTION SECURE · ' + (isOwner ? 'OWNER SESSION' : isVip ? 'PREMIUM SESSION' : 'FREE SESSION') + '</i>'
   ].join('\n');
 }
-
-function renderStoreCatalog({ user, activeTier, packages }) {
-  const isUltra = activeTier === 'ultra';
-  const title = isUltra ? '♛ PREMIUM ULTRA' : '✧ PREMIUM STANDARD';
-  const subtitle = isUltra
-    ? 'Performa tertinggi untuk pemeriksaan berskala besar.'
-    : 'Akses premium untuk penggunaan harian yang lebih leluasa.';
-  const features = isUltra
-    ? [
-        'Pemeriksaan tanpa batas selama masa aktif',
-        'Maksimal 30 nomor dalam satu kiriman',
-        'Jalur rotasi proxy prioritas',
-        'Ringkasan hasil pemeriksaan massal',
-        'Dirancang untuk penggunaan intensif'
-      ]
-    : [
-        'Pemeriksaan tanpa batas selama masa aktif',
-        'Maksimal 10 nomor dalam satu kiriman',
-        'Rotasi proxy otomatis',
-        'Akses premium Standard',
-        'Cocok untuk penggunaan rutin'
-      ];
+function renderStoreCatalog({ packages }) {
   const packageLines = packages.map((pkg, index) => {
     const perDay = Math.round(pkg.price / pkg.duration_days);
-    return (index + 1) + '. <b>' + escapeHtml(pkg.durationLabel) + '</b>  ·  <b>' +
-      formatIDR(pkg.price) + '</b>  <i>' + escapeHtml(pkg.tag) + '</i>\n   <i>Sekitar ' +
-      formatIDR(perDay) + ' per hari</i>';
+    return '<b>' + (index + 1) + '. ' + escapeHtml(pkg.durationLabel) + '</b>  ·  <b>' +
+      formatIDR(pkg.price) + '</b>  <i>' + escapeHtml(pkg.tag) + '</i>\n' +
+      '<i>Setara ' + formatIDR(perDay) + ' / hari</i>';
   }).join('\n\n');
   return [
-    title + '  /  KATALOG PAKET',
-    '<i>' + subtitle + '</i>',
+    '✦ <b>AKSES PREMIUM META DETECT</b>',
+    '<i>Satu keanggotaan. Semua fitur utama. Pengalaman lebih leluasa.</i>',
     '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
     '',
-    '◈ <b>KEUNGGULAN PAKET</b>',
-    ...features.map((feature) => '✦ ' + feature),
+    '◈ <b>APA YANG KAMU DAPATKAN</b>',
+    '✧ Pemeriksaan tanpa batas selama masa aktif',
+    '✧ Hingga 10 nomor dalam satu kiriman',
+    '✧ Rotasi proxy otomatis',
+    '✧ Antrean pemeriksaan prioritas',
+    '✧ Akses penuh ke fitur Premium',
     '',
-    '▤ <b>PILIH DURASI</b>',
+    '▤ <b>PILIH MASA AKTIF</b>',
     '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
     packageLines,
     '',
-    '<i>Pilih salah satu paket melalui tombol di bawah.</i>'
+    '<i>Pilih durasi yang paling sesuai. Rincian dan total pembayaran akan ditampilkan sebelum konfirmasi.</i>'
   ].join('\n');
 }
-
-function renderPackageDetailCard({ user, pkg }) {
-  const isUltra = pkg.tier === 'ultra';
+function renderPackageDetailCard({ pkg }) {
   const perDay = Math.round(pkg.price / pkg.duration_days);
-  const features = isUltra
-    ? [
-        'Pemeriksaan tanpa batas selama masa aktif',
-        'Maksimal 30 nomor dalam satu kiriman',
-        'Rotasi proxy dengan prioritas Ultra',
-        'Ringkasan hasil pemeriksaan massal',
-        'Dirancang untuk penggunaan intensif'
-      ]
-    : [
-        'Pemeriksaan tanpa batas selama masa aktif',
-        'Maksimal 10 nomor dalam satu kiriman',
-        'Rotasi proxy otomatis',
-        'Akses Premium Standard',
-        'Cocok untuk kebutuhan pemeriksaan rutin'
-      ];
   return [
-    (isUltra ? '♛' : '✧') + ' <b>RINCIAN PAKET ' + (isUltra ? 'ULTRA' : 'STANDARD') + '</b>',
+    '✦ <b>RINCIAN AKSES PREMIUM</b>',
     '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
     '',
-    '◈ <b>INFORMASI PAKET</b>',
-    '✦ Durasi   <b>' + escapeHtml(pkg.durationLabel) + '</b>',
-    '✦ Harga    <b>' + formatIDR(pkg.price) + '</b>',
-    '✦ Per hari <code>' + formatIDR(perDay) + '</code>',
-    '✦ Kapasitas <code>' + pkg.bulk_limit + ' nomor / kiriman</code>',
+    '◈ Masa aktif   <b>' + escapeHtml(pkg.durationLabel) + '</b>',
+    '◈ Harga        <b>' + formatIDR(pkg.price) + '</b>',
+    '◈ Biaya harian <code>' + formatIDR(perDay) + '</code>',
+    '◈ Kapasitas    <code>10 nomor / kiriman</code>',
     '',
-    '⌁ <b>FASILITAS</b>',
-    ...features.map((feature) => '✓ ' + feature),
+    '✧ Pemeriksaan tanpa batas selama masa aktif',
+    '✧ Rotasi proxy otomatis',
+    '✧ Akses seluruh fitur Premium',
     '',
     '<i>' + escapeHtml(pkg.highlight) + '</i>',
     '',
-    '<i>Pilih tombol BELI untuk melanjutkan.</i>'
+    '<i>Periksa kembali pilihanmu sebelum melanjutkan.</i>'
   ].join('\n');
 }
-function renderPaymentMaintenanceCard({ user, pkg }) {
-  const isUltra = pkg.tier === 'ultra';
+function renderPaymentMaintenanceCard({ pkg }) {
   return [
-    '✧ <b>KONFIRMASI PEMBELIAN</b>',
+    '✦ <b>RINGKASAN PESANAN</b>',
     '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
     '',
-    '◈ Paket      <b>' + (isUltra ? 'PREMIUM ULTRA' : 'PREMIUM STANDARD') + '</b>',
-    '◈ Durasi     <b>' + escapeHtml(pkg.durationLabel) + '</b>',
-    '◈ Total      <b>' + formatIDR(pkg.price) + '</b>',
+    '◈ Produk       <b>PREMIUM META DETECT</b>',
+    '◈ Masa aktif   <b>' + escapeHtml(pkg.durationLabel) + '</b>',
+    '◈ Total bayar  <b>' + formatIDR(pkg.price) + '</b>',
     '',
-    '⌁ <b>INFORMASI PEMBAYARAN</b>',
-    'Pembayaran otomatis sedang disiapkan.',
-    'Untuk aktivasi saat ini, hubungi admin melalui tombol di bawah.',
+    '⌁ <b>LANGKAH SELANJUTNYA</b>',
+    'Pembayaran otomatis belum tersedia. Hubungi admin untuk menyelesaikan pembayaran dan aktivasi.',
     '',
-    '<i>Pastikan nama paket dan nominal sudah sesuai sebelum menghubungi admin.</i>'
+    '<i>Jangan melakukan pembayaran sebelum menerima instruksi resmi dari admin.</i>'
   ].join('\n');
 }
-
 function renderCooldownCard({ result, user, isVip }) {
   const t = getTheme(user.theme);
   const sisaFree = Math.max(0, 3 - Number(user.free_used_today || 0));
