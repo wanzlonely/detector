@@ -19,6 +19,10 @@ function btn(text, callback_data, variant = null) {
 function formatIDR(num) {
   return 'Rp ' + Number(num).toLocaleString('id-ID');
 }
+function toSmallCaps(value) {
+  const map = {a:'ᴀ',b:'ʙ',c:'ᴄ',d:'ᴅ',e:'ᴇ',f:'ꜰ',g:'ɢ',h:'ʜ',i:'ɪ',j:'ᴊ',k:'ᴋ',l:'ʟ',m:'ᴍ',n:'ɴ',o:'ᴏ',p:'ᴘ',q:'ǫ',r:'ʀ',s:'s',t:'ᴛ',u:'ᴜ',v:'ᴠ',w:'ᴡ',x:'x',y:'ʏ',z:'ᴢ'};
+  return String(value).toLowerCase().replace(/[a-z]/g, (char) => map[char] || char);
+}
 
 const THEMES = {
   obsidian: {
@@ -207,10 +211,10 @@ function renderStoreCatalog({ packages }) {
   const packageLines = packages.map((pkg, index) => {
     const perDay = Math.round(pkg.price / pkg.duration_days);
     const marker = ['✦', '◈', '✧', '◆', '♛'][index] || '▪';
-    return marker + ' <b>' + escapeHtml(pkg.durationLabel) + '</b> · <b>' + formatIDR(pkg.price) + '</b> <i>' + escapeHtml(pkg.tag) + '</i>\n   <i>sᴇᴛᴀʀᴀ ' + formatIDR(perDay) + ' ᴘᴇʀ ʜᴀʀɪ</i>';
+    return marker + ' <b>' + Number(pkg.duration_days) + ' ʜᴀʀɪ</b> — <b>' + formatIDR(pkg.price) + '</b> · <i>' + toSmallCaps(pkg.tag) + '</i>\n   <i>sᴇᴛᴀʀᴀ ' + formatIDR(perDay) + ' / ʜᴀʀɪ</i>';
   }).join('\n\n');
   return [
-    '✦ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ · ᴘʀᴇᴍɪᴜᴍ</b> ✦',
+    '✦ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ · ᴘʀᴇᴍɪᴜᴍ</b>',
     'ᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ᴘᴇɴɢɢᴜɴᴀᴀɴ ʟᴇʙɪʜ ʟᴇʟᴜᴀsᴀ.',
     '',
     '♛ <b>ᴋᴇᴜɴɢɢᴜʟᴀɴ ᴘʀᴇᴍɪᴜᴍ</b>',
