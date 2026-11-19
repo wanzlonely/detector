@@ -108,35 +108,88 @@ function formatDateWIB(unixSec) {
 
 function renderDashboard({ user, isVip, isOwner = false, brandName }) {
   const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
-  const tier = isOwner ? 'OWNER ACCESS' : isVip ? 'PREMIUM MEMBER' : 'FREE ACCESS';
-  const quota = isOwner
-    ? 'UNLIMITED · OWNER PRIVILEGES'
-    : isVip
-      ? 'UNLIMITED · 10 NOMOR / KIRIM'
-      : remaining + ' DARI 3 PEMERIKSAAN TERSISA';
+  const access = isOwner ? 'OWNER ACCESS' : isVip ? 'PREMIUM MEMBER' : 'FREE MEMBER';
+  const quota = isOwner ? 'TANPA BATAS · AKSES OWNER' : isVip ? 'TANPA BATAS · 10 NOMOR / KIRIM' : remaining + ' / 3 PEMERIKSAAN TERSISA';
   const identity = escapeHtml(user.full_name || 'Pengguna');
-  const total = Number(user.total_checks || 0);
+  const username = user.username && user.username !== '-' ? '@' + escapeHtml(user.username) : 'Belum diatur';
+  const total = Number(user.total_checks || 0).toLocaleString('id-ID');
+  const level = isOwner ? 'OWNER' : isVip ? 'PREMIUM' : total >= 100 ? 'ADVANCED' : total >= 25 ? 'ACTIVE' : 'REGULER';
   return [
     '✦ <b>' + escapeHtml(brandName || 'META DETECT') + '</b>',
-    '<i>WHATSAPP TELEMETRY PLATFORM</i>',
+    '<i>ADVANCED WHATSAPP TELEMETRY</i>',
     '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
     '',
-    '◈ <b>ACCOUNT PROFILE</b>',
-    '✧ Identitas   <b>' + identity + '</b>',
-    '⌁ Telegram    <code>' + user.telegram_id + '</code>',
-    (isOwner ? '♛' : isVip ? '✦' : '◇') + ' Akses       <b>' + tier + '</b>',
-    '◉ Kuota       <b>' + escapeHtml(quota) + '</b>',
-    '⌗ Aktivitas   <b>' + total + ' pemeriksaan</b>',
+    '┌ <b>⚙ STATUS AKUN</b>',
+    '├ Nama      : <b>✧ ' + identity + ' ✧</b>',
+    '├ Username  : <b>' + username + '</b>',
+    '├ ID        : <code>' + user.telegram_id + '</code>',
+    '├ Akses     : <b>' + access + '</b>',
+    '├ Kuota     : <b>' + escapeHtml(quota) + '</b>',
+    '├ Total     : <b>' + total + ' deteksi</b>',
+    '└ Level     : <b>' + level + '</b>',
     '',
     '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
-    '⌁ <b>PANDUAN PENGGUNAAN</b>',
-    '① Tekan <b>DETECT</b> atau kirim nomor langsung.',
-    '② Gunakan format internasional, contoh <code>6282298902274</code>.',
-    '③ Kirim beberapa nomor dengan memisahkan setiap nomor ke baris baru sesuai batas akun.',
-    '④ Hasil pemeriksaan akan muncul otomatis setelah proses selesai.',
+    '⌁ <b>PUSAT KONTROL</b>',
+    'Pilih menu di keyboard untuk mulai mendeteksi, melihat statistik, mengikuti peringkat, atau mengundang teman.',
     '',
-    '<i>◈ CONNECTION SECURE · ' + (isOwner ? 'OWNER SESSION' : isVip ? 'PREMIUM SESSION' : 'FREE SESSION') + '</i>'
-  ].join('\n');
+    '<i>◈ SISTEM AKTIF · ' + (isOwner ? 'OWNER MODE' : isVip ? 'PREMIUM MODE' : 'FREE MODE') + '</i>'
+  ].join('\\n');
+}
+
+function renderStatus({ user, isVip, isOwner = false, referralStats }) {
+  const used = Number(user.free_used_today || 0);
+  const remaining = Math.max(0, 3 - used);
+  const expiry = isOwner ? 'Tidak terbatas' : isVip ? formatDateWIB(user.vip_until) : 'Belum berlangganan';
+  return [
+    '◈ <b>STATUS & STATISTIK AKUN</b>',
+    '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '✦ Nama       : <b>' + escapeHtml(user.full_name || 'Pengguna') + '</b>',
+    '⌁ Telegram  : <code>' + user.telegram_id + '</code>',
+    '♛ Keanggotaan: <b>' + (isOwner ? 'OWNER' : isVip ? 'PREMIUM' : 'GRATIS') + '</b>',
+    '◉ Kuota hari ini: <b>' + (isVip ? 'Tanpa batas' : remaining + ' dari 3 tersisa') + '</b>',
+    '⌗ Total deteksi: <b>' + Number(user.total_checks || 0).toLocaleString('id-ID') + '</b>',
+    '⌛ Masa aktif: <b>' + expiry + '</b>',
+    '',
+    '♧ <b>PROGRAM UNDANGAN</b>',
+    'Teman bergabung: <b>' + Number(referralStats.total || 0) + ' / 10</b>',
+    'Hadiah diberikan: <b>' + Number(referralStats.rewarded || 0) + ' hari Premium</b>'
+  ].join('\\n');
+}
+
+function renderLeaderboard(rows) {
+  const medals = ['🥇', '🥈', '🥉'];
+  const lines = rows.length
+    ? rows.map((row, index) => (medals[index] || (index + 1) + '.') + ' <b>' + escapeHtml(row.full_name || 'Pengguna') + '</b> — <code>' + Number(row.total_checks || 0).toLocaleString('id-ID') + '</code>').join('\\n')
+    : 'Belum ada aktivitas untuk ditampilkan. Jadilah pengguna pertama di papan peringkat!';
+  return [
+    '🏆 <b>LEADERBOARD DETECTOR</b>',
+    '<i>10 akun dengan aktivitas pemeriksaan tertinggi</i>',
+    '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    lines,
+    '',
+    '<i>Peringkat dihitung dari aktivitas akun, diperbarui setelah pemeriksaan.</i>'
+  ].join('\\n');
+}
+
+function renderReferral({ link, stats }) {
+  return [
+    '🎁 <b>PROGRAM REFER & REWARD</b>',
+    '<i>Ajak teman bergabung, kumpulkan hari Premium!</i>',
+    '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '♧ <b>HADIAH KAMU</b>',
+    '• 1 teman yang memenuhi syarat = <b>1 hari Premium</b>',
+    '• Teman harus menyelesaikan 3 pemeriksaan pertama',
+    '• Maksimal 10 teman yang dapat didaftarkan',
+    '• Satu akun hanya dapat dihitung sekali',
+    '',
+    '⌁ <b>TAUTAN UNDANGAN</b>',
+    '<code>' + escapeHtml(link) + '</code>',
+    '',
+    'Teman bergabung: <b>' + Number(stats.total || 0) + ' / 10</b>',
+    'Total hadiah: <b>' + Number(stats.rewarded || 0) + ' hari Premium</b>',
+    '',
+    '<i>Bagikan tautanmu dan pantau hadiah melalui menu Status.</i>'
+  ].join('\\n');
 }
 function renderStoreCatalog({ packages }) {
   const packageLines = packages.map((pkg, index) => {
