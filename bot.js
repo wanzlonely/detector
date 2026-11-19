@@ -265,7 +265,7 @@ bot.command('addvip', async (ctx) => {
     return ctx.reply('✚ <b>FORMAT AKTIVASI BELUM TEPAT</b>\nGunakan format <code>ID_TELEGRAM DURASI_HARI</code>.\nContoh: <code>123456789 7</code>.', { parse_mode: 'HTML' });
   }
   const result = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
-      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\n\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(activated.expiry) + '</code>\n\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
+      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\n\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(result.expiry) + '</code>\n\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
 });
 
 bot.command('broadcast', async (ctx) => {
@@ -331,12 +331,27 @@ function extractPhoneNumbers(input) {
   return results;
 }
 
+async function mapPool(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  async function run() {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await worker(items[i], i);
+    }
+  }
+  const n = Math.min(Math.max(1, concurrency), items.length || 1);
+  await Promise.all(Array.from({ length: n }, () => run()));
+  return results;
+}
+
 async function processNumbers(ctx, numbersList) {
   const owner = isOwner(ctx);
   const user = await getEffectiveUser(ctx);
   const vip = owner || isUserVip(user);
-  const maxBatch = owner ? 30 : (!vip ? 1 : Math.min(10, Number(user.bulk_limit || 10)));
-  const premiumAccess = vip;
+  const maxBatch = owner ? 30 : (!vip ? 1 : Math.min(30, Number(user.bulk_limit || 30)));
+  const concurrency = owner || vip ? Math.min(12, numbersList.length) : 1;
 
   if (numbersList.length > maxBatch) {
     return ctx.reply('◈ <b>ʙᴀᴛᴀs ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>\nᴀᴋᴜɴᴍᴜ ᴅᴀᴘᴀᴛ ᴍᴇᴍᴇʀɪᴋsᴀ ᴍᴀᴋsɪᴍᴀʟ <b>' + maxBatch + ' ɴᴏᴍᴏʀ</b> ᴅᴀʟᴀᴍ sᴀᴛᴜ ᴋɪʀɪᴍᴀɴ.', { parse_mode: 'HTML' });
@@ -353,21 +368,29 @@ async function processNumbers(ctx, numbersList) {
   await redis.set('detect:active:' + ctx.from.id, jobId, { ex: 3600 });
   let completed = 0;
   const startedAt = Date.now();
-  let stage = 'ᴍᴇɴʏɪᴀᴘᴋᴀɴ sᴇsɪ ᴅᴇᴛᴇᴄᴛ';
+  let stage = 'ᴍᴇɴʏɪᴀᴘᴋᴀɴ sᴇsɪ ᴅᴇᴛᴇᴄᴛ · parallel x' + concurrency;
   let frame = 0;
   const stopMarkup = Markup.inlineKeyboard([[Markup.button.callback('× HENTIKAN DETEKSI', 'detect:stop:' + ctx.from.id + ':' + jobId)]]);
   const progress = await ctx.reply(buildProgressText(0, numbersList.length, stage, { ready: 0, cooldown: 0, banned: 0, error: 0, failed: 0, clone: 0, smsUnavailable: 0 }), { parse_mode: 'HTML', ...stopMarkup });
-  const timer = setInterval(() => {
-    frame = (frame + 1) % 4;
-    ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, stats, frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
-  }, 2200);
   const stats = { ready: 0, cooldown: 0, banned: 0, error: 0, failed: 0, clone: 0, smsUnavailable: 0 };
-  const detectionResults = [];
+  const detectionResults = new Array(numbersList.length);
   let lastReaction = '👀';
   let stopped = false;
+  let progressDirty = false;
 
-  for (const rawNumber of numbersList) {
-    if (await redis.get(stopKey)) { stopped = true; break; }
+  const timer = setInterval(() => {
+    if (!progressDirty) return;
+    progressDirty = false;
+    frame = (frame + 1) % 4;
+    ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, stats, frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
+  }, 900);
+
+  await mapPool(numbersList, concurrency, async (rawNumber, index) => {
+    if (stopped || await redis.get(stopKey)) {
+      stopped = true;
+      detectionResults[index] = { number: rawNumber, error: true, detail: 'ᴅɪʜᴇɴᴛɪᴋᴀɴ' };
+      return;
+    }
     stage = 'Memeriksa target ' + (completed + 1) + ' dari ' + numbersList.length;
     try {
       const result = await checkWhatsAppCooldown(rawNumber);
@@ -388,7 +411,7 @@ async function processNumbers(ctx, numbersList) {
       await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
       const reward = await qualifyReferral(ctx.from.id);
       if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '♧ <b>ᴋᴏɪɴ ʀᴇғᴇʀᴀʟ ʙᴇʀᴛᴀᴍʙᴀʜ!</b>\n\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+5 ᴋᴏɪɴ</b>', { parse_mode: 'HTML' }).catch(() => {});
-      detectionResults.push({ number: result.formattedNumber, result, status });
+      detectionResults[index] = { number: result.formattedNumber, result, status };
     } catch (err) {
       stats.error += 1;
       stats.failed += 1;
@@ -399,23 +422,18 @@ async function processNumbers(ctx, numbersList) {
         : /429|rate.?limit|too many/i.test(err && err.message || '')
           ? 'sᴇʀᴠᴇʀ sᴇᴅᴀɴɢ ᴍᴇᴍʙᴀᴛᴀsɪ ᴘᴇʀᴍɪɴᴛᴀᴀɴ. ᴛᴜɴɢɢᴜ sᴇʙᴇɴᴛᴀʀ sᴇʙᴇʟᴜᴍ ᴍᴇɴᴄᴏʙᴀ ʟᴀɢɪ.'
           : 'ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴘʀᴏsᴇs. sɪʟᴀᴋᴀɴ ᴄᴏʙᴀ ʟᴀɢɪ ɴᴀɴᴛɪ.';
-      detectionResults.push({ number: rawNumber, error: true, detail });
+      detectionResults[index] = { number: rawNumber, error: true, detail };
     }
     completed += 1;
     stage = 'ᴍᴇᴍᴘᴇʀʙᴀʀᴜɪ ʜᴀsɪʟ ᴅᴇᴛᴇᴄᴛ';
-    await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, stats, ++frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
-  }
-
+    progressDirty = true;
+  });
 
   clearInterval(timer);
   await redis.del(stopKey).catch(() => {});
-  const exitReason = await redis.get('detect:exit:' + ctx.from.id + ':' + jobId);
-  await redis.del('detect:exit:' + ctx.from.id + ':' + jobId).catch(() => {});
-  if (String(await redis.get('detect:active:' + ctx.from.id) || '') === jobId) await redis.del('detect:active:' + ctx.from.id).catch(() => {});
-  if (exitReason === 'navigation') {
-    await ctx.telegram.deleteMessage(ctx.chat.id, progress.message_id).catch(() => {});
-    return;
-  }
+  await redis.del('detect:active:' + ctx.from.id).catch(() => {});
+
+  const finalResults = detectionResults.filter(Boolean);
   const finalPercent = Math.min(100, Math.floor(completed / Math.max(1, numbersList.length) * 100));
   const filled = Math.floor(finalPercent / 10);
   const finalBar = '●'.repeat(filled) + '○'.repeat(10 - filled);
@@ -427,10 +445,10 @@ async function processNumbers(ctx, numbersList) {
     '\n✕ ɢᴀɢᴀʟ ⦂ <b>' + Number(stats.failed || stats.error || 0) + '</b>' +
     '\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + stats.cooldown + '</b>' +
     '\n  ⊘ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + stats.banned + '</b>' +
-    '\n\n◐ ' + (stopped ? 'ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ' : 'sᴇʟᴜʀᴜʜ ᴛᴀʀɢᴇᴛ sᴇʟᴇsᴀɪ');
+    '\n\n◐ ' + (stopped ? 'ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ' : 'sᴇʟᴜʀᴜʜ ᴛᴀʀɢᴇᴛ sᴇʟᴇsᴀɪ · ' + Math.ceil((Date.now() - startedAt) / 1000) + 'd');
   await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, finalText, { parse_mode: 'HTML' }).catch(() => {});
   await ctx.reply(renderDetectionSummary({
-    results: detectionResults,
+    results: finalResults,
     elapsedSeconds: Math.ceil((Date.now() - startedAt) / 1000)
   }), { parse_mode: 'HTML' });
   if (ctx.message && ctx.message.message_id) {
@@ -464,29 +482,21 @@ bot.on('text', async (ctx) => {
     await redis.del('contact:state:' + ctx.from.id);
     if (!ADMIN_ID) return ctx.reply('✕ ᴀᴅᴍɪɴ ʙᴇʟᴜᴍ ᴅɪᴀᴛᴜʀ.');
     const sender = ctx.from.username ? '@' + ctx.from.username : (ctx.from.first_name || 'Pengguna');
-    const forwarded = await bot.telegram.sendMessage(ADMIN_ID, '✉ <b>ᴘᴇsᴀɴ ᴍᴀsᴜᴋ</b>\n\nᴅᴀʀɪ ⦂ ' + escapeHtml(sender) + '\nɪᴅ ⦂ <code>' + ctx.from.id + '</code>\n\n┃ ' + escapeHtml(text) + '\n\n<i>Gunakan tombol di bawah agar balasan terkirim ke akun yang tepat.</i>', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('↩ BALAS PENGGUNA · ' + String(ctx.from.id).slice(-5), 'contact:reply:' + ctx.from.id)]]) });
-    await redis.set('contact:message:' + forwarded.message_id, String(ctx.from.id), { ex: 604800 });
-    return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴘᴇsᴀɴ ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴅɪᴛᴇʀᴜsᴋᴀɴ ᴋᴇ ᴀᴅᴍɪɴ. ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ ʙᴀʟᴀsᴀɴ ᴅɪ sɪɴɪ.', { parse_mode: 'HTML' });
+    const forwarded = await bot.telegram.sendMessage(ADMIN_ID, '✉ <b>ᴘᴇsᴀɴ ᴍᴀsᴜᴋ</b>\n\nᴅᴀʀɪ ⦂ ' + escapeHtml(sender) + '\nɪᴅ ⦂ <code>' + ctx.from.id + '</code>\n\n┃ ' + escapeHtml(text) + '\n\n<i>Gunakan tombol di bawah agar balasan terkirim ke akun yang tepat.</i>', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('↩ BALAS', 'contact:reply:' + ctx.from.id)]]) });
+    await redis.set('contact:message:' + forwarded.message_id, String(ctx.from.id), { ex: 86400 });
+    return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ᴋᴇ ᴀᴅᴍɪɴ</b>', { parse_mode: 'HTML' });
   }
-  if (text === '⌖ DETECT' || text === '⌖ Detect' || text === 'Detect') {
-    return ctx.reply(
-      '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX\n62858XXXXX</code>',
-      { parse_mode: 'HTML' }
-    );
-  }
-  if (text === '✧ BELI PREMIUM' || text === '✧ Beli Premium' || text === 'Beli Premium') {
-    return showStore(ctx, false);
-  }
-  if (text === '/cancel' || text.toUpperCase() === 'BATAL') {
-    if (isOwner(ctx)) await clearOwnerAction(ctx.from.id);
-    return ctx.reply('✕ <b>ᴘʀᴏsᴇs ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\n\nᴛɪᴅᴀᴋ ᴀᴅᴀ ᴘᴇʀᴜʙᴀʜᴀɴ ʏᴀɴɢ ᴅɪʟᴀᴋᴜᴋᴀɴ. ᴋᴀᴍᴜ ʙɪsᴀ ᴍᴇᴍɪʟɪʜ ᴍᴇɴᴜ ʟᴀɪɴ.');
-  }
-  if (isOwner(ctx)) {
-    const action = await getOwnerAction(ctx.from.id);
+
+  const action = await getOwnerAction(ctx.from.id);
+  if (isOwner(ctx) && action) {
+    if (text === '/cancel' || text.toUpperCase() === 'BATAL') {
+      await clearOwnerAction(ctx.from.id);
+      return ctx.reply('✕ <b>ᴀᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+    }
     if (action === 'activate') {
-      const [uidText, daysText] = text.trim().split(/\s+/);
-      const uid = Number(uidText);
-      const days = Number(daysText);
+      const parts = text.trim().split(/\s+/);
+      const uid = Number(parts[0]);
+      const days = Number(parts[1]);
       if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isFinite(days) || days <= 0 || days > 3650) {
         return ctx.reply('✦ <b>ғᴏʀᴍᴀᴛ ᴀᴋᴛɪᴠᴀsɪ ᴛɪᴅᴀᴋ ᴛᴇᴘᴀᴛ</b>\n\nᴋɪʀɪᴍ ɪᴅ ᴛᴇʟᴇɢʀᴀᴍ ᴅᴀɴ ᴅᴜʀᴀsɪ ʜᴀʀɪ ᴅᴇɴɢᴀɴ ᴘᴇᴍɪsᴀʜ sᴘᴀsɪ.\nᴄᴏɴᴛᴏʜ ⦂ <code>123456789 7</code>', { parse_mode: 'HTML' });
       }
