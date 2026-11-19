@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const {
-  getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
+  redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
   consumeQuota, addCheckLog, getGlobalStats, getCachedCheckResult,
   setCachedCheckResult, incrementUserChecks, activateVip
 } = require('./database');
@@ -15,9 +15,26 @@ const {
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
 const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
-const MAIN_KEYBOARD = Markup.keyboard([
+const USER_KEYBOARD = Markup.keyboard([
   [{ text: '⌕ DETECT' }, { text: '✧ BELI PREMIUM' }]
 ]).resize().persistent().placeholder('Pilih menu atau kirim nomor…');
+
+const OWNER_KEYBOARD = Markup.keyboard([
+  [{ text: '⌕ DETECT' }, { text: '✧ BELI PREMIUM' }],
+  [{ text: '⌂ DASHBOARD' }, { text: '♛ OWNER CONSOLE' }],
+  [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
+]).resize().persistent().placeholder('Pilih fungsi owner…');
+
+const OWNER_ACTION_TTL = 300;
+async function setOwnerAction(userId, action) {
+  await redis.set('owner:action:' + userId, action, { ex: OWNER_ACTION_TTL });
+}
+async function getOwnerAction(userId) {
+  return redis.get('owner:action:' + userId);
+}
+async function clearOwnerAction(userId) {
+  await redis.del('owner:action:' + userId);
+}
 
 function isOwner(ctx) {
   return Boolean(ADMIN_ID) && Number(ctx.from && ctx.from.id) === ADMIN_ID;
@@ -29,7 +46,7 @@ bot.use((ctx, next) => {
     const originalReply = ctx.reply.bind(ctx);
     ctx.reply = (message, extra = {}) => originalReply(message, {
       ...extra,
-      ...(!extra.reply_markup ? MAIN_KEYBOARD : {})
+      ...(!extra.reply_markup ? (isOwner(ctx) ? OWNER_KEYBOARD : USER_KEYBOARD) : {})
     });
   }
   return next();
@@ -98,14 +115,8 @@ async function showCheckout(ctx, pkg, edit) {
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
 }
 
-bot.telegram.setMyCommands([
-  { command: 'start', description: 'Buka dashboard utama' },
-  { command: 'detect', description: 'Mulai pemeriksaan nomor' },
-  { command: 'store', description: 'Lihat paket Premium' },
-  { command: 'admin', description: 'Owner console' },
-  { command: 'addvip', description: 'Aktivasi membership pengguna' },
-  { command: 'broadcast', description: 'Kirim pengumuman' }
-]).catch((err) => console.error('[commands]', err && err.stack || err));
+// Semua navigasi tersedia melalui Reply Keyboard sesuai peran akun.
+bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
 
 bot.start(showHome);
 bot.command('detect', (ctx) => ctx.reply(
@@ -144,6 +155,22 @@ bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
   );
 });
 
+bot.hears('⌂ DASHBOARD', showHome);
+bot.hears('♛ OWNER CONSOLE', async (ctx) => {
+  if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
+  const stats = await getGlobalStats();
+  return ctx.reply('♛ <b>OWNER CONSOLE</b>\\n\\nPengguna: <code>' + stats.totalUsers + '</code>\\nPremium aktif: <code>' + stats.activeVip + '</code>\\nTotal pemeriksaan: <code>' + stats.totalChecks + '</code>\\nDataImpulse: <code>' + (isDataImpulseConfigured() ? 'TERHUBUNG' : 'BELUM DIATUR') + '</code>', { parse_mode: 'HTML' });
+});
+bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
+  if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
+  await setOwnerAction(ctx.from.id, 'activate');
+  return ctx.reply('✚ <b>AKTIVASI PREMIUM</b>\\nKirim dengan format <code>ID_TELEGRAM DURASI_HARI</code>.\\nContoh: <code>123456789 7</code>.\\nKetik /cancel untuk membatalkan.', { parse_mode: 'HTML' });
+});
+bot.hears('▤ BROADCAST', async (ctx) => {
+  if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
+  await setOwnerAction(ctx.from.id, 'broadcast');
+  return ctx.reply('▤ <b>BROADCAST</b>\\nKirim isi pengumuman yang ingin disampaikan kepada semua pengguna.', { parse_mode: 'HTML' });
+});
 bot.command('admin', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
   const stats = await getGlobalStats();
@@ -268,6 +295,38 @@ bot.on('text', async (ctx) => {
   }
   if (text === '✧ BELI PREMIUM' || text === '✧ Beli Premium' || text === 'Beli Premium') {
     return showStore(ctx, false);
+  }
+  if (text === '/cancel') {
+    if (isOwner(ctx)) await clearOwnerAction(ctx.from.id);
+    return ctx.reply('Aksi dibatalkan.');
+  }
+  if (isOwner(ctx)) {
+    const action = await getOwnerAction(ctx.from.id);
+    if (action === 'activate') {
+      const [uidText, daysText] = text.trim().split(/\\s+/);
+      const uid = Number(uidText);
+      const days = Number(daysText);
+      if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isFinite(days) || days <= 0 || days > 3650) {
+        return ctx.reply('Format belum benar. Kirim <code>ID_TELEGRAM DURASI_HARI</code>, contoh <code>123456789 7</code>.', { parse_mode: 'HTML' });
+      }
+      const activated = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
+      await clearOwnerAction(ctx.from.id);
+      return ctx.reply('✦ Premium berhasil diaktifkan untuk <code>' + uid + '</code> hingga <code>' + formatDateWIB(activated.expiry) + '</code>.', { parse_mode: 'HTML' });
+    }
+    if (action === 'broadcast') {
+      await clearOwnerAction(ctx.from.id);
+      const stats = await getGlobalStats();
+      let sent = 0;
+      for (const uid of stats.allUserIds) {
+        try {
+          await bot.telegram.sendMessage(Number(uid), '✦ <b>INFO META DETECT</b>\\n\\n' + escapeHtml(text), { parse_mode: 'HTML' });
+          sent += 1;
+        } catch (err) {
+          console.error('[broadcast]', uid, err && err.message || err);
+        }
+      }
+      return ctx.reply('Pengumuman terkirim ke ' + sent + ' pengguna.');
+    }
   }
 
   const numbers = text.split(/\r?\n/)
