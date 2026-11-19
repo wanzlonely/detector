@@ -185,17 +185,17 @@ bot.hears('♛ OWNER CONSOLE', async (ctx) => {
   return ctx.reply('♛ <b>OWNER CONSOLE</b>\n\nPengguna: <code>' + stats.totalUsers + '</code>\nPremium aktif: <code>' + stats.activeVip + '</code>\nTotal pemeriksaan: <code>' + stats.totalChecks + '</code>\nDataImpulse: <code>' + (isDataImpulseConfigured() ? 'TERHUBUNG' : 'BELUM DIATUR') + '</code>', { parse_mode: 'HTML' });
 });
 bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES OWNER DIPERLUKAN</b>\\nFitur ini hanya dapat digunakan oleh pemilik bot yang telah terverifikasi.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'activate');
   return ctx.reply(`✚ <b>AKTIVASI PREMIUM</b>\nKirim dengan format <code>ID_TELEGRAM DURASI_HARI</code>.\nContoh: <code>123456789 7</code>.\nKirim <code>BATAL</code> untuk membatalkan.`, { parse_mode: 'HTML' });
 });
 bot.hears('▤ BROADCAST', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES OWNER DIPERLUKAN</b>\\nFitur ini hanya dapat digunakan oleh pemilik bot yang telah terverifikasi.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'broadcast');
   return ctx.reply('▤ <b>BROADCAST</b>\nKirim isi pengumuman yang ingin disampaikan kepada semua pengguna.', { parse_mode: 'HTML' });
 });
 bot.command('admin', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES OWNER DIPERLUKAN</b>\\nFitur ini hanya dapat digunakan oleh pemilik bot yang telah terverifikasi.', { parse_mode: 'HTML' });
   const stats = await getGlobalStats();
   return ctx.reply(
     '◈ <b>OWNER CONSOLE</b>\n\nPengguna: <code>' + stats.totalUsers +
