@@ -238,8 +238,10 @@ function renderCooldownCard({ result, user, isVip }) {
       ? 'COOLDOWN ACTIVE — Verifikasi SMS masih dalam masa tunggu.'
       : 'ALL CLEAR — Verifikasi SMS siap diproses.';
 
-  const tierFooter = String(user.vip_tier).toUpperCase() === 'OWNER'\n    ? '✧ OWNER ACCESS'
-    : !isVip\n      ? `KUOTA ${sisaFree}/3`
+  const tierFooter = String(user.vip_tier).toUpperCase() === 'OWNER'
+    ? '✧ OWNER ACCESS'
+    : !isVip
+      ? `KUOTA ${sisaFree}/3`
       : '✦ PREMIUM ACCESS';
 
   return (
