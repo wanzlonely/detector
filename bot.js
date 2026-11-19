@@ -180,22 +180,22 @@ bot.hears('🏆 LEADERBOARD', showLeaderboard);
 bot.hears('🎁 REFERRAL', showReferral);
 
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES TIDAK DIIZINKAN</b>\\nFitur ini hanya tersedia untuk akun Owner MetaDetect.');
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴛɪᴅᴀᴋ ᴅɪɪᴢɪɴᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴏᴡɴᴇʀ ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ.');
   const stats = await getGlobalStats();
   return ctx.reply('♛ <b>OWNER CONSOLE</b>\n\nPengguna: <code>' + stats.totalUsers + '</code>\nPremium aktif: <code>' + stats.activeVip + '</code>\nTotal pemeriksaan: <code>' + stats.totalChecks + '</code>\nDataImpulse: <code>' + (isDataImpulseConfigured() ? 'TERHUBUNG' : 'BELUM DIATUR') + '</code>', { parse_mode: 'HTML' });
 });
 bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES OWNER DIPERLUKAN</b>\\nFitur ini hanya dapat digunakan oleh pemilik bot yang telah terverifikasi.', { parse_mode: 'HTML' });
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'activate');
   return ctx.reply(`✦ ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ ✦\n\nᴍᴀsᴜᴋᴋᴀɴ ɪᴅ ᴛᴇʟᴇɢʀᴀᴍ & ᴅᴜʀᴀsɪ ʜᴀʀɪ\nᴅᴇɴɢᴀɴ ᴘᴇᴍɪsᴀʜ sᴘᴀsɪ.\n\nᴄᴏɴᴛᴏʜ ⦂ <code>123456789 7</code>\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ`, { parse_mode: 'HTML' });
 });
 bot.hears('▤ BROADCAST', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES OWNER DIPERLUKAN</b>\\nFitur ini hanya dapat digunakan oleh pemilik bot yang telah terverifikasi.', { parse_mode: 'HTML' });
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'broadcast');
   return ctx.reply('▤ <b>BROADCAST</b>\nKirim isi pengumuman yang ingin disampaikan kepada semua pengguna.', { parse_mode: 'HTML' });
 });
 bot.command('admin', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES OWNER DIPERLUKAN</b>\\nFitur ini hanya dapat digunakan oleh pemilik bot yang telah terverifikasi.', { parse_mode: 'HTML' });
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
   const stats = await getGlobalStats();
   return ctx.reply(
     '◈ <b>OWNER CONSOLE</b>\n\nPengguna: <code>' + stats.totalUsers +
@@ -223,7 +223,7 @@ bot.command('addvip', async (ctx) => {
 bot.command('broadcast', async (ctx) => {
   if (!isOwner(ctx)) return;
   const message = ctx.message.text.replace(/^\/broadcast\s*/i, '').trim();
-  if (!message) return ctx.reply('▤ <b>PESAN PENGUMUMAN KOSONG</b>\\nTambahkan isi pesan setelah perintah broadcast, atau gunakan tombol BROADCAST pada keyboard Owner.');
+  if (!message) return ctx.reply('▤ <b>ᴘᴇsᴀɴ ʙʀᴏᴀᴅᴄᴀsᴛ ᴋᴏsᴏɴɢ</b>\\n\\nᴛᴜʟɪs ɪsɪ ᴘᴇɴɢᴜᴍᴜᴍᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴋɪʀɪᴍ, ᴀᴛᴀᴜ ɢᴜɴᴀᴋᴀɴ ᴛᴏᴍʙᴏʟ ʙʀᴏᴀᴅᴄᴀsᴛ.');
   const stats = await getGlobalStats();
   let sent = 0;
   for (const uid of stats.allUserIds) {
@@ -317,10 +317,10 @@ async function processNumbers(ctx, numbersList) {
       lastReaction = '⚠️';
       console.error('[detect] target failed:', rawNumber, err && err.stack || err);
       const detail = /timeout|timed out/i.test(err && err.message || '')
-        ? 'Koneksi pemeriksaan melewati batas waktu. Coba lagi beberapa saat.'
+        ? 'ᴋᴏɴᴇᴋsɪ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴇʟᴇᴡᴀᴛɪ ʙᴀᴛᴀs ᴡᴀᴋᴛᴜ. ᴄᴏʙᴀ ʟᴀɢɪ ʙᴇʙᴇʀᴀᴘᴀ sᴀᴀᴛ.'
         : /429|rate.?limit|too many/i.test(err && err.message || '')
-          ? 'Server sedang membatasi permintaan. Tunggu sebentar sebelum mencoba lagi.'
-          : 'Pemeriksaan gagal diproses. Silakan coba lagi nanti.';
+          ? 'sᴇʀᴠᴇʀ sᴇᴅᴀɴɢ ᴍᴇᴍʙᴀᴛᴀsɪ ᴘᴇʀᴍɪɴᴛᴀᴀɴ. ᴛᴜɴɢɢᴜ sᴇʙᴇɴᴛᴀʀ sᴇʙᴇʟᴜᴍ ᴍᴇɴᴄᴏʙᴀ ʟᴀɢɪ.'
+          : 'ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴘʀᴏsᴇs. sɪʟᴀᴋᴀɴ ᴄᴏʙᴀ ʟᴀɢɪ ɴᴀɴᴛɪ.';
       await ctx.reply('⚠️ <b>PEMERIKSAAN GAGAL</b>\nNomor: <code>' + escapeHtml(rawNumber) + '</code>\n' + detail, { parse_mode: 'HTML' });
     }
     completed += 1;
@@ -338,7 +338,7 @@ async function processNumbers(ctx, numbersList) {
   }
   clearInterval(timer);
   await redis.del(stopKey).catch(() => {});
-  const finalText = (stopped ? '⏹ <b>PEMERIKSAAN DIHENTIKAN</b>' : '✓ <b>PEMERIKSAAN SELESAI</b>') + '\n\n' + buildProgressText(completed, numbersList.length, stopped ? 'Dihentikan oleh pengguna' : 'Seluruh target selesai') + '\n\n✧ Berhasil: <b>' + (stats.ready + stats.cooldown + stats.banned) + '</b> · ⚠ Gagal: <b>' + stats.error + '</b>';
+  const finalText = (stopped ? '⏹ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴅɪʜᴇɴᴛɪᴋᴀɴ</b>' : '✓ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>') + '\n\n' + buildProgressText(completed, numbersList.length, stopped ? 'Dihentikan oleh pengguna' : 'Seluruh target selesai') + '\n\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + (stats.ready + stats.cooldown + stats.banned) + '</b> · ⚠ ɢᴀɢᴀʟ ⦂ <b>' + stats.error + '</b>';
   await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, finalText, { parse_mode: 'HTML' }).catch(() => {});
   if (ctx.message && ctx.message.message_id) {
     ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, [{ type: 'emoji', emoji: lastReaction }]).catch(() => {});
@@ -359,7 +359,7 @@ bot.on('text', async (ctx) => {
   }
   if (text === '/cancel' || text.toUpperCase() === 'BATAL') {
     if (isOwner(ctx)) await clearOwnerAction(ctx.from.id);
-    return ctx.reply('✕ <b>PROSES DIBATALKAN</b>\\nTidak ada perubahan yang dilakukan. Kamu dapat memilih menu lain kapan saja.');
+    return ctx.reply('✕ <b>ᴘʀᴏsᴇs ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\\n\\nᴛɪᴅᴀᴋ ᴀᴅᴀ ᴘᴇʀᴜʙᴀʜᴀɴ ʏᴀɴɢ ᴅɪʟᴀᴋᴜᴋᴀɴ. ᴋᴀᴍᴜ ʙɪsᴀ ᴍᴇᴍɪʟɪʜ ᴍᴇɴᴜ ʟᴀɪɴ.');
   }
   if (isOwner(ctx)) {
     const action = await getOwnerAction(ctx.from.id);
