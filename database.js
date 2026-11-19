@@ -278,6 +278,7 @@ async function redeemReferralReward(id,offer) {
   const balance=await getReferralCoinBalance(id);
   if(balance<offer.cost) return {ok:false,balance};
   const after=Number(await redis.incrby(key,-offer.cost));
+  if(after<0){await redis.incrby(key,offer.cost);return {ok:false,balance:await getReferralCoinBalance(id)};}
   if(offer.type==='quota') await redis.incrby('referral:bonus_quota:'+id,offer.amount);
   else await activateVip(id,offer.amount,'PREMIUM','PREMIUM · '+offer.amount+' Hari');
   return {ok:true,balance:after};
