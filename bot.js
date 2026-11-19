@@ -9,22 +9,22 @@ const { isDataImpulseConfigured } = require('./proxyManager');
 const { checkWhatsAppCooldown } = require('./waChecker');
 const {
   escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
-  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard
+  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary
 } = require('./themes');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
 const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
 const USER_KEYBOARD = Markup.keyboard([
-  [{ text: '⌕ DETECT' }, { text: '✧ BELI PREMIUM' }],
-  [{ text: '◈ STATUS' }, { text: '🏆 LEADERBOARD' }],
-  [{ text: '🎁 REFERRAL' }]
+  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
+  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
+  [{ text: '♧ REFERRAL' }]
 ]).resize().persistent().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
-  [{ text: '⌕ DETECT' }, { text: '✧ BELI PREMIUM' }],
-  [{ text: '◈ STATUS' }, { text: '🏆 LEADERBOARD' }],
-  [{ text: '🎁 REFERRAL' }],
+  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
+  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
+  [{ text: '♧ REFERRAL' }],
   [{ text: '♛ OWNER CONSOLE' }],
   [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
 ]).resize().persistent().placeholder('Pilih fungsi owner…');
@@ -96,7 +96,7 @@ async function showPackage(ctx, pkg, edit) {
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id)],
     [
-      Markup.button.callback('← KEMBALI KE PAKET', 'store:premium')
+      Markup.button.callback('↶ KEMBALI KE PAKET', 'store:premium')
     ]
   ]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
@@ -107,9 +107,9 @@ async function showCheckout(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPaymentMaintenanceCard({ user, pkg });
   const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('✉ HUBUNGI ADMIN', 'contact:' + pkg.id)],
+    [Markup.button.callback('⌁ HUBUNGI ADMIN', 'contact:' + pkg.id)],
     [
-      Markup.button.callback('← PILIH PAKET LAIN', 'store:' + pkg.tier)
+      Markup.button.callback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier)
     ]
   ]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
@@ -128,7 +128,7 @@ bot.start(async (ctx) => {
   return showHome(ctx);
 });
 bot.command('detect', (ctx) => ctx.reply(
-  '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n⚠︎ ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴊɪᴋᴀ ʙᴀɴʏᴀᴋ ⚠︎\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>6282298902274\n6281234567890</code>',
+  '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>6282298902274\n6281234567890</code>',
   { parse_mode: 'HTML' }
 ));
 bot.command('store', (ctx) => showStore(ctx, false));
@@ -163,15 +163,13 @@ bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
 function renderOwnerConsole(stats) {
   return [
     '♛ <b>ᴏᴡɴᴇʀ ᴄᴏɴsᴏʟᴇ</b> ♛',
-    '<i>ʀɪɴɢᴋᴀsᴀɴ ᴏᴘᴇʀᴀsɪ sɪsᴛᴇᴍ</i>',
+    'ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ · ᴄᴏɴᴛʀᴏʟ ᴘᴀɴᴇʟ',
     '',
-    '⚙ <b>sᴛᴀᴛɪsᴛɪᴋ ᴜᴛᴀᴍᴀ</b>',
     '▸ ᴘᴇɴɢɢᴜɴᴀ ⦂ <code>' + stats.totalUsers + '</code>',
     '▸ ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ ⦂ <code>' + stats.activeVip + '</code>',
     '▸ ᴛᴏᴛᴀʟ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ⦂ <code>' + stats.totalChecks + '</code>',
-    '▸ ᴅᴀᴛᴀɪᴍᴘᴜʟsᴇ ⦂ <b>' + (isDataImpulseConfigured() ? 'ᴛᴇʀʜᴜʙᴜɴɢ' : 'ʙᴇʟᴜᴍ ᴅɪᴀᴛᴜʀ') + '</b>',
+    '▸ ᴅᴀᴛᴀɪᴍᴘᴜʟsᴇ ⦂ <b>' + (isDataImpulseConfigured() ? '● ᴛᴇʀʜᴜʙᴜɴɢ' : 'ʙᴇʟᴜᴍ ᴅɪᴀᴛᴜʀ') + '</b>',
     '',
-    '⌁ ᴘɪʟɪʜ ᴀᴋsɪ ᴏᴡɴᴇʀ ᴍᴇʟᴀʟᴜɪ ᴋᴇʏʙᴏᴀʀᴅ.',
     '◈ ᴏᴡɴᴇʀ ᴍᴏᴅᴇ · ᴀᴋᴛɪғ'
   ].join('\n');
 }
@@ -189,11 +187,11 @@ async function showReferral(ctx) {
   const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
   const stats = await getReferralStats(ctx.from.id);
   const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect melalui tautan undanganku!');
-  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('↗ BAGIKAN TAUTAN', shareUrl)]]) });
+  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl)]]) });
 }
 bot.hears('◈ STATUS', showStatus);
-bot.hears('🏆 LEADERBOARD', showLeaderboard);
-bot.hears('🎁 REFERRAL', showReferral);
+bot.hears('♛ LEADERBOARD', showLeaderboard);
+bot.hears('♧ REFERRAL', showReferral);
 
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴛɪᴅᴀᴋ ᴅɪɪᴢɪɴᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴏᴡɴᴇʀ ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ.');
@@ -246,15 +244,19 @@ bot.command('broadcast', async (ctx) => {
 });
 
 
-function buildProgressText(done, total, stage, frame = 0) {
+function buildProgressText(done, total, stage, stats, frame = 0) {
   const percent = Math.min(100, Math.floor(done / Math.max(1, total) * 100));
   const filled = Math.floor(percent / 10);
-  const bar = '▰'.repeat(filled) + '▱'.repeat(10 - filled);
+  const bar = '●'.repeat(filled) + '○'.repeat(10 - filled);
   const spinner = ['◐', '◓', '◑', '◒'][frame % 4];
-  return '⚡ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>\n' + spinner + ' ' + stage +
-    '\n\n<code>' + bar + '</code> <b>' + percent + '%</b>' +
-    '\nProgres: <b>' + done + ' / ' + total + '</b> nomor' +
-    '\n<i>Hasil akan ditampilkan otomatis.</i>';
+  const counts = stats || { ready: 0, cooldown: 0, banned: 0, error: 0 };
+  return '⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>\n\n' + bar + ' <b>' + percent + '%</b>' +
+    '\nᴛᴀʀɢᴇᴛ ⟿ <b>' + done + ' / ' + total + '</b>' +
+    '\n\n✧ ʙᴇʀʜᴀsɪʟ — <b>' + counts.ready + '</b>' +
+    '\n✕ ɢᴀɢᴀʟ — <b>' + (counts.error + counts.banned) + '</b>' +
+    '\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ — <b>' + counts.cooldown + '</b>' +
+    '\n  ⊘ ᴅɪʙᴀᴛᴀsɪ — <b>' + counts.banned + '</b>' +
+    '\n\n' + spinner + ' ' + stage;
 }
 bot.action(/^detect:stop:(\d+):(\d+)$/, async (ctx) => {
   if (Number(ctx.from.id) !== Number(ctx.match[1])) return ctx.answerCbQuery('Sesi ini bukan milikmu.', { show_alert: true });
@@ -282,15 +284,17 @@ async function processNumbers(ctx, numbersList) {
   const jobId = String(Date.now());
   const stopKey = 'detect:stop:' + ctx.from.id + ':' + jobId;
   let completed = 0;
-  let stage = 'Menyiapkan sesi pemeriksaan';
+  const startedAt = Date.now();
+  let stage = 'ᴍᴇɴʏɪᴀᴘᴋᴀɴ sᴇsɪ ᴅᴇᴛᴇᴄᴛ';
   let frame = 0;
-  const stopMarkup = Markup.inlineKeyboard([[Markup.button.callback('⏹ HENTIKAN DETEKSI', 'detect:stop:' + ctx.from.id + ':' + jobId)]]);
-  const progress = await ctx.reply(buildProgressText(0, numbersList.length, stage), { parse_mode: 'HTML', ...stopMarkup });
+  const stopMarkup = Markup.inlineKeyboard([[Markup.button.callback('× HENTIKAN DETEKSI', 'detect:stop:' + ctx.from.id + ':' + jobId)]]);
+  const progress = await ctx.reply(buildProgressText(0, numbersList.length, stage, { ready: 0, cooldown: 0, banned: 0, error: 0 }), { parse_mode: 'HTML', ...stopMarkup });
   const timer = setInterval(() => {
     frame = (frame + 1) % 4;
-    ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
+    ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, stats, frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
   }, 2200);
   const stats = { ready: 0, cooldown: 0, banned: 0, error: 0 };
+  const detectionResults = [];
   let lastReaction = '👀';
   let stopped = false;
 
@@ -314,12 +318,7 @@ async function processNumbers(ctx, numbersList) {
       await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
       const reward = await qualifyReferral(ctx.from.id);
       if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '🎁 <b>ʜᴀᴅɪᴀʜ ʀᴇғᴇʀᴀʟ ᴅɪᴛᴇʀɪᴍᴀ!</b>\n\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>', { parse_mode: 'HTML' }).catch(() => {});
-      const currentUser = await getEffectiveUser(ctx);
-      await ctx.reply(renderCooldownCard({
-        result,
-        user: currentUser,
-        isVip: owner || isUserVip(currentUser)
-      }), { parse_mode: 'HTML' });
+      detectionResults.push({ number: result.formattedNumber, result });
     } catch (err) {
       stats.error += 1;
       lastReaction = '⚠️';
@@ -329,25 +328,22 @@ async function processNumbers(ctx, numbersList) {
         : /429|rate.?limit|too many/i.test(err && err.message || '')
           ? 'sᴇʀᴠᴇʀ sᴇᴅᴀɴɢ ᴍᴇᴍʙᴀᴛᴀsɪ ᴘᴇʀᴍɪɴᴛᴀᴀɴ. ᴛᴜɴɢɢᴜ sᴇʙᴇɴᴛᴀʀ sᴇʙᴇʟᴜᴍ ᴍᴇɴᴄᴏʙᴀ ʟᴀɢɪ.'
           : 'ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴘʀᴏsᴇs. sɪʟᴀᴋᴀɴ ᴄᴏʙᴀ ʟᴀɢɪ ɴᴀɴᴛɪ.';
-      await ctx.reply('⚠️ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ɢᴀɢᴀʟ</b>\nɴᴏᴍᴏʀ ⦂ <code>' + escapeHtml(rawNumber) + '</code>\n' + detail, { parse_mode: 'HTML' });
+      detectionResults.push({ number: rawNumber, error: true, detail });
     }
     completed += 1;
     stage = 'Memperbarui hasil pemeriksaan';
-    await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, ++frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
+    await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, stats, ++frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
   }
 
-  if (vip && numbersList.length > 1) {
-    await ctx.reply(
-      '✦ <b>ʀɪɴɢᴋᴀsᴀɴ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b> ✦\n\nᴛᴏᴛᴀʟ ⦂ <code>' + numbersList.length +
-      '</code>\nSiap: <code>' + stats.ready + '</code>\nCooldown: <code>' + stats.cooldown +
-      '</code>\nDiblokir: <code>' + stats.banned + '</code>\nGagal: <code>' + stats.error + '</code>',
-      { parse_mode: 'HTML' }
-    );
-  }
+
   clearInterval(timer);
   await redis.del(stopKey).catch(() => {});
-  const finalText = (stopped ? '⏹ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴅɪʜᴇɴᴛɪᴋᴀɴ</b>' : '✓ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>') + '\n\n' + buildProgressText(completed, numbersList.length, stopped ? 'Dihentikan oleh pengguna' : 'Seluruh target selesai') + '\n\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + (stats.ready + stats.cooldown + stats.banned) + '</b> · ⚠ ɢᴀɢᴀʟ ⦂ <b>' + stats.error + '</b>';
+  const finalText = (stopped ? '× <b>ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ</b>' : '✓ <b>ᴅᴇᴛᴇᴄᴛ sᴇʟᴇsᴀɪ</b>') + '\n\n' + buildProgressText(completed, numbersList.length, stopped ? 'ᴅɪʜᴇɴᴛɪᴋᴀɴ ᴘᴇɴɢɢᴜɴᴀ' : 'sᴇʟᴜʀᴜʜ ᴛᴀʀɢᴇᴛ sᴇʟᴇsᴀɪ', stats);
   await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, finalText, { parse_mode: 'HTML' }).catch(() => {});
+  await ctx.reply(renderDetectionSummary({
+    results: detectionResults,
+    elapsedSeconds: Math.ceil((Date.now() - startedAt) / 1000)
+  }), { parse_mode: 'HTML' });
   if (ctx.message && ctx.message.message_id) {
     ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, [{ type: 'emoji', emoji: lastReaction }]).catch(() => {});
   }
@@ -356,9 +352,9 @@ async function processNumbers(ctx, numbersList) {
 bot.on('text', async (ctx) => {
   const text = ctx.message.text.trim();
   if (!text || text.startsWith('/')) return;
-  if (text === '⌕ DETECT' || text === '⌕ Detect' || text === 'Detect') {
+  if (text === '⌖ DETECT' || text === '⌖ Detect' || text === 'Detect') {
     return ctx.reply(
-      '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n⚠︎ ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴊɪᴋᴀ ʙᴀɴʏᴀᴋ ⚠︎\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>6282298902274\n6281234567890</code>',
+      '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>6282298902274\n6281234567890</code>',
       { parse_mode: 'HTML' }
     );
   }
