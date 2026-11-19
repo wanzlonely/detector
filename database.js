@@ -265,21 +265,19 @@ async function getReferralStats(telegramId) {
 }
 
 async function getLeaderboard(limit = 10) {
-  let ids = await redis.zrange('leaderboard:checks', 0, Math.max(0, limit - 1), { rev: true });
-  if (!ids || !ids.length) {
+  const migrationKey = 'leaderboard:migrated:v1';
+  const migrated = await redis.get(migrationKey);
+  if (!migrated) {
     const all = await redis.smembers('users:all');
-    ids = [];
     for (const id of all || []) {
       const user = await redis.get('user:' + id);
       if (!user) continue;
       const score = Number(user.total_checks || 0);
-      if (score > 0) {
-        await redis.zadd('leaderboard:checks', { score, member: String(id) });
-        ids.push(String(id));
-      }
+      if (score > 0) await redis.zadd('leaderboard:checks', { score, member: String(id) });
     }
-    ids = await redis.zrange('leaderboard:checks', 0, Math.max(0, limit - 1), { rev: true });
+    await redis.set(migrationKey, '1');
   }
+  const ids = await redis.zrange('leaderboard:checks', 0, Math.max(0, limit - 1), { rev: true });
   const rows = [];
   for (const id of ids || []) {
     const user = await redis.get('user:' + id);
