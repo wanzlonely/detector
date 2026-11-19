@@ -25,7 +25,7 @@ const OWNER_KEYBOARD = Markup.keyboard([
   [{ text: '⌕ DETECT' }, { text: '✧ BELI PREMIUM' }],
   [{ text: '◈ STATUS' }, { text: '🏆 LEADERBOARD' }],
   [{ text: '🎁 REFERRAL' }],
-  [{ text: '⌂ DASHBOARD' }, { text: '♛ OWNER CONSOLE' }],
+  [{ text: '♛ OWNER CONSOLE' }],
   [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
 ]).resize().persistent().placeholder('Pilih fungsi owner…');
 
@@ -80,7 +80,6 @@ function buildStoreKeyboard() {
       Markup.button.callback(pkg.durationLabel + ' · ' + formatIDR(pkg.price), 'pkg:' + pkg.id)
     ));
   }
-  rows.push([Markup.button.callback('⌂ DASHBOARD', 'home')]);
   return Markup.inlineKeyboard(rows);
 }
 async function showStore(ctx, edit) {
@@ -97,8 +96,7 @@ async function showPackage(ctx, pkg, edit) {
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id)],
     [
-      Markup.button.callback('← KEMBALI KE PAKET', 'store:premium'),
-      Markup.button.callback('⌂ DASHBOARD', 'home')
+      Markup.button.callback('← KEMBALI KE PAKET', 'store:premium')
     ]
   ]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
@@ -111,8 +109,7 @@ async function showCheckout(ctx, pkg, edit) {
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback('✉ HUBUNGI ADMIN', 'contact:' + pkg.id)],
     [
-      Markup.button.callback('← PILIH PAKET LAIN', 'store:' + pkg.tier),
-      Markup.button.callback('⌂ DASHBOARD', 'home')
+      Markup.button.callback('← PILIH PAKET LAIN', 'store:' + pkg.tier)
     ]
   ]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
@@ -188,7 +185,7 @@ bot.hears('🎁 REFERRAL', showReferral);
 
 bot.hears('⌂ DASHBOARD', showHome);
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES TIDAK DIIZINKAN</b>\\nFitur ini hanya tersedia untuk akun Owner MetaDetect.');
   const stats = await getGlobalStats();
   return ctx.reply('♛ <b>OWNER CONSOLE</b>\n\nPengguna: <code>' + stats.totalUsers + '</code>\nPremium aktif: <code>' + stats.activeVip + '</code>\nTotal pemeriksaan: <code>' + stats.totalChecks + '</code>\nDataImpulse: <code>' + (isDataImpulseConfigured() ? 'TERHUBUNG' : 'BELUM DIATUR') + '</code>', { parse_mode: 'HTML' });
 });
@@ -367,7 +364,7 @@ bot.on('text', async (ctx) => {
   }
   if (text === '/cancel' || text.toUpperCase() === 'BATAL') {
     if (isOwner(ctx)) await clearOwnerAction(ctx.from.id);
-    return ctx.reply('Aksi dibatalkan.');
+    return ctx.reply('✕ <b>PROSES DIBATALKAN</b>\\nTidak ada perubahan yang dilakukan. Kamu dapat memilih menu lain kapan saja.');
   }
   if (isOwner(ctx)) {
     const action = await getOwnerAction(ctx.from.id);
@@ -394,7 +391,7 @@ bot.on('text', async (ctx) => {
           console.error('[broadcast]', uid, err && err.message || err);
         }
       }
-      return ctx.reply('Pengumuman terkirim ke ' + sent + ' pengguna.');
+      return ctx.reply('✦ <b>BROADCAST SELESAI</b>\\n\\n◉ Berhasil terkirim: <b>' + sent + '</b> dari <b>' + stats.allUserIds.length + '</b> pengguna.\\n<i>Akun yang memblokir bot atau tidak dapat menerima pesan mungkin tidak terjangkau.</i>');
     }
   }
 
