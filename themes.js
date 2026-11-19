@@ -6,9 +6,9 @@ function escapeHtml(str = '') {
 }
 
 const VARIANT_PREFIX = {
-  primary: '⚡ ',
-  success: '✅ ',
-  danger: '🛡 '
+  primary: '⌖ ',
+  success: '✓ ',
+  danger: '⛨ '
 };
 
 function btn(text, callback_data, variant = null) {
@@ -149,7 +149,7 @@ function renderStatus({ user, isVip, isOwner = false, referralStats }) {
     '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + Number(user.total_checks || 0).toLocaleString('id-ID') + ' ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>',
     '▸ ᴍᴀsᴀ ᴀᴋᴛɪғ ⦂ <b>' + escapeHtml(expiry) + '</b>',
     '',
-    '🎁 <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀᴀʟ</b>',
+    '♧ <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀᴀʟ</b>',
     '▸ ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ⦂ <b>' + Number(referralStats.total || 0) + ' / 10</b>',
     '▸ ʜᴀᴅɪᴀʜ ᴅɪᴛᴇʀɪᴍᴀ ⦂ <b>' + Number(referralStats.rewarded || 0) + ' ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>',
     '',
@@ -179,7 +179,7 @@ function renderLeaderboard(rows) {
   ].join('\n');
 }function renderReferral({ link, stats }) {
   return [
-    '🎁 <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀᴀʟ & ʜᴀᴅɪᴀʜ</b>',
+    '♧ <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀᴀʟ & ʜᴀᴅɪᴀʜ</b>',
     '<i>ᴀᴊᴀᴋ ᴛᴇᴍᴀɴ · ᴋᴜᴍᴘᴜʟᴋᴀɴ ᴘʀᴇᴍɪᴜᴍ</i>',
     '',
     '✦ <b>ᴄᴀʀᴀ ᴍᴇɴᴅᴀᴘᴀᴛᴋᴀɴ ʜᴀᴅɪᴀʜ</b>',
