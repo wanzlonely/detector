@@ -278,7 +278,6 @@ async function getLeaderboard(limit = 10) {
         ids.push(String(id));
       }
     }
-    ids.sort(async () => 0);
     ids = await redis.zrange('leaderboard:checks', 0, Math.max(0, limit - 1), { rev: true });
   }
   const rows = [];
