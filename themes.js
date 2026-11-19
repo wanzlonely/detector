@@ -107,84 +107,81 @@ function formatDateWIB(unixSec) {
 }
 
 function renderDashboard({ user, isVip, isOwner = false, brandName }) {
-  const t = getTheme(user.theme);
   const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
   const tier = isOwner ? 'OWNER ACCESS' : !isVip
-    ? 'FREE ACCESS'
+    ? 'AKSES GRATIS'
     : String(user.vip_tier).toUpperCase() === 'ULTRA'
       ? 'PREMIUM ULTRA'
       : 'PREMIUM STANDARD';
   const quota = isOwner
-    ? 'UNLIMITED · OWNER PRIVILEGES'
+    ? 'TANPA BATAS · AKSES OWNER'
     : isVip
-      ? `UNLIMITED · BULK ${user.bulk_limit || 10}/BATCH · EXP ${formatDateWIB(user.vip_until)}`
-      : `${remaining}/3 CHECKS LEFT · RESET 00:00 WIB`;
-  const identity = escapeHtml(user.full_name || 'User');
-  const header =
-    `✧ <b>${escapeHtml(brandName || 'META DETECT')}</b>\n` +
-    `<i>ADVANCED WHATSAPP TELEMETRY</i>\n` +
-    `<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
-  const account =
-    `<blockquote>◈ <b>ACCOUNT OVERVIEW</b>\n` +
-    `◦ Identity  <b>${identity}</b>\n` +
-    `◦ Telegram  <code>${user.telegram_id}</code>\n` +
-    `◦ Access    <b>${tier}</b>\n` +
-    `◦ Quota     <code>${quota}</code>\n` +
-    `◦ Total     <code>${Number(user.total_checks || 0)} checks</code></blockquote>\n\n`;
-  const guide =
-    `<blockquote>⌁ <b>QUICK TELEMETRY GUIDE</b>\n` +
-    `1. Tekan <b>Detect</b> atau kirim nomor langsung.\n` +
-    `2. Gunakan format internasional, contoh <code>6282298902274</code>.\n` +
-    `3. Untuk bulk, pisahkan setiap nomor dengan baris baru sesuai limit akun.\n` +
-    `4. Hasil pemeriksaan ditampilkan otomatis setelah proses selesai.</blockquote>\n\n`;
-  const footer = `<i>◈ SECURE SESSION · ${isOwner ? 'OWNER MODE' : 'TELEMETRY READY'}</i>`;
-  return header + account + guide + footer;
+      ? 'TANPA BATAS · MAKS. ' + (user.bulk_limit || 10) + ' NOMOR / KIRIM · AKTIF S/D ' + formatDateWIB(user.vip_until)
+      : remaining + '/3 PEMERIKSAAN TERSISA · RESET 00.00 WIB';
+  const identity = escapeHtml(user.full_name || 'Pengguna');
+  return [
+    '✧ <b>' + escapeHtml(brandName || 'META DETECT') + '</b>',
+    '<i>ADVANCED WHATSAPP TELEMETRY</i>',
+    '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '',
+    '◈ <b>PROFIL AKUN</b>',
+    '✦ Nama        <b>' + identity + '</b>',
+    '⌁ ID Telegram <code>' + user.telegram_id + '</code>',
+    '♛ Akses       <b>' + tier + '</b>',
+    '◉ Kuota       <code>' + escapeHtml(quota) + '</code>',
+    '⌗ Aktivitas   <code>' + Number(user.total_checks || 0) + ' pemeriksaan</code>',
+    '',
+    '⌁ <b>PANDUAN SINGKAT</b>',
+    '① Tekan <b>DETECT</b> atau kirim nomor langsung.',
+    '② Gunakan kode negara, contoh <code>6282298902274</code>.',
+    '③ Untuk pemeriksaan massal, pisahkan nomor dengan baris baru sesuai batas akun.',
+    '④ Hasil akan dikirim otomatis setelah pemeriksaan selesai.',
+    '',
+    '<i>◈ SISTEM AKTIF · ' + (isOwner ? 'MODE OWNER' : 'SESI PENGGUNA') + '</i>'
+  ].join('\n');
 }
 
 function renderStoreCatalog({ user, activeTier, packages }) {
-  const t = getTheme(user.theme);
   const isUltra = activeTier === 'ultra';
-
-  const tierTitle = isUltra ? '👑 PREMIUM ULTRA CATALOG' : '⚡ PREMIUM STANDARD CATALOG';
-  const tierSubtitle = isUltra
-    ? 'Kasta tertinggi dengan kapasitas Bulk 30 nomor, rotasi IP prioritas & Batch Analytics.'
-    : 'Akses unlimited harian, kecepatan penuh & Bulk Check hingga 10 nomor sekaligus.';
-
-  const specBlock = isUltra
-    ? `<blockquote>` +
-      `${t.bullet} <b>Daily Limit:</b> <code>UNLIMITED CHECKS</code>\n` +
-      `${t.bullet} <b>Bulk Capacity:</b> <code>30 Nomor / Kirim</code>\n` +
-      `${t.bullet} <b>IP Rotation:</b> <code>Priority 7x Auto-Rotate</code>\n` +
-      `${t.bullet} <b>Extra Perks:</b> <code>Batch Summary Report + Crown Badge</code>` +
-      `</blockquote>\n\n`
-    : `<blockquote>` +
-      `${t.bullet} <b>Daily Limit:</b> <code>UNLIMITED CHECKS</code>\n` +
-      `${t.bullet} <b>Bulk Capacity:</b> <code>10 Nomor / Kirim</code>\n` +
-      `${t.bullet} <b>IP Rotation:</b> <code>DataImpulse 5x Auto-Rotate</code>\n` +
-      `${t.bullet} <b>Extra Perks:</b> <code>Priority queue & expanded bulk capacity</code>` +
-      `</blockquote>\n\n`;
-
-  const listItems = packages
-    .map((pkg) => {
-      const perDay = Math.round(pkg.price / pkg.duration_days);
-      return (
-        `${t.bullet} <b>${escapeHtml(pkg.durationLabel)}</b> — <code>${formatIDR(pkg.price)}</code> [<code>${pkg.tag}</code>]\n` +
-        `   <i>Hanya ${formatIDR(perDay)}/hari · ${escapeHtml(pkg.highlight)}</i>`
-      );
-    })
-    .join('\n\n');
-
-  return (
-    `${t.mark} <b>${tierTitle}</b>\n` +
-    `<i>${tierSubtitle}</i>\n\n` +
-    specBlock +
-    `<blockquote expandable>` +
-    `<b>📦 DAFTAR PAKET ${isUltra ? 'ULTRA' : 'STANDARD'} (TAP TO EXPAND)</b>\n` +
-    `${t.divider}\n` +
-    listItems +
-    `</blockquote>\n\n` +
-    `<i>Pilih salah satu durasi paket di bawah untuk melihat kartu rincian & aktivasi:</i>`
-  );
+  const title = isUltra ? '♛ PREMIUM ULTRA' : '✧ PREMIUM STANDARD';
+  const subtitle = isUltra
+    ? 'Performa tertinggi untuk pemeriksaan berskala besar.'
+    : 'Akses premium untuk penggunaan harian yang lebih leluasa.';
+  const features = isUltra
+    ? [
+        'Pemeriksaan tanpa batas selama masa aktif',
+        'Maksimal 30 nomor dalam satu kiriman',
+        'Jalur rotasi proxy prioritas',
+        'Ringkasan hasil pemeriksaan massal',
+        'Dirancang untuk penggunaan intensif'
+      ]
+    : [
+        'Pemeriksaan tanpa batas selama masa aktif',
+        'Maksimal 10 nomor dalam satu kiriman',
+        'Rotasi proxy otomatis',
+        'Akses premium Standard',
+        'Cocok untuk penggunaan rutin'
+      ];
+  const packageLines = packages.map((pkg, index) => {
+    const perDay = Math.round(pkg.price / pkg.duration_days);
+    return (index + 1) + '. <b>' + escapeHtml(pkg.durationLabel) + '</b>  ·  <b>' +
+      formatIDR(pkg.price) + '</b>  <i>' + escapeHtml(pkg.tag) + '</i>\n   <i>Sekitar ' +
+      formatIDR(perDay) + ' per hari</i>';
+  }).join('\n\n');
+  return [
+    title + '  /  KATALOG PAKET',
+    '<i>' + subtitle + '</i>',
+    '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '',
+    '◈ <b>KEUNGGULAN PAKET</b>',
+    ...features.map((feature) => '✦ ' + feature),
+    '',
+    '▤ <b>PILIH DURASI</b>',
+    '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    packageLines,
+    '',
+    '<i>Pilih salah satu paket melalui tombol di bawah.</i>'
+  ].join('\n');
 }
 
 function renderPackageDetailCard({ user, pkg }) {
