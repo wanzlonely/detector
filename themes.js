@@ -107,43 +107,31 @@ function formatDateWIB(unixSec) {
 }
 
 function renderDashboard({ user, isVip, isOwner = false, brandName }) {
-  const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
-  const access = isOwner ? '♛ OWNER ACCESS' : isVip ? '✦ PREMIUM MEMBER' : '◈ FREE MEMBER';
-  const quota = isOwner ? 'TANPA BATAS · AKSES OWNER' : isVip ? 'TANPA BATAS · 10 NOMOR / KIRIM' : remaining + ' DARI 3 PEMERIKSAAN';
   const identity = escapeHtml(user.full_name || 'Pengguna');
-  const username = user.username && user.username !== '-' ? '@' + escapeHtml(user.username) : 'Belum tersedia';
-  const totalCount = Number(user.total_checks || 0);
-  const total = totalCount.toLocaleString('id-ID');
-  const level = isOwner ? 'OWNER' : isVip ? 'PREMIUM' : totalCount >= 100 ? 'ADVANCED' : totalCount >= 25 ? 'ACTIVE' : 'REGULER';
+  const username = user.username && user.username !== '-' ? '@' + escapeHtml(user.username) : 'Tidak tersedia';
+  const total = Number(user.total_checks || 0).toLocaleString('id-ID');
+  const access = isOwner ? 'ᴏᴡɴᴇʀ ᴀᴄᴄᴇss' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : 'ғʀᴇᴇ ᴍᴇᴍʙᴇʀ';
+  const quota = isOwner ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs · ᴏᴡɴᴇʀ' : isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : Math.max(0, 3 - Number(user.free_used_today || 0)) + ' / 3 ᴛᴇʀsɪsᴀ';
+  const level = isOwner ? 'ᴏᴡɴᴇʀ' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : total >= 100 ? 'ᴀᴄᴛɪᴠᴇ' : 'ʀᴇɢᴜʟᴇʀ';
   return [
-    '✦ <b>' + escapeHtml(brandName || 'META DETECT') + '</b>',
-    '<i>WHATSAPP TELEMETRY · SMART DETECTION</i>',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '✦ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ</b> ✦',
+    '<i>ᴀᴅᴠᴀɴᴄᴇᴅ ᴡʜᴀᴛsᴀᴘᴘ ᴛᴇʟᴇᴍᴇᴛʀʏ</i>',
     '',
-    '╭─ <b>PROFIL & STATUS AKUN</b>',
-    '│',
-    '├ ✧ Nama        : <b>' + identity + '</b>',
-    '├ ◉ Username   : <b>' + username + '</b>',
-    '├ ⌁ Telegram ID: <code>' + user.telegram_id + '</code>',
-    '├ ♛ Hak akses  : <b>' + access + '</b>',
-    '├ ◈ Kuota      : <b>' + escapeHtml(quota) + '</b>',
-    '├ ⌗ Total      : <b>' + total + ' nomor</b>',
-    '├ ◆ Level      : <b>' + level + '</b>',
-    '╰─',
+    '⚙ <b>sᴛᴀᴛᴜs ᴀᴋᴜɴ</b>',
+    '▸ ɴᴀᴍᴀ ⦂ <b>' + identity + '</b>',
+    '▸ ᴜsᴇʀ ⦂ <b>' + username + '</b>',
+    '▸ ɪᴅ ⦂ <code>' + user.telegram_id + '</code>',
+    '▸ ᴀᴋsᴇs ⦂ <b>' + access + '</b>',
+    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + escapeHtml(quota) + '</b>',
+    '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + total + ' ᴅᴇᴛᴇᴋsɪ</b>',
+    '▸ ʟᴇᴠᴇʟ ⦂ <b>' + level + '</b>',
     '',
-    '╭─ <b>PUSAT KENDALI</b>',
-    '├ ⌕ Deteksi    — periksa nomor WhatsApp',
-    '├ ✧ Premium    — lihat pilihan masa aktif',
-    '├ ◈ Status     — pantau statistik akun',
-    '├ 🏆 Peringkat  — lihat pengguna teraktif',
-    '╰ 🎁 Referral   — undang teman dan raih hadiah',
+    '⌁ <b>ᴘᴜsᴀᴛ ᴋᴏɴᴛʀᴏʟ</b>',
+    'ᴘɪʟɪʜ ᴍᴇɴᴜ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴜʟᴀɪ ᴍᴇɴᴅᴇᴛᴇᴋsɪ, ᴍᴇʟɪʜᴀᴛ sᴛᴀᴛɪsᴛɪᴋ, ᴀᴛᴀᴜ ᴍᴇɴɢᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ.',
     '',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
-    '<i>◈ SISTEM SIAP · ' + (isOwner ? 'OWNER MODE' : isVip ? 'PREMIUM MODE' : 'FREE MODE') + '</i>'
-  ].join('\n');
-}
-
-function renderStatus({ user, isVip, isOwner = false, referralStats }) {
+    '◈ sɪsᴛᴇᴍ ᴀᴋᴛɪꜰ'
+  ].join('\\n');
+}function renderStatus({ user, isVip, isOwner = false, referralStats }) {
   const used = Number(user.free_used_today || 0);
   const remaining = Math.max(0, 3 - used);
   const expiry = isOwner ? 'Tidak terbatas' : isVip ? formatDateWIB(user.vip_until) : 'Belum berlangganan';
@@ -171,21 +159,22 @@ function renderStatus({ user, isVip, isOwner = false, referralStats }) {
 function renderLeaderboard(rows) {
   const medals = ['🥇', '🥈', '🥉'];
   const lines = rows.length
-    ? rows.map((row, index) => (medals[index] || '▫️') + ' <b>' + (index + 1) + '. ' + escapeHtml(row.full_name || 'Pengguna') + '</b>\n    <code>' + Number(row.total_checks || 0).toLocaleString('id-ID') + '</code> pemeriksaan').join('\n')
-    : 'Belum ada aktivitas yang tercatat. Jadilah pengguna pertama di papan peringkat!';
+    ? rows.slice(0, 10).map((row, index) => {
+        const rank = String(index + 1).padStart(2, '0');
+        const medal = medals[index] || rank;
+        const name = escapeHtml(row.full_name || 'Pengguna');
+        const count = Number(row.total_checks || 0).toLocaleString('id-ID');
+        return medal + ' ✧ <b>' + name + '</b>\\n      └ <b>' + count + '</b> ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
+      }).join('\\n\\n')
+    : 'Belum ada data pemeriksaan. Jadilah pengguna pertama di papan peringkat!';
   return [
-    '🏆 <b>PAPAN PERINGKAT DETECTOR</b>',
-    '<i>10 pengguna paling aktif di MetaDetect</i>',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '♛ <b>𝗧𝗢𝗣 𝟭𝟬 𝗗𝗘𝗧𝗘𝗖𝗧𝗢𝗥 • 𝗠𝗘𝗧𝗔𝗗𝗘𝗧𝗘𝗖𝗧</b> ♛',
     '',
     lines,
     '',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
-    '<i>♧ Peringkat dihitung dari total pemeriksaan yang tercatat.</i>'
-  ].join('\n');
-}
-
-function renderReferral({ link, stats }) {
+    '♧ sᴛᴀᴛᴜs ᴅɪ ᴀᴛᴀs ᴀᴅᴀʟᴀʜ ᴜsᴇʀ ʏᴀɴɢ ᴘᴀʟɪɴɢ ɢᴏᴋɪʟ 🥴'
+  ].join('\\n');
+}function renderReferral({ link, stats }) {
   return [
     '🎁 <b>PROGRAM REFERAL & HADIAH</b>',
     '<i>Bagikan MetaDetect. Ajak teman. Kumpulkan Premium.</i>',
