@@ -106,45 +106,39 @@ function formatDateWIB(unixSec) {
   );
 }
 
-function renderDashboard({ user, isVip, brandName }) {
+function renderDashboard({ user, isVip, isOwner = false, brandName }) {
   const t = getTheme(user.theme);
-  const sisaFree = Math.max(0, 3 - Number(user.free_used_today || 0));
-  const tierName = String(user.vip_tier || 'FREE').toUpperCase();
-  const tierBadge = !isVip
-    ? '🆓 FREE TIER'
-    : tierName === 'ULTRA'
-      ? `👑 PREMIUM ULTRA · ${user.vip_plan}`
-      : `⚡ PREMIUM STANDARD · ${user.vip_plan}`;
-
-  const quotaDisplay = isVip
-    ? `UNLIMITED (Bulk ${user.bulk_limit || 10}/batch) · Exp ${formatDateWIB(user.vip_until)}`
-    : `${sisaFree} / 3 Cek Tersisa (Reset 00:00 WIB)`;
-
+  const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
+  const tier = isOwner ? 'OWNER ACCESS' : !isVip
+    ? 'FREE ACCESS'
+    : String(user.vip_tier).toUpperCase() === 'ULTRA'
+      ? 'PREMIUM ULTRA'
+      : 'PREMIUM STANDARD';
+  const quota = isOwner
+    ? 'UNLIMITED · OWNER PRIVILEGES'
+    : isVip
+      ? `UNLIMITED · BULK ${user.bulk_limit || 10}/BATCH · EXP ${formatDateWIB(user.vip_until)}`
+      : `${remaining}/3 CHECKS LEFT · RESET 00:00 WIB`;
+  const identity = escapeHtml(user.full_name || 'User');
   const header =
-    `${t.mark} <b>${escapeHtml(brandName)}</b>\n` +
-    `<i>${t.tagline}</i>\n` +
-    `${t.divider}\n\n`;
-
-  const profileBlock =
-    `<blockquote>` +
-    `${t.bullet} <b>Account:</b> ${escapeHtml(user.full_name)} (<code>${user.telegram_id}</code>)\n` +
-    `${t.bullet} <b>Membership:</b> <code>${escapeHtml(tierBadge)}</code>\n` +
-    `${t.bullet} <b>Daily Quota:</b> <code>${quotaDisplay}</code>\n` +
-    `${t.bullet} <b>Total Checks:</b> <code>${Number(user.total_checks || 0)}x</code>\n` +
-    `${t.bullet} <b>Interface:</b> <code>${t.label}</code> · Blur: <code>${user.privacy_mode ? 'ON' : 'OFF'}</code>` +
-    `</blockquote>\n\n`;
-
-  const expandableGuide =
-    `<blockquote expandable>` +
-    `<b>🧭 QUICK TELEMETRY GUIDE</b>\n` +
-    `${t.divider}\n` +
-    `1. Kirim nomor format internasional (contoh: <code>6282298902274</code>) langsung ke chat ini.\n` +
-    `2. IP Proxy DataImpulse otomatis dirotasi setiap proses & saat terjadi limit.\n` +
-    `3. Paket <b>Standard</b> membuka Bulk Check hingga 10 nomor; paket <b>Ultra</b> hingga 30 nomor + Batch Summary.\n` +
-    `4. Buka <b>Themes & UI</b> untuk mengubah tema kartu dan sensor privasi.` +
-    `</blockquote>`;
-
-  return header + profileBlock + expandableGuide;
+    `✧ <b>${escapeHtml(brandName || 'META DETECT')}</b>\n` +
+    `<i>ADVANCED WHATSAPP TELEMETRY</i>\n` +
+    `<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>\n\n`;
+  const account =
+    `<blockquote>◈ <b>ACCOUNT OVERVIEW</b>\n` +
+    `◦ Identity  <b>${identity}</b>\n` +
+    `◦ Telegram  <code>${user.telegram_id}</code>\n` +
+    `◦ Access    <b>${tier}</b>\n` +
+    `◦ Quota     <code>${quota}</code>\n` +
+    `◦ Total     <code>${Number(user.total_checks || 0)} checks</code></blockquote>\n\n`;
+  const guide =
+    `<blockquote>⌁ <b>QUICK TELEMETRY GUIDE</b>\n` +
+    `1. Tekan <b>Detect</b> atau kirim nomor langsung.\n` +
+    `2. Gunakan format internasional, contoh <code>6282298902274</code>.\n` +
+    `3. Untuk bulk, pisahkan setiap nomor dengan baris baru sesuai limit akun.\n` +
+    `4. Hasil pemeriksaan ditampilkan otomatis setelah proses selesai.</blockquote>\n\n`;
+  const footer = `<i>◈ SECURE SESSION · ${isOwner ? 'OWNER MODE' : 'TELEMETRY READY'}</i>`;
+  return header + account + guide + footer;
 }
 
 function renderStoreCatalog({ user, activeTier, packages }) {
