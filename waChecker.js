@@ -48,9 +48,14 @@ async function checkWhatsAppCooldown(rawNumber) {
   const parsed = WADetector.parseDualResponse(payloads.phoneInfo, data.existText, data.codeText);
   let existResponse = {};
   try { existResponse = JSON.parse(data.existText || '{}'); } catch (_) {}
-  const smsAvailable = Object.prototype.hasOwnProperty.call(existResponse, 'send_sms_eligible')
-    ? Boolean(existResponse.send_sms_eligible)
-    : null;
+  const rawSmsEligible = existResponse.send_sms_eligible;
+  const smsAvailable = typeof rawSmsEligible === 'boolean'
+    ? rawSmsEligible
+    : rawSmsEligible === 0 || rawSmsEligible === '0'
+      ? false
+      : rawSmsEligible === 1 || rawSmsEligible === '1'
+        ? true
+        : null;
 
   return {
     formattedNumber: parsed.phone,
