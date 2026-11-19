@@ -1,7 +1,7 @@
 const WADetector = require('./waEngine');
 const { executeWithProxyRotation } = require('./proxyManager');
 
-const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 15000);
+const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 10000);
 
 function buildHeaders(userAgent) {
   return {
@@ -15,14 +15,15 @@ async function postWithTimeout(url, body, headers, dispatcher) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body,
-      dispatcher,
-      signal: controller.signal
-    });
-    return await res.text();
+    const res = await fetch(url, { method: 'POST', headers, body, dispatcher, signal: controller.signal });
+    const text = await res.text();
+    if (!res.ok) throw new Error('WhatsApp HTTP ' + res.status + ': ' + text.slice(0, 180));
+    if (!text) throw new Error('WhatsApp mengembalikan respons kosong.');
+    return text;
+  } catch (err) {
+    const cause = err && err.cause;
+    const detail = cause && (cause.code || cause.message) ? ' [' + (cause.code || cause.message) + ']' : '';
+    throw new Error((err && err.message || 'Permintaan jaringan gagal') + detail);
   } finally {
     clearTimeout(timer);
   }
