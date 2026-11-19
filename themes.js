@@ -280,7 +280,7 @@ function renderDetectionSummary({ results, elapsedSeconds }) {
     else if (item.result.isCloneBlocked) groups.clone.push(number);
     else if (item.result.anyCooldown) {
       const sms = item.result.channels && item.result.channels.sms;
-      const timer = sms && (sms.formatted || sms.humanTime || sms.uiTimer);
+      const timer = sms && (sms.formatted || sms.uiTimer || sms.humanTime);
       groups.cooldown.push(number + (timer ? ' — ' + escapeHtml(timer) : ''));
     } else if (item.result.smsAvailable === false) groups.smsUnavailable.push(number);
     else if (!item.result.isReady) groups.failed.push(number);
