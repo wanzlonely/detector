@@ -272,25 +272,28 @@ function renderPaymentMaintenanceCard({ pkg }) {
 }
 
 function renderDetectionSummary({ results, elapsedSeconds }) {
-  const groups = { cooldown: [], restricted: [], ready: [], failed: [] };
+  const groups = { cooldown: [], clone: [], smsUnavailable: [], restricted: [], failed: [] };
   for (const item of results) {
     const number = '<code>' + escapeHtml(item.number || '-') + '</code>';
     if (item.error) groups.failed.push(number);
     else if (item.result.isBanned) groups.restricted.push(number);
+    else if (item.result.isCloneBlocked) groups.clone.push(number);
     else if (item.result.anyCooldown) {
-      const timer = item.result.channels && item.result.channels.sms && item.result.channels.sms.humanTime;
-      groups.cooldown.push(number + (timer ? ' · ' + escapeHtml(timer) : ''));
-    } else groups.ready.push(number);
+      const sms = item.result.channels && item.result.channels.sms;
+      const timer = sms && (sms.formatted || sms.humanTime || sms.uiTimer);
+      groups.cooldown.push(number + (timer ? ' — ' + escapeHtml(timer) : ''));
+    } else if (item.result.smsAvailable === false) groups.smsUnavailable.push(number);
+    else if (!item.result.isReady) groups.failed.push(number);
   }
   return [
-    '✦ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>',
+    '⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>',
+    ...(groups.cooldown.length ? ['', '◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>', ...groups.cooldown] : []),
+    ...(groups.clone.length ? ['', '△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>', ...groups.clone] : []),
+    ...(groups.smsUnavailable.length ? ['', '✕ <b>ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>', ...groups.smsUnavailable] : []),
+    ...(groups.restricted.length ? ['', '⊘ <b>ᴅɪʙᴀᴛᴀsɪ</b>', ...groups.restricted] : []),
+    ...(groups.failed.length ? ['', '⚠ <b>ɢᴀɢᴀʟ ᴅɪᴘʀᴏsᴇs</b>', ...groups.failed] : []),
     '',
-    ...(groups.ready.length ? ['✧ ʙᴇʀʜᴀsɪʟ', ...groups.ready] : []),
-    ...(groups.cooldown.length ? ['', '↻ ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ', ...groups.cooldown] : []),
-    ...(groups.restricted.length ? ['', '⊘ sᴛᴀᴛᴜs ᴅɪʙᴀᴛᴀsɪ', ...groups.restricted] : []),
-    ...(groups.failed.length ? ['', '✕ ɢᴀɢᴀʟ ᴅɪᴘʀᴏsᴇs', ...groups.failed] : []),
-    '',
-    'sᴇʟᴇsᴀɪ ᴅᴀʟᴀᴍ ' + Math.max(0, Number(elapsedSeconds) || 0) + ' ᴅᴇᴛɪᴋ'
+    'ᴘʀᴏsᴇs ⟿ ' + Math.max(0, Number(elapsedSeconds) || 0) + 'd'
   ].join('\n');
 }
 
