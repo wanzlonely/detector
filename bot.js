@@ -198,7 +198,7 @@ bot.hears('🎁 REFERRAL', showReferral);
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴛɪᴅᴀᴋ ᴅɪɪᴢɪɴᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴏᴡɴᴇʀ ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ.');
   const stats = await getGlobalStats();
-  return ctx.reply('♛ <b>OWNER CONSOLE</b>\n\nPengguna: <code>' + stats.totalUsers + '</code>\nPremium aktif: <code>' + stats.activeVip + '</code>\nTotal pemeriksaan: <code>' + stats.totalChecks + '</code>\nDataImpulse: <code>' + (isDataImpulseConfigured() ? 'TERHUBUNG' : 'BELUM DIATUR') + '</code>', { parse_mode: 'HTML' });
+  return ctx.reply(renderOwnerConsole(stats), { parse_mode: 'HTML' });\n\nPengguna: <code>' + stats.totalUsers + '</code>\nPremium aktif: <code>' + stats.activeVip + '</code>\nTotal pemeriksaan: <code>' + stats.totalChecks + '</code>\nDataImpulse: <code>' + (isDataImpulseConfigured() ? 'TERHUBUNG' : 'BELUM DIATUR') + '</code>', { parse_mode: 'HTML' });
 });
 bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
@@ -208,7 +208,7 @@ bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
 bot.hears('▤ BROADCAST', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'broadcast');
-  return ctx.reply('▤ <b>BROADCAST</b>\nKirim isi pengumuman yang ingin disampaikan kepada semua pengguna.', { parse_mode: 'HTML' });
+  return ctx.reply('▤ <b>ᴍᴏᴅᴇ ʙʀᴏᴀᴅᴄᴀsᴛ</b>\\n\\nᴋɪʀɪᴍ ɪsɪ ᴘᴇɴɢᴜᴍᴜᴍᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴀᴍᴘᴀɪᴋᴀɴ ᴋᴇ sᴇᴍᴜᴀ ᴘᴇɴɢɢᴜɴᴀ.', { parse_mode: 'HTML' });\nKirim isi pengumuman yang ingin disampaikan kepada semua pengguna.', { parse_mode: 'HTML' });
 });
 bot.command('admin', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
@@ -259,7 +259,7 @@ function buildProgressText(done, total, stage, frame = 0) {
   const filled = Math.floor(percent / 10);
   const bar = '▰'.repeat(filled) + '▱'.repeat(10 - filled);
   const spinner = ['◐', '◓', '◑', '◒'][frame % 4];
-  return '⚡ <b>DETECT SEDANG BERJALAN</b>\n' + spinner + ' ' + stage +
+  return '⚡ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>\n' + spinner + ' ' + stage +
     '\n\n<code>' + bar + '</code> <b>' + percent + '%</b>' +
     '\nProgres: <b>' + done + ' / ' + total + '</b> nomor' +
     '\n<i>Hasil akan ditampilkan otomatis.</i>';
@@ -278,11 +278,11 @@ async function processNumbers(ctx, numbersList) {
   const premiumAccess = vip;
 
   if (numbersList.length > maxBatch) {
-    return ctx.reply('◈ <b>BATAS PEMERIKSAAN</b>\nAkun ini dapat memeriksa maksimal <b>' + maxBatch + ' nomor</b> dalam satu kiriman.', { parse_mode: 'HTML' });
+    return ctx.reply('◈ <b>ʙᴀᴛᴀs ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>\\nᴀᴋᴜɴᴍᴜ ᴅᴀᴘᴀᴛ ᴍᴇᴍᴇʀɪᴋsᴀ ᴍᴀᴋsɪᴍᴀʟ <b>' + maxBatch + ' ɴᴏᴍᴏʀ</b> ᴅᴀʟᴀᴍ sᴀᴛᴜ ᴋɪʀɪᴍᴀɴ.', { parse_mode: 'HTML' });\nAkun ini dapat memeriksa maksimal <b>' + maxBatch + ' nomor</b> dalam satu kiriman.', { parse_mode: 'HTML' });
   }
   if (!owner) {
     const allowed = await consumeQuota(ctx.from.id, numbersList.length);
-    if (!allowed) return ctx.reply('◈ <b>KUOTA HARIAN HABIS</b>\nKuota gratis 3 pemeriksaan sudah digunakan. Kuota diperbarui pukul 00.00 WIB.', { parse_mode: 'HTML' });
+    if (!allowed) return ctx.reply('◈ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\\nᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴᴍᴜ sᴜᴅᴀʜ ᴛᴇʀᴘᴀᴋᴀɪ. ᴋᴜᴏᴛᴀ ᴀᴋᴀɴ ᴅɪᴘᴇʀʙᴀʀᴜɪ ᴘᴜᴋᴜʟ 00.00 ᴡɪʙ.', { parse_mode: 'HTML' });\nKuota gratis 3 pemeriksaan sudah digunakan. Kuota diperbarui pukul 00.00 WIB.', { parse_mode: 'HTML' });
   } else {
     await incrementUserChecks(ctx.from.id, numbersList.length);
   }
@@ -337,7 +337,7 @@ async function processNumbers(ctx, numbersList) {
         : /429|rate.?limit|too many/i.test(err && err.message || '')
           ? 'sᴇʀᴠᴇʀ sᴇᴅᴀɴɢ ᴍᴇᴍʙᴀᴛᴀsɪ ᴘᴇʀᴍɪɴᴛᴀᴀɴ. ᴛᴜɴɢɢᴜ sᴇʙᴇɴᴛᴀʀ sᴇʙᴇʟᴜᴍ ᴍᴇɴᴄᴏʙᴀ ʟᴀɢɪ.'
           : 'ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴘʀᴏsᴇs. sɪʟᴀᴋᴀɴ ᴄᴏʙᴀ ʟᴀɢɪ ɴᴀɴᴛɪ.';
-      await ctx.reply('⚠️ <b>PEMERIKSAAN GAGAL</b>\nNomor: <code>' + escapeHtml(rawNumber) + '</code>\n' + detail, { parse_mode: 'HTML' });
+      await ctx.reply('⚠️ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ɢᴀɢᴀʟ</b>\\nɴᴏᴍᴏʀ ⦂ <code>' + escapeHtml(rawNumber) + '</code>\\n' + detail, { parse_mode: 'HTML' });\nNomor: <code>' + escapeHtml(rawNumber) + '</code>\n' + detail, { parse_mode: 'HTML' });
     }
     completed += 1;
     stage = 'Memperbarui hasil pemeriksaan';
@@ -402,7 +402,7 @@ bot.on('text', async (ctx) => {
           console.error('[broadcast]', uid, err && err.message || err);
         }
       }
-      return ctx.reply('✦ <b>BROADCAST SELESAI</b>\\n\\n◉ Berhasil terkirim: <b>' + sent + '</b> dari <b>' + stats.allUserIds.length + '</b> pengguna.\\n<i>Akun yang memblokir bot atau tidak dapat menerima pesan mungkin tidak terjangkau.</i>');
+      return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\\n\\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');\\n\\n◉ Berhasil terkirim: <b>' + sent + '</b> dari <b>' + stats.allUserIds.length + '</b> pengguna.\\n<i>Akun yang memblokir bot atau tidak dapat menerima pesan mungkin tidak terjangkau.</i>');
     }
   }
 
