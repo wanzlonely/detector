@@ -123,7 +123,7 @@ bot.start(async (ctx) => {
   const payload = String(ctx.startPayload || '');
   if (payload.startsWith('ref_')) {
     const registered = await registerReferral(ctx.from.id, payload.slice(4));
-    if (registered) await ctx.reply('🎁 Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh hadiah 1 hari Premium.');
+    if (registered) await ctx.reply('♧ Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh hadiah 1 hari Premium.');
   }
   return showHome(ctx);
 });
@@ -194,22 +194,22 @@ bot.hears('♛ LEADERBOARD', showLeaderboard);
 bot.hears('♧ REFERRAL', showReferral);
 
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴛɪᴅᴀᴋ ᴅɪɪᴢɪɴᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴏᴡɴᴇʀ ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ.');
+  if (!isOwner(ctx)) return ctx.reply('⊘ <b>ᴀᴋsᴇs ᴛɪᴅᴀᴋ ᴅɪɪᴢɪɴᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴏᴡɴᴇʀ ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ.');
   const stats = await getGlobalStats();
   return ctx.reply(renderOwnerConsole(stats), { parse_mode: 'HTML' });
 });
 bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
+  if (!isOwner(ctx)) return ctx.reply('⊘ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'activate');
   return ctx.reply(`✦ ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ ✦\n\nᴍᴀsᴜᴋᴋᴀɴ ɪᴅ ᴛᴇʟᴇɢʀᴀᴍ & ᴅᴜʀᴀsɪ ʜᴀʀɪ\nᴅᴇɴɢᴀɴ ᴘᴇᴍɪsᴀʜ sᴘᴀsɪ.\n\nᴄᴏɴᴛᴏʜ ⦂ <code>123456789 7</code>\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ`, { parse_mode: 'HTML' });
 });
 bot.hears('▤ BROADCAST', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
+  if (!isOwner(ctx)) return ctx.reply('⊘ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'broadcast');
   return ctx.reply('▤ <b>ᴍᴏᴅᴇ ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ɪsɪ ᴘᴇɴɢᴜᴍᴜᴍᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴀᴍᴘᴀɪᴋᴀɴ ᴋᴇ sᴇᴍᴜᴀ ᴘᴇɴɢɢᴜɴᴀ.', { parse_mode: 'HTML' });
 });
 bot.command('admin', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
+  if (!isOwner(ctx)) return ctx.reply('⊘ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
   const stats = await getGlobalStats();
   return ctx.reply(renderOwnerConsole(stats), { parse_mode: 'HTML' });
 });
@@ -317,7 +317,7 @@ async function processNumbers(ctx, numbersList) {
       lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
       await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
       const reward = await qualifyReferral(ctx.from.id);
-      if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '🎁 <b>ʜᴀᴅɪᴀʜ ʀᴇғᴇʀᴀʟ ᴅɪᴛᴇʀɪᴍᴀ!</b>\n\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>', { parse_mode: 'HTML' }).catch(() => {});
+      if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '♧ <b>ʜᴀᴅɪᴀʜ ʀᴇғᴇʀᴀʟ ᴅɪᴛᴇʀɪᴍᴀ!</b>\n\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>', { parse_mode: 'HTML' }).catch(() => {});
       detectionResults.push({ number: result.formattedNumber, result });
     } catch (err) {
       stats.error += 1;
@@ -331,7 +331,7 @@ async function processNumbers(ctx, numbersList) {
       detectionResults.push({ number: rawNumber, error: true, detail });
     }
     completed += 1;
-    stage = 'Memperbarui hasil pemeriksaan';
+    stage = 'ᴍᴇᴍᴘᴇʀʙᴀʀᴜɪ ʜᴀsɪʟ ᴅᴇᴛᴇᴄᴛ';
     await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, stats, ++frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
   }
 
