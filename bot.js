@@ -325,7 +325,7 @@ function extractPhoneNumbers(input) {
   } catch (err) {
     console.warn('[phone parser]', err && err.message || err);
   }
-  const candidates = source.match(/\+?\d[\d\s().-]{3,}\d|\+?\d{5,15}/g) || [];
+  const candidates = source.split(/\r?\n/).flatMap((line) => line.match(/\+?\d[\d \t().-]{3,}\d|\+?\d{5,15}/g) || []);
   for (const candidate of candidates) add(candidate);
   return results;
 }
@@ -349,7 +349,7 @@ async function processNumbers(ctx, numbersList) {
 
   const jobId = String(Date.now());
   const stopKey = 'detect:stop:' + ctx.from.id + ':' + jobId;
-  await redis.set('detect:active:' + ctx.from.id, jobId, { ex: 600 });
+  await redis.set('detect:active:' + ctx.from.id, jobId, { ex: 3600 });
   let completed = 0;
   const startedAt = Date.now();
   let stage = 'ᴍᴇɴʏɪᴀᴘᴋᴀɴ sᴇsɪ ᴅᴇᴛᴇᴄᴛ';
