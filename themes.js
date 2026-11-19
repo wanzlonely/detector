@@ -221,25 +221,6 @@ function renderPackageDetailCard({ user, pkg }) {
   ].join('\n');
 }
 function renderPaymentMaintenanceCard({ user, pkg }) {
-  const t = getTheme(user.theme);
-  const icon = pkg.tier === 'ultra' ? '👑' : '⚡';
-
-  return (
-    `${t.mark} <b>CHECKOUT & PAYMENT GATEWAY</b>\n\n` +
-    `<blockquote>` +
-    `${t.bullet} <b>Paket Dipilih:</b> ${icon} <b>${escapeHtml(pkg.tierLabel)} · ${escapeHtml(pkg.durationLabel)}</b>\n` +
-    `${t.bullet} <b>Total Tagihan:</b> <code>${formatIDR(pkg.price)}</code>\n` +
-    `${t.bullet} <b>Status Sistem:</b> <code>🚧 DALAM PROSES PENGERJAAN</code>` +
-    `</blockquote>\n\n` +
-    `<blockquote expandable>` +
-    `<b>🚧 INFORMASI SISTEM PEMBAYARAN</b>\n` +
-    `${t.divider}\n` +
-    `Modul pembayaran otomatis (QRIS & Virtual Account) sedang dalam tahap penyelesaian akhir oleh tim pengembang.\n\n` +
-    `Untuk pembelian paket saat ini, silakan hubungi Admin secara langsung agar akun Anda diaktifkan secara manual.` +
-    `</blockquote>`
-  );
-}
-function renderPaymentMaintenanceCard({ user, pkg }) {
   const isUltra = pkg.tier === 'ultra';
   return [
     '✧ <b>KONFIRMASI PEMBELIAN</b>',
