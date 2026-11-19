@@ -160,7 +160,7 @@ function renderStatus({ user, isVip, isOwner = false, referralStats }) {
 }
 
 function renderLeaderboard(rows) {
-  const medals = ['🥇', '🥈', '🥉'];
+  const medals = ['♛', '♜', '♞'];
   const lines = rows.length
     ? rows.slice(0, 10).map((row, index) => {
         const rank = String(index + 1).padStart(2, '0');
@@ -171,11 +171,11 @@ function renderLeaderboard(rows) {
       }).join('\n\n')
     : 'Belum ada data pemeriksaan. Jadilah pengguna pertama di papan peringkat!';
   return [
-    '♛ <b>𝗧𝗢𝗣 𝟭𝟬 𝗗𝗘𝗧𝗘𝗖𝗧𝗢𝗥 • 𝗠𝗘𝗧𝗔𝗗𝗘𝗧𝗘𝗖𝗧</b> ♛',
+    '♛ <b>ᴛᴏᴘ 𝟷𝟶 ᴅᴇᴛᴇᴄᴛᴏʀ • ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ</b> ♛',
     '',
     lines,
     '',
-    '♧ sᴛᴀᴛᴜs ᴅɪ ᴀᴛᴀs ᴀᴅᴀʟᴀʜ ᴜsᴇʀ ʏᴀɴɢ ᴘᴀʟɪɴɢ ɢᴏᴋɪʟ 🥴'
+    '♧ sᴛᴀᴛᴜs ᴅɪ ᴀᴛᴀs ᴀᴅᴀʟᴀʜ ᴜsᴇʀ ʏᴀɴɢ ᴘᴀʟɪɴɢ ɢᴏᴋɪʟ '
   ].join('\n');
 }function renderReferral({ link, stats }) {
   return [
@@ -266,6 +266,29 @@ function renderPaymentMaintenanceCard({ pkg }) {
   ].join('\n');
 }
 
+function renderDetectionSummary({ results, elapsedSeconds }) {
+  const groups = { cooldown: [], restricted: [], ready: [], failed: [] };
+  for (const item of results) {
+    const number = '<code>' + escapeHtml(item.number || '-') + '</code>';
+    if (item.error) groups.failed.push(number);
+    else if (item.result.isBanned) groups.restricted.push(number);
+    else if (item.result.anyCooldown) {
+      const timer = item.result.channels && item.result.channels.sms && item.result.channels.sms.humanTime;
+      groups.cooldown.push(number + (timer ? ' · ' + escapeHtml(timer) : ''));
+    } else groups.ready.push(number);
+  }
+  return [
+    '✦ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>',
+    '',
+    ...(groups.ready.length ? ['✧ ʙᴇʀʜᴀsɪʟ', ...groups.ready] : []),
+    ...(groups.cooldown.length ? ['', '↻ ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ', ...groups.cooldown] : []),
+    ...(groups.restricted.length ? ['', '⊘ sᴛᴀᴛᴜs ᴅɪʙᴀᴛᴀsɪ', ...groups.restricted] : []),
+    ...(groups.failed.length ? ['', '✕ ɢᴀɢᴀʟ ᴅɪᴘʀᴏsᴇs', ...groups.failed] : []),
+    '',
+    'sᴇʟᴇsᴀɪ ᴅᴀʟᴀᴍ ' + Math.max(0, Number(elapsedSeconds) || 0) + ' ᴅᴇᴛɪᴋ'
+  ].join('\n');
+}
+
 function renderCooldownCard({ result, user, isVip }) {
   const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
   const numberDisplay = formatSensitiveNumber(result.formattedNumber, Boolean(user.privacy_mode));
@@ -314,5 +337,6 @@ module.exports = {
   renderStoreCatalog,
   renderPackageDetailCard,
   renderPaymentMaintenanceCard,
-  renderCooldownCard
+  renderCooldownCard,
+  renderDetectionSummary
 };
