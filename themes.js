@@ -161,7 +161,7 @@ function renderStoreCatalog({ user, activeTier, packages }) {
       `${t.bullet} <b>Daily Limit:</b> <code>UNLIMITED CHECKS</code>\n` +
       `${t.bullet} <b>Bulk Capacity:</b> <code>10 Nomor / Kirim</code>\n` +
       `${t.bullet} <b>IP Rotation:</b> <code>DataImpulse 5x Auto-Rotate</code>\n` +
-      `${t.bullet} <b>Extra Perks:</b> <code>Full Theme Studio + Privacy Blur</code>` +
+      `${t.bullet} <b>Extra Perks:</b> <code>Priority queue & expanded bulk capacity</code>` +
       `</blockquote>\n\n`;
 
   const listItems = packages
@@ -199,7 +199,7 @@ function renderPackageDetailCard({ user, pkg }) {
         'Ultra Bulk Check hingga 30 nomor dalam 1 pesan',
         'Batch Analytics Summary (Ready / Cooldown / Banned)',
         'Priority DataImpulse IP Rotation (hingga 7x retry)',
-        'Akses penuh semua tema UI & Privacy Spoiler'
+        'Prioritas antrean dan dukungan operasional'
       ]
     : [
         'Unlimited pengecekan nomor selama masa aktif',
@@ -286,11 +286,13 @@ function renderCooldownCard({ result, user, isVip }) {
       ? 'COOLDOWN ACTIVE — Verifikasi SMS masih dalam masa tunggu.'
       : 'ALL CLEAR — Verifikasi SMS siap diproses.';
 
-  const tierFooter = !isVip
-    ? `QUOTA ${sisaFree}/3`
-    : String(user.vip_tier).toUpperCase() === 'ULTRA'
-      ? '👑 ULTRA UNLIMITED'
-      : '⚡ STANDARD UNLIMITED';
+  const tierFooter = String(user.vip_tier).toUpperCase() === 'OWNER'
+    ? '✧ OWNER UNLIMITED'
+    : !isVip
+      ? `QUOTA ${sisaFree}/3`
+      : String(user.vip_tier).toUpperCase() === 'ULTRA'
+        ? '♛ ULTRA UNLIMITED'
+        : '✧ STANDARD UNLIMITED';
 
   return (
     `${t.mark} <b>TELEMETRY REPORT</b>\n\n` +
