@@ -164,7 +164,7 @@ bot.hears('♛ OWNER CONSOLE', async (ctx) => {
 bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
   await setOwnerAction(ctx.from.id, 'activate');
-  return ctx.reply('✚ <b>AKTIVASI PREMIUM</b>\\nKirim dengan format <code>ID_TELEGRAM DURASI_HARI</code>.\\nContoh: <code>123456789 7</code>.\\nKetik /cancel untuk membatalkan.', { parse_mode: 'HTML' });
+  return ctx.reply('✚ <b>AKTIVASI PREMIUM</b>\\nKirim dengan format <code>ID_TELEGRAM DURASI_HARI</code>.\\nContoh: <code>123456789 7</code>.\\nKirim <code>BATAL</code> untuk membatalkan.', { parse_mode: 'HTML' });
 });
 bot.hears('▤ BROADCAST', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
@@ -296,7 +296,7 @@ bot.on('text', async (ctx) => {
   if (text === '✧ BELI PREMIUM' || text === '✧ Beli Premium' || text === 'Beli Premium') {
     return showStore(ctx, false);
   }
-  if (text === '/cancel') {
+  if (text === '/cancel' || text.toUpperCase() === 'BATAL') {
     if (isOwner(ctx)) await clearOwnerAction(ctx.from.id);
     return ctx.reply('Aksi dibatalkan.');
   }
