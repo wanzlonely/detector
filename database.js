@@ -6,116 +6,11 @@ const redis = new Redis({
 });
 
 const PACKAGES = [
-  {
-    id: 'std_1d',
-    tier: 'standard',
-    tierLabel: 'PREMIUM STANDARD',
-    duration_days: 1,
-    durationLabel: '1 Hari',
-    price: 3000,
-    tag: 'STARTER',
-    bulk_limit: 10,
-    highlight: 'Akses penuh 24 jam tanpa batas kuota harian.'
-  },
-  {
-    id: 'std_3d',
-    tier: 'standard',
-    tierLabel: 'PREMIUM STANDARD',
-    duration_days: 3,
-    durationLabel: '3 Hari',
-    price: 5000,
-    tag: 'HEMAT',
-    bulk_limit: 10,
-    highlight: 'Pilihan ekonomis untuk kebutuhan pengecekan 3 hari.'
-  },
-  {
-    id: 'std_7d',
-    tier: 'standard',
-    tierLabel: 'PREMIUM STANDARD',
-    duration_days: 7,
-    durationLabel: '7 Hari',
-    price: 10000,
-    tag: 'POPULER',
-    bulk_limit: 10,
-    highlight: 'Paling diminati untuk operasional mingguan.'
-  },
-  {
-    id: 'std_15d',
-    tier: 'standard',
-    tierLabel: 'PREMIUM STANDARD',
-    duration_days: 15,
-    durationLabel: '15 Hari',
-    price: 13000,
-    tag: 'PRO VALUE',
-    bulk_limit: 10,
-    highlight: 'Efisiensi biaya harian super rendah selama 15 hari.'
-  },
-  {
-    id: 'std_20d',
-    tier: 'standard',
-    tierLabel: 'PREMIUM STANDARD',
-    duration_days: 20,
-    durationLabel: '20 Hari',
-    price: 25000,
-    tag: 'LONG PASS',
-    bulk_limit: 10,
-    highlight: 'Durasi maksimal Standard dengan stabilitas penuh.'
-  },
-  {
-    id: 'ult_1d',
-    tier: 'ultra',
-    tierLabel: 'PREMIUM ULTRA',
-    duration_days: 1,
-    durationLabel: '1 Hari',
-    price: 6000,
-    tag: 'ULTRA TRIAL',
-    bulk_limit: 30,
-    highlight: 'Performa puncak Ultra & Bulk 30 nomor selama 24 jam.'
-  },
-  {
-    id: 'ult_3d',
-    tier: 'ultra',
-    tierLabel: 'PREMIUM ULTRA',
-    duration_days: 3,
-    durationLabel: '3 Hari',
-    price: 10000,
-    tag: 'ULTRA HEMAT',
-    bulk_limit: 30,
-    highlight: 'Kecepatan node prioritas & batch analytics 3 hari.'
-  },
-  {
-    id: 'ult_7d',
-    tier: 'ultra',
-    tierLabel: 'PREMIUM ULTRA',
-    duration_days: 7,
-    durationLabel: '7 Hari',
-    price: 18000,
-    tag: 'BEST SELLER',
-    bulk_limit: 30,
-    highlight: 'Keseimbangan terbaik kapasitas Ultra untuk 1 minggu.'
-  },
-  {
-    id: 'ult_15d',
-    tier: 'ultra',
-    tierLabel: 'PREMIUM ULTRA',
-    duration_days: 15,
-    durationLabel: '15 Hari',
-    price: 25000,
-    tag: 'ULTRA PRO',
-    bulk_limit: 30,
-    highlight: 'Kapasitas tinggi tanpa antrean selama 15 hari penuh.'
-  },
-  {
-    id: 'ult_20d',
-    tier: 'ultra',
-    tierLabel: 'PREMIUM ULTRA',
-    duration_days: 20,
-    durationLabel: '20 Hari',
-    price: 45000,
-    tag: 'APEX TIER',
-    bulk_limit: 30,
-    highlight: 'Kasta tertinggi dengan limit batch & rotasi IP maksimal.'
-  }
+  { id: 'std_1d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 1, durationLabel: '1 Hari', price: 3000, tag: 'STARTER', bulk_limit: 10, highlight: 'Akses Premium penuh selama 24 jam.' },
+  { id: 'std_3d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 3, durationLabel: '3 Hari', price: 5000, tag: 'HEMAT', bulk_limit: 10, highlight: 'Pilihan hemat untuk penggunaan beberapa hari.' },
+  { id: 'std_7d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 7, durationLabel: '7 Hari', price: 10000, tag: 'POPULER', bulk_limit: 10, highlight: 'Pilihan populer untuk aktivitas mingguan.' },
+  { id: 'std_15d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 15, durationLabel: '15 Hari', price: 13000, tag: 'PRO VALUE', bulk_limit: 10, highlight: 'Lebih hemat untuk penggunaan jangka menengah.' },
+  { id: 'std_20d', tier: 'premium', tierLabel: 'PREMIUM', duration_days: 20, durationLabel: '20 Hari', price: 25000, tag: 'LONG PASS', bulk_limit: 10, highlight: 'Akses Premium untuk durasi lebih panjang.' }
 ];
 
 function getTodayWIB() {
@@ -254,7 +149,7 @@ async function activateVip(telegramId, days, tier = 'STANDARD', planName = null)
     await redis.sadd('users:all', String(telegramId));
   }
 
-  const normalizedTier = String(tier).toUpperCase() === 'ULTRA' ? 'ULTRA' : 'STANDARD';
+  const normalizedTier = 'PREMIUM';
   const nowSec = Math.floor(Date.now() / 1000);
   const base = Number(user.vip_until || 0) > nowSec ? Number(user.vip_until) : nowSec;
   const expiry = base + Number(days) * 86400;
@@ -262,7 +157,7 @@ async function activateVip(telegramId, days, tier = 'STANDARD', planName = null)
   user.vip_until = expiry;
   user.vip_tier = normalizedTier;
   user.vip_plan = planName || `${normalizedTier} · ${days} Hari`;
-  user.bulk_limit = normalizedTier === 'ULTRA' ? 30 : 10;
+  user.bulk_limit = 10;
 
   await redis.set(userKey, user);
   await redis.sadd('users:vip', String(telegramId));
