@@ -3,8 +3,7 @@ const { Telegraf, Markup } = require('telegraf');
 const { findPhoneNumbersInText } = require('libphonenumber-js');
 const {
   redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
-  consumeQuota, addCheckLog, getGlobalStats, getCachedCheckResult,
-  setCachedCheckResult, incrementUserChecks, activateVip, registerReferral, qualifyReferral, getReferralStats, getLeaderboard, redeemReferralReward
+  consumeQuota, addCheckLog, getGlobalStats, incrementUserChecks, activateVip, registerReferral, qualifyReferral, getReferralStats, getLeaderboard, redeemReferralReward
 } = require('./database');
 const { isDataImpulseConfigured } = require('./proxyManager');
 const { checkWhatsAppCooldown } = require('./waChecker');
