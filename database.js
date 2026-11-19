@@ -7,172 +7,331 @@ const redis = new Redis({
 
 const PACKAGES = [
   {
-    id: 'starter',
-    name: 'Starter',
-    price: 0,
-    checks: 5,
-    tier: 'free',
-    description: '5 checks / hari'
+    id: 'std_1d',
+    tier: 'standard',
+    tierLabel: 'PREMIUM STANDARD',
+    duration_days: 1,
+    durationLabel: '1 Hari',
+    price: 3000,
+    tag: 'STARTER',
+    bulk_limit: 10,
+    highlight: 'Akses penuh 24 jam tanpa batas kuota harian.'
   },
   {
-    id: 'basic',
-    name: 'Basic',
-    price: 15000,
-    checks: 50,
-    tier: 'paid',
-    description: '50 checks'
+    id: 'std_3d',
+    tier: 'standard',
+    tierLabel: 'PREMIUM STANDARD',
+    duration_days: 3,
+    durationLabel: '3 Hari',
+    price: 5000,
+    tag: 'HEMAT',
+    bulk_limit: 10,
+    highlight: 'Pilihan ekonomis untuk kebutuhan pengecekan 3 hari.'
   },
   {
-    id: 'pro',
-    name: 'Pro',
-    price: 35000,
-    checks: 150,
-    tier: 'paid',
-    description: '150 checks'
+    id: 'std_7d',
+    tier: 'standard',
+    tierLabel: 'PREMIUM STANDARD',
+    duration_days: 7,
+    durationLabel: '7 Hari',
+    price: 10000,
+    tag: 'POPULER',
+    bulk_limit: 10,
+    highlight: 'Paling diminati untuk operasional mingguan.'
   },
   {
-    id: 'vip',
-    name: 'VIP',
-    price: 75000,
-    checks: 500,
-    tier: 'vip',
-    description: '500 checks + priority'
+    id: 'std_15d',
+    tier: 'standard',
+    tierLabel: 'PREMIUM STANDARD',
+    duration_days: 15,
+    durationLabel: '15 Hari',
+    price: 13000,
+    tag: 'PRO VALUE',
+    bulk_limit: 10,
+    highlight: 'Efisiensi biaya harian super rendah selama 15 hari.'
+  },
+  {
+    id: 'std_20d',
+    tier: 'standard',
+    tierLabel: 'PREMIUM STANDARD',
+    duration_days: 20,
+    durationLabel: '20 Hari',
+    price: 25000,
+    tag: 'LONG PASS',
+    bulk_limit: 10,
+    highlight: 'Durasi maksimal Standard dengan stabilitas penuh.'
+  },
+  {
+    id: 'ult_1d',
+    tier: 'ultra',
+    tierLabel: 'PREMIUM ULTRA',
+    duration_days: 1,
+    durationLabel: '1 Hari',
+    price: 6000,
+    tag: 'ULTRA TRIAL',
+    bulk_limit: 30,
+    highlight: 'Performa puncak Ultra & Bulk 30 nomor selama 24 jam.'
+  },
+  {
+    id: 'ult_3d',
+    tier: 'ultra',
+    tierLabel: 'PREMIUM ULTRA',
+    duration_days: 3,
+    durationLabel: '3 Hari',
+    price: 10000,
+    tag: 'ULTRA HEMAT',
+    bulk_limit: 30,
+    highlight: 'Kecepatan node prioritas & batch analytics 3 hari.'
+  },
+  {
+    id: 'ult_7d',
+    tier: 'ultra',
+    tierLabel: 'PREMIUM ULTRA',
+    duration_days: 7,
+    durationLabel: '7 Hari',
+    price: 18000,
+    tag: 'BEST SELLER',
+    bulk_limit: 30,
+    highlight: 'Keseimbangan terbaik kapasitas Ultra untuk 1 minggu.'
+  },
+  {
+    id: 'ult_15d',
+    tier: 'ultra',
+    tierLabel: 'PREMIUM ULTRA',
+    duration_days: 15,
+    durationLabel: '15 Hari',
+    price: 25000,
+    tag: 'ULTRA PRO',
+    bulk_limit: 30,
+    highlight: 'Kapasitas tinggi tanpa antrean selama 15 hari penuh.'
+  },
+  {
+    id: 'ult_20d',
+    tier: 'ultra',
+    tierLabel: 'PREMIUM ULTRA',
+    duration_days: 20,
+    durationLabel: '20 Hari',
+    price: 45000,
+    tag: 'APEX TIER',
+    bulk_limit: 30,
+    highlight: 'Kasta tertinggi dengan limit batch & rotasi IP maksimal.'
   }
 ];
 
+function getTodayWIB() {
+  return new Date(Date.now() + 7 * 3600 * 1000).toISOString().split('T')[0];
+}
+
 function getPackagesByTier(tier) {
-  if (tier === 'all') return PACKAGES;
-  return PACKAGES.filter((p) => p.tier === tier || (tier === 'paid' && p.tier !== 'free'));
+  return PACKAGES.filter((p) => p.tier === String(tier).toLowerCase());
 }
 
-function getPackageById(id) {
-  return PACKAGES.find((p) => p.id === id) || null;
+function getPackageById(pkgId) {
+  return PACKAGES.find((p) => p.id === pkgId) || null;
 }
 
-function getAlternateTierPackage(currentId) {
-  const current = getPackageById(currentId);
-  if (!current) return null;
-  const others = PACKAGES.filter((p) => p.id !== currentId && p.tier !== 'free');
-  return others[0] || null;
+function getAlternateTierPackage(pkg) {
+  if (!pkg) return null;
+  const targetTier = pkg.tier === 'ultra' ? 'standard' : 'ultra';
+  return PACKAGES.find((p) => p.tier === targetTier && p.duration_days === pkg.duration_days) || null;
 }
 
-async function getOrCreateUser(telegramId, username = '') {
-  const key = `user:${telegramId}`;
-  let user = await redis.hgetall(key);
-  if (!user || !user.telegramId) {
+async function getOrCreateUser(tgUser) {
+  const key = `user:${tgUser.id}`;
+  const today = getTodayWIB();
+  let user = await redis.get(key);
+
+  if (!user) {
+    const fullName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ') || 'User';
     user = {
-      telegramId: String(telegramId),
-      username: username || '',
-      quota: 5,
-      totalChecks: 0,
-      isVip: '0',
-      vipUntil: '0',
-      preferredTheme: 'default',
-      createdAt: String(Date.now())
+      telegram_id: tgUser.id,
+      username: tgUser.username || '-',
+      full_name: fullName,
+      theme: 'obsidian',
+      privacy_mode: 0,
+      vip_until: 0,
+      vip_tier: 'FREE',
+      vip_plan: 'FREE',
+      bulk_limit: 1,
+      total_checks: 0,
+      created_at: Math.floor(Date.now() / 1000)
     };
-    await redis.hset(key, user);
+    await redis.set(key, user);
+    await redis.sadd('users:all', String(tgUser.id));
+  } else {
+    const updatedName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ') || user.full_name;
+    const updatedUsername = tgUser.username || user.username;
+    let changed = false;
+
+    if (updatedName !== user.full_name) {
+      user.full_name = updatedName;
+      changed = true;
+    }
+    if (updatedUsername !== user.username) {
+      user.username = updatedUsername;
+      changed = true;
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (user.vip_until > 0 && user.vip_until < nowSec) {
+      user.vip_until = 0;
+      user.vip_tier = 'FREE';
+      user.vip_plan = 'FREE';
+      user.bulk_limit = 1;
+      changed = true;
+    }
+
+    if (changed) {
+      await redis.set(key, user);
+    }
   }
+
+  const usedToday = Number((await redis.get(`quota:${tgUser.id}:${today}`)) || 0);
   return {
     ...user,
-    quota: Number(user.quota || 0),
-    totalChecks: Number(user.totalChecks || 0),
-    isVip: user.isVip === '1' || user.isVip === true,
-    vipUntil: Number(user.vipUntil || 0)
+    free_used_today: usedToday
   };
 }
 
-async function updateUserPreferences(telegramId, prefs) {
+async function updateUserPreferences(telegramId, updates) {
   const key = `user:${telegramId}`;
-  const updates = {};
-  if (prefs.preferredTheme) updates.preferredTheme = prefs.preferredTheme;
-  if (prefs.username) updates.username = prefs.username;
-  if (Object.keys(updates).length) await redis.hset(key, updates);
+  const user = await redis.get(key);
+  if (!user) return null;
+  const merged = { ...user, ...updates };
+  await redis.set(key, merged);
+  return merged;
 }
 
-async function isUserVip(telegramId) {
-  const user = await getOrCreateUser(telegramId);
-  if (!user.isVip) return false;
-  if (user.vipUntil && user.vipUntil < Date.now()) {
-    await redis.hset(`user:${telegramId}`, { isVip: '0', vipUntil: '0' });
-    return false;
+function isUserVip(user) {
+  return Number(user.vip_until || 0) > Math.floor(Date.now() / 1000);
+}
+
+async function consumeQuota(telegramId, count = 1) {
+  const userKey = `user:${telegramId}`;
+  const user = await redis.get(userKey);
+  if (!user) return false;
+
+  if (isUserVip(user)) {
+    user.total_checks = Number(user.total_checks || 0) + count;
+    await redis.set(userKey, user);
+    await redis.incrby('stats:total_checks', count);
+    return true;
   }
-  return true;
-}
 
-async function consumeQuota(telegramId) {
-  const key = `user:${telegramId}`;
-  const user = await getOrCreateUser(telegramId);
-  if (await isUserVip(telegramId)) {
-    await redis.hincrby(key, 'totalChecks', 1);
-    return { success: true, remaining: 'unlimited' };
+  const today = getTodayWIB();
+  const quotaKey = `quota:${telegramId}:${today}`;
+  const used = Number((await redis.get(quotaKey)) || 0);
+
+  if (used + count <= 3) {
+    await redis.incrby(quotaKey, count);
+    await redis.expire(quotaKey, 90000);
+    user.total_checks = Number(user.total_checks || 0) + count;
+    await redis.set(userKey, user);
+    await redis.incrby('stats:total_checks', count);
+    return true;
   }
-  if (user.quota <= 0) {
-    return { success: false, remaining: 0 };
+
+  return false;
+}
+
+async function activateVip(telegramId, days, tier = 'STANDARD', planName = null) {
+  const userKey = `user:${telegramId}`;
+  let user = await redis.get(userKey);
+  if (!user) {
+    user = {
+      telegram_id: telegramId,
+      username: '-',
+      full_name: 'VIP User',
+      theme: 'obsidian',
+      privacy_mode: 0,
+      vip_until: 0,
+      vip_tier: 'FREE',
+      vip_plan: 'FREE',
+      bulk_limit: 1,
+      total_checks: 0,
+      created_at: Math.floor(Date.now() / 1000)
+    };
+    await redis.sadd('users:all', String(telegramId));
   }
-  const newQuota = await redis.hincrby(key, 'quota', -1);
-  await redis.hincrby(key, 'totalChecks', 1);
-  return { success: true, remaining: newQuota };
+
+  const normalizedTier = String(tier).toUpperCase() === 'ULTRA' ? 'ULTRA' : 'STANDARD';
+  const nowSec = Math.floor(Date.now() / 1000);
+  const base = Number(user.vip_until || 0) > nowSec ? Number(user.vip_until) : nowSec;
+  const expiry = base + Number(days) * 86400;
+
+  user.vip_until = expiry;
+  user.vip_tier = normalizedTier;
+  user.vip_plan = planName || `${normalizedTier} · ${days} Hari`;
+  user.bulk_limit = normalizedTier === 'ULTRA' ? 30 : 10;
+
+  await redis.set(userKey, user);
+  await redis.sadd('users:vip', String(telegramId));
+  return { expiry, user };
 }
 
-async function activateVip(telegramId, days = 30) {
-  const key = `user:${telegramId}`;
-  const until = Date.now() + days * 24 * 60 * 60 * 1000;
-  await redis.hset(key, {
-    isVip: '1',
-    vipUntil: String(until),
-    quota: 9999
-  });
-  return until;
-}
-
-async function addCheckLog(telegramId, number, result) {
+async function addCheckLog(telegramId, phoneNumber, statusSummary, proxyNode) {
+  const logKey = `logs:${telegramId}`;
   const entry = {
-    telegramId: String(telegramId),
-    number,
-    result: JSON.stringify(result),
-    ts: Date.now()
+    phone_number: phoneNumber,
+    status_summary: statusSummary,
+    proxy_node: proxyNode || 'ROTATING',
+    checked_at: Math.floor(Date.now() / 1000)
   };
-  await redis.lpush('logs:checks', JSON.stringify(entry));
-  await redis.ltrim('logs:checks', 0, 999);
-  await redis.lpush(`logs:user:${telegramId}`, JSON.stringify(entry));
-  await redis.ltrim(`logs:user:${telegramId}`, 0, 49);
+  await redis.lpush(logKey, entry);
+  await redis.ltrim(logKey, 0, 14);
 }
 
 async function getCheckLogs(telegramId, limit = 10) {
-  const raw = await redis.lrange(`logs:user:${telegramId}`, 0, limit - 1);
-  return raw.map((r) => {
-    try {
-      const o = typeof r === 'string' ? JSON.parse(r) : r;
-      return { ...o, result: typeof o.result === 'string' ? JSON.parse(o.result) : o.result };
-    } catch {
-      return null;
-    }
-  }).filter(Boolean);
+  const items = await redis.lrange(`logs:${telegramId}`, 0, limit - 1);
+  return (items || []).map((item) => (typeof item === 'string' ? JSON.parse(item) : item));
+}
+
+const CHECK_CACHE_TTL_SECONDS = Number(process.env.CHECK_CACHE_TTL_SECONDS || 600);
+
+function normalizePhoneForCache(rawNumber) {
+  return String(rawNumber).replace(/\D/g, '');
+}
+
+async function getCachedCheckResult(rawNumber) {
+  if (CHECK_CACHE_TTL_SECONDS <= 0) return null;
+  const key = `checkcache:${normalizePhoneForCache(rawNumber)}`;
+  const cached = await redis.get(key);
+  return cached || null;
+}
+
+async function setCachedCheckResult(rawNumber, result) {
+  if (CHECK_CACHE_TTL_SECONDS <= 0) return;
+  const key = `checkcache:${normalizePhoneForCache(rawNumber)}`;
+  await redis.set(key, result, { ex: CHECK_CACHE_TTL_SECONDS });
 }
 
 async function getGlobalStats() {
-  const totalUsers = await redis.dbsize();
-  const logs = await redis.llen('logs:checks');
-  return { totalUsers, totalChecks: logs };
-}
+  const allUserIds = await redis.smembers('users:all');
+  const vipIds = await redis.smembers('users:vip');
+  const nowSec = Math.floor(Date.now() / 1000);
+  let activeVipCount = 0;
 
-async function getCachedCheckResult(number) {
-  const key = `cache:check:${number}`;
-  const raw = await redis.get(key);
-  if (!raw) return null;
-  try {
-    return typeof raw === 'string' ? JSON.parse(raw) : raw;
-  } catch {
-    return null;
+  for (const uid of vipIds || []) {
+    const u = await redis.get(`user:${uid}`);
+    if (u && Number(u.vip_until || 0) > nowSec) {
+      activeVipCount += 1;
+    } else {
+      await redis.srem('users:vip', String(uid));
+    }
   }
-}
 
-async function setCachedCheckResult(number, result, ttlSeconds = 600) {
-  const key = `cache:check:${number}`;
-  await redis.set(key, JSON.stringify(result), { ex: ttlSeconds });
+  const totalChecks = Number((await redis.get('stats:total_checks')) || 0);
+
+  return {
+    totalUsers: (allUserIds || []).length,
+    activeVip: activeVipCount,
+    totalChecks,
+    allUserIds: allUserIds || []
+  };
 }
 
 module.exports = {
+  redis,
   getPackagesByTier,
   getPackageById,
   getAlternateTierPackage,
