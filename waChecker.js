@@ -103,7 +103,6 @@ function extractChannelTimers(existRaw, codeRaw) {
 
   // SMS cooldown efektif: prioritaskan exist.sms_wait; abaikan echo wa_old
   let smsSeconds = isWaOldEcho ? 0 : Math.max(existSms, codeSms);
-  // Jika retry_after lebih besar dan bukan echo, gunakan sebagai fallback
   if (!isWaOldEcho && retryAfter > smsSeconds && retryAfter > 0) {
     if (existSms > 0) {
       smsSeconds = existSms;
@@ -160,7 +159,20 @@ async function checkWhatsAppCooldown(rawNumber) {
   const parsed = WADetector.parseDualResponse(payloads.phoneInfo, data.existText, data.codeText);
   const existResponse = safeJson(data.existText);
   const codeResponse = safeJson(data.codeText);
-  const timers = extractChannelTimers(existResponse, codeResponse);
+  const rawTimers = extractChannelTimers(existResponse, codeResponse);
+
+  // Prefer engine multi-channel when available (newer waEngine), fallback to raw extract
+  const eng = parsed.channels || {};
+  const timers = {
+    sms: (eng.sms && eng.sms.seconds > 0) ? eng.sms.seconds : rawTimers.sms,
+    wa_old: (eng.wa_old && eng.wa_old.seconds > 0) ? eng.wa_old.seconds : rawTimers.wa_old,
+    voice: (eng.voice && eng.voice.seconds > 0) ? eng.voice.seconds : rawTimers.voice,
+    flash: (eng.flash && eng.flash.seconds > 0) ? eng.flash.seconds : rawTimers.flash,
+    retry_after: rawTimers.retry_after,
+    wa_old_eligible: Boolean(parsed.waOldEligible || rawTimers.wa_old_eligible),
+    device_name: parsed.deviceName || rawTimers.device_name,
+    is_wa_old_echo: rawTimers.is_wa_old_echo
+  };
 
   const rawSmsEligible = existResponse.send_sms_eligible;
   const smsAvailable =
