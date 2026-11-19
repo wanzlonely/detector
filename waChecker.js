@@ -46,12 +46,20 @@ async function checkWhatsAppCooldown(rawNumber) {
   });
 
   const parsed = WADetector.parseDualResponse(payloads.phoneInfo, data.existText, data.codeText);
+  let existResponse = {};
+  try { existResponse = JSON.parse(data.existText || '{}'); } catch (_) {}
+  const smsAvailable = Object.prototype.hasOwnProperty.call(existResponse, 'send_sms_eligible')
+    ? Boolean(existResponse.send_sms_eligible)
+    : null;
 
   return {
     formattedNumber: parsed.phone,
     region: parsed.country,
     accountStatus: parsed.state,
     isBanned: Boolean(parsed.isBanned),
+    isCloneBlocked: Boolean(parsed.isCloneBlocked),
+    isReady: Boolean(parsed.isReady),
+    smsAvailable,
     anyCooldown: Boolean(parsed.isCooldown),
     description: parsed.description,
     channels: {
