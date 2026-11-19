@@ -210,7 +210,11 @@ bot.hears('▤ BROADCAST', async (ctx) => {
   await setOwnerAction(ctx.from.id, 'broadcast');
   return ctx.reply('▤ <b>ᴍᴏᴅᴇ ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ɪsɪ ᴘᴇɴɢᴜᴍᴜᴍᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴀᴍᴘᴀɪᴋᴀɴ ᴋᴇ sᴇᴍᴜᴀ ᴘᴇɴɢɢᴜɴᴀ.', { parse_mode: 'HTML' });
 });
-bot.command('admin', async (ctx) => {,  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });,  const stats = await getGlobalStats();,  return ctx.reply(renderOwnerConsole(stats), { parse_mode: 'HTML' });,});
+bot.command('admin', async (ctx) => {
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
+  const stats = await getGlobalStats();
+  return ctx.reply(renderOwnerConsole(stats), { parse_mode: 'HTML' });
+});
 bot.command('addvip', async (ctx) => {
   if (!isOwner(ctx)) return;
   const parts = ctx.message.text.trim().split(/\s+/);
@@ -334,7 +338,7 @@ async function processNumbers(ctx, numbersList) {
 
   if (vip && numbersList.length > 1) {
     await ctx.reply(
-      '✦ <b>RINGKASAN PEMERIKSAAN PREMIUM</b>\n\nTotal: <code>' + numbersList.length +
+      '✦ <b>ʀɪɴɢᴋᴀsᴀɴ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b> ✦\n\nᴛᴏᴛᴀʟ ⦂ <code>' + numbersList.length +
       '</code>\nSiap: <code>' + stats.ready + '</code>\nCooldown: <code>' + stats.cooldown +
       '</code>\nDiblokir: <code>' + stats.banned + '</code>\nGagal: <code>' + stats.error + '</code>',
       { parse_mode: 'HTML' }
@@ -390,7 +394,7 @@ bot.on('text', async (ctx) => {
           console.error('[broadcast]', uid, err && err.message || err);
         }
       }
-      return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\n\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');\n\n◉ Berhasil terkirim: <b>' + sent + '</b> dari <b>' + stats.allUserIds.length + '</b> pengguna.\n<i>Akun yang memblokir bot atau tidak dapat menerima pesan mungkin tidak terjangkau.</i>');
+      return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\n\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');
     }
   }
 
