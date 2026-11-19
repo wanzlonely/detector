@@ -133,7 +133,7 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
     'Pilih menu di keyboard untuk mulai mendeteksi, melihat statistik, mengikuti peringkat, atau mengundang teman.',
     '',
     '<i>◈ SISTEM AKTIF · ' + (isOwner ? 'OWNER MODE' : isVip ? 'PREMIUM MODE' : 'FREE MODE') + '</i>'
-  ].join('\\n');
+  ].join('\n');
 }
 
 function renderStatus({ user, isVip, isOwner = false, referralStats }) {
@@ -153,13 +153,13 @@ function renderStatus({ user, isVip, isOwner = false, referralStats }) {
     '♧ <b>PROGRAM UNDANGAN</b>',
     'Teman bergabung: <b>' + Number(referralStats.total || 0) + ' / 10</b>',
     'Hadiah diberikan: <b>' + Number(referralStats.rewarded || 0) + ' hari Premium</b>'
-  ].join('\\n');
+  ].join('\n');
 }
 
 function renderLeaderboard(rows) {
   const medals = ['🥇', '🥈', '🥉'];
   const lines = rows.length
-    ? rows.map((row, index) => (medals[index] || (index + 1) + '.') + ' <b>' + escapeHtml(row.full_name || 'Pengguna') + '</b> — <code>' + Number(row.total_checks || 0).toLocaleString('id-ID') + '</code>').join('\\n')
+    ? rows.map((row, index) => (medals[index] || (index + 1) + '.') + ' <b>' + escapeHtml(row.full_name || 'Pengguna') + '</b> — <code>' + Number(row.total_checks || 0).toLocaleString('id-ID') + '</code>').join('\n')
     : 'Belum ada aktivitas untuk ditampilkan. Jadilah pengguna pertama di papan peringkat!';
   return [
     '🏆 <b>LEADERBOARD DETECTOR</b>',
@@ -168,7 +168,7 @@ function renderLeaderboard(rows) {
     lines,
     '',
     '<i>Peringkat dihitung dari aktivitas akun, diperbarui setelah pemeriksaan.</i>'
-  ].join('\\n');
+  ].join('\n');
 }
 
 function renderReferral({ link, stats }) {
@@ -189,7 +189,7 @@ function renderReferral({ link, stats }) {
     'Total hadiah: <b>' + Number(stats.rewarded || 0) + ' hari Premium</b>',
     '',
     '<i>Bagikan tautanmu dan pantau hadiah melalui menu Status.</i>'
-  ].join('\\n');
+  ].join('\n');
 }
 function renderStoreCatalog({ packages }) {
   const packageLines = packages.map((pkg, index) => {
