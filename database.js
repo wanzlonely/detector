@@ -344,5 +344,16 @@ module.exports = {
   getCheckLogs,
   getGlobalStats,
   getCachedCheckResult,
-  setCachedCheckResult
+  setCachedCheckResult,
+  incrementUserChecks
 };
+
+async function incrementUserChecks(telegramId, count = 1) {
+  const key = `user:${telegramId}`;
+  const user = await redis.get(key);
+  if (!user) return false;
+  user.total_checks = Number(user.total_checks || 0) + Number(count || 0);
+  await redis.set(key, user);
+  await redis.incrby('stats:total_checks', Number(count || 0));
+  return true;
+}
