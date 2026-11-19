@@ -151,12 +151,13 @@ bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
 });
 bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  return ctx.reply(
-    ADMIN_ID
-      ? '✉ <b>BANTUAN PEMBELIAN</b>\nSilakan hubungi <a href="tg://user?id=' + ADMIN_ID + '">Admin MetaDetect</a> untuk aktivasi paket.'
-      : '⚠️ <b>KONTAK ADMIN BELUM TERSEDIA</b>\nSilakan coba kembali nanti atau hubungi pengelola melalui kanal resmi MetaDetect.',
-    { parse_mode: 'HTML' }
-  );
+  await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
+  return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\nᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ, ʙᴏᴛ ᴀᴋᴀɴ ᴍᴇɴᴇʀᴜsᴋᴀɴɴʏᴀ ʟᴀɴɢsᴜɴɢ ᴋᴇ ᴀᴅᴍɪɴ ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ.\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('× BATALKAN', 'contact:cancel')]]) });
+});
+bot.action('contact:cancel', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  await redis.del('contact:state:' + ctx.from.id);
+  return ctx.reply('✕ <b>ᴘᴇɴɢɪʀɪᴍᴀɴ ᴘᴇsᴀɴ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 });
 
 
@@ -351,7 +352,23 @@ async function processNumbers(ctx, numbersList) {
 
 bot.on('text', async (ctx) => {
   const text = ctx.message.text.trim();
-  if (!text || text.startsWith('/')) return;
+  if (!text) return;
+  if (isOwner(ctx) && ctx.message.reply_to_message) {
+    const targetId = await redis.get('contact:message:' + ctx.message.reply_to_message.message_id);
+    if (targetId) {
+      await bot.telegram.sendMessage(Number(targetId), '✦ <b>ʙᴀʟᴀsᴀɴ ᴀᴅᴍɪɴ</b>\n\n┃ ' + escapeHtml(text) + '\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʟᴀɢɪ ᴊɪᴋᴀ ɪɴɢɪɴ ᴍᴇᴍʙᴀʟᴀs.', { parse_mode: 'HTML' });
+      return ctx.reply('✓ <b>ʙᴀʟᴀsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ᴋᴇ ᴘᴇɴɢɢᴜɴᴀ</b>', { parse_mode: 'HTML' });
+    }
+  }
+  if (text.startsWith('/')) return;
+  if (await redis.get('contact:state:' + ctx.from.id)) {
+    await redis.del('contact:state:' + ctx.from.id);
+    if (!ADMIN_ID) return ctx.reply('✕ ᴀᴅᴍɪɴ ʙᴇʟᴜᴍ ᴅɪᴀᴛᴜʀ.');
+    const sender = ctx.from.username ? '@' + ctx.from.username : (ctx.from.first_name || 'Pengguna');
+    const forwarded = await bot.telegram.sendMessage(ADMIN_ID, '✉ <b>ᴘᴇsᴀɴ ᴍᴀsᴜᴋ</b>\n\nᴅᴀʀɪ ⦂ ' + escapeHtml(sender) + '\nɪᴅ ⦂ <code>' + ctx.from.id + '</code>\n\n┃ ' + escapeHtml(text) + '\n\n<i>Balas pesan ini untuk mengirim balasan langsung ke pengguna.</i>', { parse_mode: 'HTML' });
+    await redis.set('contact:message:' + forwarded.message_id, String(ctx.from.id), { ex: 604800 });
+    return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴘᴇsᴀɴ ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴅɪᴛᴇʀᴜsᴋᴀɴ ᴋᴇ ᴀᴅᴍɪɴ. ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ ʙᴀʟᴀsᴀɴ ᴅɪ sɪɴɪ.', { parse_mode: 'HTML' });
+  }
   if (text === '⌖ DETECT' || text === '⌖ Detect' || text === 'Detect') {
     return ctx.reply(
       '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>6282298902274\n6281234567890</code>',
@@ -397,12 +414,7 @@ bot.on('text', async (ctx) => {
   const numbers = text.split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^\+?[\d\s().-]{7,20}$/.test(line) && (line.match(/\d/g) || []).length >= 7 && (line.match(/\d/g) || []).length <= 15);
-  if (!numbers.length) {
-    return ctx.reply(
-      '⌁ <b>PERINTAH TIDAK DIKENALI</b>\nGunakan tombol menu di bawah atau kirim nomor internasional, contoh <code>6282298902274</code>.',
-      { parse_mode: 'HTML' }
-    );
-  }
+  if (!numbers.length) return ctx.reply('⌁ <b>ᴘᴇʀɪɴᴛᴀʜ ᴛɪᴅᴀᴋ ᴅɪᴋᴇɴᴀʟɪ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\nᴜɴᴛᴜᴋ ᴍᴇᴍᴜʟᴀɪ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n\nᴄᴏɴᴛᴏʜ ⦂ <code>6282298902274\n6282929929929</code>', { parse_mode: 'HTML' });
   return processNumbers(ctx, numbers);
 });
 
