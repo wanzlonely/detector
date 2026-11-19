@@ -267,34 +267,36 @@ function renderPaymentMaintenanceCard({ pkg }) {
 }
 
 function renderCooldownCard({ result, user, isVip }) {
-  const sisaFree = Math.max(0, 3 - Number(user.free_used_today || 0));
+  const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
   const numberDisplay = formatSensitiveNumber(result.formattedNumber, Boolean(user.privacy_mode));
   const sms = result.channels.sms;
-  const status = result.isBanned ? 'DIBLOKIR' : result.anyCooldown ? 'COOLDOWN AKTIF' : 'SIAP';
+  const status = result.isBanned ? 'ᴅɪʙʟᴏᴋɪʀ' : result.anyCooldown ? 'ᴄᴏᴏʟᴅᴏᴡɴ ᴀᴋᴛɪғ' : 'sɪᴀᴘ';
   const verdict = result.isBanned
-    ? 'Nomor terdeteksi memiliki pembatasan dari layanan WhatsApp.'
+    ? 'ɴᴏᴍᴏʀ ᴛᴇʀᴅᴇᴛᴇᴋsɪ ᴍᴇᴍɪʟɪᴋɪ ᴘᴇᴍʙᴀᴛᴀsᴀɴ ᴅᴀʀɪ ʟᴀʏᴀɴᴀɴ ᴡʜᴀᴛsᴀᴘᴘ.'
     : result.anyCooldown
-      ? 'Nomor masih berada dalam masa tunggu verifikasi.'
-      : 'Tidak ditemukan masa tunggu aktif pada pemeriksaan ini.';
-  const tierFooter = String(user.vip_tier).toUpperCase() === 'OWNER'
-    ? '♛ OWNER ACCESS'
-    : !isVip ? 'KUOTA ' + sisaFree + '/3' : '✦ PREMIUM ACCESS';
+      ? 'ɴᴏᴍᴏʀ ᴍᴀsɪʜ ʙᴇʀᴀᴅᴀ ᴅᴀʟᴀᴍ ᴍᴀsᴀ ᴛᴜɴɢɢᴜ ᴠᴇʀɪғɪᴋᴀsɪ.'
+      : 'ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ᴍᴀsᴀ ᴛᴜɴɢɢᴜ ᴀᴋᴛɪғ ᴘᴀᴅᴀ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ɪɴɪ.';
+  const access = String(user.vip_tier).toUpperCase() === 'OWNER'
+    ? '♛ ᴏᴡɴᴇʀ ᴀᴄᴄᴇss'
+    : !isVip ? 'ғʀᴇᴇ · ' + remaining + '/3' : '✦ ᴘʀᴇᴍɪᴜᴍ ᴀᴄᴄᴇss';
   return [
-    '✦ <b>HASIL PEMERIKSAAN WHATSAPP</b>',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '✦ <b>ʜᴀsɪʟ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b> ✦',
+    '<i>ᴀɴᴀʟɪsɪs sᴛᴀᴛᴜs ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</i>',
     '',
-    '╭─ <b>INFORMASI TARGET</b>',
-    '├ ☎ Nomor  : ' + numberDisplay + ' <code>(' + escapeHtml(result.region) + ')</code>',
-    '├ ◈ Status : <b>' + status + '</b>',
-    '├ ⛨ Jalur  : <code>' + escapeHtml(result.proxyInfo) + '</code>',
-    '╰ ✧ Hasil  : ' + verdict,
+    '◈ <b>ɪɴғᴏʀᴍᴀsɪ ᴛᴀʀɢᴇᴛ</b>',
+    '▸ ɴᴏᴍᴏʀ ⦂ ' + numberDisplay,
+    '▸ ɴᴇɢᴀʀᴀ ⦂ <b>' + escapeHtml(result.region) + '</b>',
+    '▸ sᴛᴀᴛᴜs ⦂ <b>' + status + '</b>',
+    '▸ ᴊᴀʟᴜʀ ⦂ <code>' + escapeHtml(result.proxyInfo) + '</code>',
     '',
-    '╭─ <b>STATUS VERIFIKASI SMS</b>',
-    '├ ' + (sms.isCooldown ? '⏳ Masa tunggu: <b>' + escapeHtml(sms.uiTimer) + '</b>' : '✓ Tidak ada masa tunggu aktif'),
-    '╰ ⌁ Rincian: <code>' + (sms.isCooldown ? escapeHtml(sms.humanTime) : 'Siap') + '</code>',
+    '⌁ <b>ʜᴀsɪʟ ᴀɴᴀʟɪsɪs</b>',
+    verdict,
     '',
-    '<code>━━━━━━━━━━━━━━━━━━━━━━━━━━</code>',
-    '<i>' + formatDateWIB(Math.floor(Date.now() / 1000)) + ' · ' + tierFooter + '</i>'
+    '⚙ <b>ᴠᴇʀɪғɪᴋᴀsɪ sᴍs</b>',
+    '▸ ᴍᴀsᴀ ᴛᴜɴɢɢᴜ ⦂ <b>' + (sms.isCooldown ? escapeHtml(sms.uiTimer) : 'ᴛɪᴅᴀᴋ ᴀᴋᴛɪғ') + '</b>',
+    '▸ ᴅᴜʀᴀsɪ ⦂ <code>' + (sms.isCooldown ? escapeHtml(sms.humanTime) : 'ʀᴇᴀᴅʏ') + '</code>',
+    '',
+    '◈ ' + formatDateWIB(Math.floor(Date.now() / 1000)) + ' · ' + access
   ].join('\n');
 }
 
