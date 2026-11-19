@@ -27,7 +27,12 @@ bot.use(async (ctx, next) => {
   const callbackData = ctx.callbackQuery && ctx.callbackQuery.data || '';
   const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
-  if (navigationText || navigationCallback) await stopActiveDetection(ctx);
+  if (navigationText || navigationCallback) {
+    await stopActiveDetection(ctx);
+    if (ctx.from && (navigationText || navigationCallback)) {
+      await redis.del('detect:mode:' + ctx.from.id).catch(() => {});
+    }
+  }
   return next();
 });
 
@@ -36,7 +41,7 @@ const USER_KEYBOARD = Markup.keyboard([
   [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
   [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
   [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }]
-]).resize().persistent().placeholder('Pilih menu…');
+]).resize().oneTime().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
   [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
@@ -44,7 +49,7 @@ const OWNER_KEYBOARD = Markup.keyboard([
   [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }],
   [{ text: '♛ OWNER CONSOLE' }],
   [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
-]).resize().persistent().placeholder('Pilih fungsi owner…');
+]).resize().oneTime().placeholder('Pilih fungsi owner…');
 
 const OWNER_ACTION_TTL = 300;
 async function setOwnerAction(userId, action) {
@@ -63,13 +68,6 @@ function isOwner(ctx) {
 
 // Reply Keyboard selalu dipasang pada balasan biasa; katalog memakai inline button.
 bot.use((ctx, next) => {
-  if (typeof ctx.reply === 'function') {
-    const originalReply = ctx.reply.bind(ctx);
-    ctx.reply = (message, extra = {}) => originalReply(message, {
-      ...extra,
-      ...(!extra.reply_markup ? (isOwner(ctx) ? OWNER_KEYBOARD : USER_KEYBOARD) : {})
-    });
-  }
   return next();
 });
 
@@ -86,7 +84,7 @@ async function showHome(ctx) {
     isVip: isOwner(ctx) || isUserVip(user),
     isOwner: isOwner(ctx),
     brandName: BRAND_NAME
-  }), { parse_mode: 'HTML' });
+  }), { parse_mode: 'HTML', ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime() });
 }
 
 function buildStoreKeyboard() {
@@ -139,10 +137,10 @@ bot.start(async (ctx) => {
   }
   return showHome(ctx);
 });
-bot.command('detect', (ctx) => ctx.reply(
-  '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX\n62858XXXXX</code>',
-  { parse_mode: 'HTML' }
-));
+bot.command('detect', async (ctx) => {
+  await redis.set('detect:mode:' + ctx.from.id, 'active', { ex: 1800 });
+  return ctx.reply('⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\nᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ ᴜɴᴛᴜᴋ ᴘʀᴇᴍɪᴜᴍ.\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX\n62858XXXXX</code>', { parse_mode: 'HTML' });
+});
 bot.command('store', (ctx) => showStore(ctx, false));
 
 bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {
@@ -335,7 +333,7 @@ async function processNumbers(ctx, numbersList) {
   const owner = isOwner(ctx);
   const user = await getEffectiveUser(ctx);
   const vip = owner || isUserVip(user);
-  const maxBatch = owner ? 30 : (!vip ? 1 : Math.min(10, Number(user.bulk_limit || 10)));
+  const maxBatch = owner ? 30 : (!vip ? 1 : Math.min(30, Math.max(1, Number(user.bulk_limit || 30))));
   const premiumAccess = vip;
 
   if (numbersList.length > maxBatch) {
@@ -469,8 +467,9 @@ bot.on('text', async (ctx) => {
     return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴘᴇsᴀɴ ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴅɪᴛᴇʀᴜsᴋᴀɴ ᴋᴇ ᴀᴅᴍɪɴ. ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ ʙᴀʟᴀsᴀɴ ᴅɪ sɪɴɪ.', { parse_mode: 'HTML' });
   }
   if (text === '⌖ DETECT' || text === '⌖ Detect' || text === 'Detect') {
+    await redis.set('detect:mode:' + ctx.from.id, 'active', { ex: 1800 });
     return ctx.reply(
-      '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX\n62858XXXXX</code>',
+      '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\nᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ ᴜɴᴛᴜᴋ ᴘʀᴇᴍɪᴜᴍ.\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX\n62858XXXXX</code>',
       { parse_mode: 'HTML' }
     );
   }
@@ -511,7 +510,9 @@ bot.on('text', async (ctx) => {
   }
 
   const numbers = extractPhoneNumbers(text);
-  if (!numbers.length) return ctx.reply('⌁ <b>ᴘᴇʀɪɴᴛᴀʜ ᴛɪᴅᴀᴋ ᴅɪᴋᴇɴᴀʟɪ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\nᴜɴᴛᴜᴋ ᴍᴇᴍᴜʟᴀɪ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX</code>', { parse_mode: 'HTML' });
+  if (!numbers.length) return ctx.reply('⌁ <b>ᴘᴇʀɪɴᴛᴀʜ ᴛɪᴅᴀᴋ ᴅɪᴋᴇɴᴀʟɪ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ.\nᴜɴᴛᴜᴋ ᴍᴇᴍᴜʟᴀɪ, ᴀᴋᴛɪғᴋᴀɴ ᴍᴇɴᴜ Detect ᴛᴇʀʟᴇʙɪʜ ᴅᴀʜᴜʟᴜ.', { parse_mode: 'HTML' });
+  const detectMode = await redis.get('detect:mode:' + ctx.from.id);
+  if (detectMode !== 'active') return ctx.reply('⌁ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ ᴛɪᴅᴀᴋ ᴀᴋᴛɪғ</b>\n\nᴘɪʟɪʜ ᴍᴇɴᴜ ⌖ DETECT ᴜɴᴛᴜᴋ ᴍᴇᴍᴜʟᴀɪ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.', { parse_mode: 'HTML' });
   return processNumbers(ctx, numbers);
 });
 
