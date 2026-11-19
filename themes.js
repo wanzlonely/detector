@@ -109,10 +109,11 @@ function formatDateWIB(unixSec) {
 function renderDashboard({ user, isVip, isOwner = false, brandName }) {
   const identity = escapeHtml(user.full_name || 'Pengguna');
   const username = user.username && user.username !== '-' ? '@' + escapeHtml(user.username) : 'Tidak tersedia';
-  const total = Number(user.total_checks || 0).toLocaleString('id-ID');
+  const totalCount = Number(user.total_checks || 0);
+  const total = totalCount.toLocaleString('id-ID');
   const access = isOwner ? 'ᴏᴡɴᴇʀ ᴀᴄᴄᴇss' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : 'ғʀᴇᴇ ᴍᴇᴍʙᴇʀ';
   const quota = isOwner ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs · ᴏᴡɴᴇʀ' : isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : Math.max(0, 3 - Number(user.free_used_today || 0)) + ' / 3 ᴛᴇʀsɪsᴀ';
-  const level = isOwner ? 'ᴏᴡɴᴇʀ' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : total >= 100 ? 'ᴀᴄᴛɪᴠᴇ' : 'ʀᴇɢᴜʟᴇʀ';
+  const level = isOwner ? 'ᴏᴡɴᴇʀ' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : totalCount >= 100 ? 'ᴀᴄᴛɪᴠᴇ' : 'ʀᴇɢᴜʟᴇʀ';
   return [
     '✦ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ</b> ✦',
     '<i>ᴀᴅᴠᴀɴᴄᴇᴅ ᴡʜᴀᴛsᴀᴘᴘ ᴛᴇʟᴇᴍᴇᴛʀʏ</i>',
