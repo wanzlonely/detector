@@ -131,7 +131,9 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
     '',
     '◈ sɪsᴛᴇᴍ ᴀᴋᴛɪꜰ'
   ].join('\\n');
-}function renderStatus({ user, isVip, isOwner = false, referralStats }) {
+}
+
+function renderStatus({ user, isVip, isOwner = false, referralStats }) {
   const used = Number(user.free_used_today || 0);
   const remaining = Math.max(0, 3 - used);
   const expiry = isOwner ? 'Tidak terbatas' : isVip ? formatDateWIB(user.vip_until) : 'Belum berlangganan';
