@@ -51,12 +51,9 @@ async function showHome(ctx) {
   }), { parse_mode: 'HTML' });
 }
 
-function buildStoreKeyboard(tier) {
-  const packages = getPackagesByTier(tier);
-  const rows = [[
-    Markup.button.callback(tier === 'standard' ? '● STANDARD' : '◈ STANDARD', 'store:standard'),
-    Markup.button.callback(tier === 'ultra' ? '● ULTRA' : '♛ ULTRA', 'store:ultra')
-  ]];
+function buildStoreKeyboard() {
+  const packages = getPackagesByTier('premium');
+  const rows = [];
   for (let i = 0; i < packages.length; i += 2) {
     rows.push(packages.slice(i, i + 2).map((pkg) =>
       Markup.button.callback(pkg.durationLabel + ' · ' + formatIDR(pkg.price), 'pkg:' + pkg.id)
@@ -65,24 +62,21 @@ function buildStoreKeyboard(tier) {
   rows.push([Markup.button.callback('⌂ DASHBOARD', 'home')]);
   return Markup.inlineKeyboard(rows);
 }
-
-async function showStore(ctx, tier, edit) {
-  const activeTier = tier === 'ultra' ? 'ultra' : 'standard';
+async function showStore(ctx, edit) {
   const user = await getEffectiveUser(ctx);
-  const packages = getPackagesByTier(activeTier);
-  const message = renderStoreCatalog({ user, activeTier, packages });
-  const keyboard = buildStoreKeyboard(activeTier);
+  const packages = getPackagesByTier('premium');
+  const message = renderStoreCatalog({ user, packages });
+  const keyboard = buildStoreKeyboard();
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
 }
-
 async function showPackage(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPackageDetailCard({ user, pkg });
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id)],
     [
-      Markup.button.callback('← KEMBALI KE PAKET', 'store:' + pkg.tier),
+      Markup.button.callback('← KEMBALI KE PAKET', 'store:premium'),
       Markup.button.callback('⌂ DASHBOARD', 'home')
     ]
   ]);
@@ -107,7 +101,7 @@ async function showCheckout(ctx, pkg, edit) {
 bot.telegram.setMyCommands([
   { command: 'start', description: 'Buka dashboard utama' },
   { command: 'detect', description: 'Mulai pemeriksaan nomor' },
-  { command: 'store', description: 'Paket Premium Standard dan Ultra' },
+  { command: 'store', description: 'Lihat paket Premium' },
   { command: 'admin', description: 'Owner console' },
   { command: 'addvip', description: 'Aktivasi membership pengguna' },
   { command: 'broadcast', description: 'Kirim pengumuman' }
@@ -118,7 +112,7 @@ bot.command('detect', (ctx) => ctx.reply(
   '⌕ <b>MODE DETECT SIAP</b>\nKirim nomor WhatsApp dengan kode negara, contoh <code>6282298902274</code>.\nUntuk beberapa nomor, pisahkan setiap nomor dengan baris baru.',
   { parse_mode: 'HTML' }
 ));
-bot.command('store', (ctx) => showStore(ctx, 'standard', false));
+bot.command('store', (ctx) => showStore(ctx, false));
 
 bot.action('home', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
@@ -170,10 +164,10 @@ bot.command('addvip', async (ctx) => {
   const tier = String(parts[2] || 'STANDARD').toUpperCase() === 'ULTRA' ? 'ULTRA' : 'STANDARD';
   const days = Number(parts[3] || parts[2]);
   if (!uid || !Number.isFinite(days) || days <= 0) {
-    return ctx.reply('Format: <code>/addvip USER_ID STANDARD|ULTRA HARI</code>', { parse_mode: 'HTML' });
+    return ctx.reply('Format: <code>/addvip USER_ID HARI</code>', { parse_mode: 'HTML' });
   }
-  const result = await activateVip(uid, days, tier, tier + ' · ' + days + ' Hari');
-  return ctx.reply('✧ Paket ' + tier + ' aktif untuk <code>' + uid + '</code> sampai <code>' + formatDateWIB(result.expiry) + '</code>.', { parse_mode: 'HTML' });
+  const result = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
+  return ctx.reply('✧ Premium aktif untuk <code>' + uid + '</code> sampai <code>' + formatDateWIB(result.expiry) + '</code>.', { parse_mode: 'HTML' });
 });
 
 bot.command('broadcast', async (ctx) => {
@@ -219,7 +213,7 @@ async function processNumbers(ctx, numbersList) {
       let result = await getCachedCheckResult(rawNumber);
       const fromCache = Boolean(result);
       if (!result) {
-        result = await checkWhatsAppCooldown(rawNumber, { isUltra: ultra });
+        result = await checkWhatsAppCooldown(rawNumber, { isPremium: premiumAccess });
         if (!result || typeof result !== 'object') throw new Error('Engine mengembalikan hasil kosong atau format tidak valid.');
         await setCachedCheckResult(rawNumber, result);
       }
@@ -249,9 +243,9 @@ async function processNumbers(ctx, numbersList) {
     }
   }
 
-  if (ultra && numbersList.length > 1) {
+  if (vip && numbersList.length > 1) {
     await ctx.reply(
-      '♛ <b>RINGKASAN ULTRA</b>\n\nTotal: <code>' + numbersList.length +
+      '✦ <b>RINGKASAN PEMERIKSAAN PREMIUM</b>\n\nTotal: <code>' + numbersList.length +
       '</code>\nSiap: <code>' + stats.ready + '</code>\nCooldown: <code>' + stats.cooldown +
       '</code>\nDiblokir: <code>' + stats.banned + '</code>\nGagal: <code>' + stats.error + '</code>',
       { parse_mode: 'HTML' }
@@ -273,7 +267,7 @@ bot.on('text', async (ctx) => {
     );
   }
   if (text === '✧ BELI PREMIUM' || text === '✧ Beli Premium' || text === 'Beli Premium') {
-    return showStore(ctx, 'standard', false);
+    return showStore(ctx, false);
   }
 
   const numbers = text.split(/\r?\n/)
