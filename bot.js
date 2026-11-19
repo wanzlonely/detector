@@ -123,7 +123,7 @@ bot.start(async (ctx) => {
   const payload = String(ctx.startPayload || '');
   if (payload.startsWith('ref_')) {
     const registered = await registerReferral(ctx.from.id, payload.slice(4));
-    if (registered) await ctx.reply('♧ Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh hadiah 1 hari Premium.');
+    if (registered) await ctx.reply('♧ Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh 5 koin referral.');
   }
   return showHome(ctx);
 });
@@ -149,7 +149,7 @@ bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
   if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>\nSilakan buka kembali katalog Premium untuk melihat pilihan yang tersedia.');
   return showCheckout(ctx, pkg, true);
 });
-bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
+bot.action(/^contact:(?!cancel$)([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
   return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\nᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ, ʙᴏᴛ ᴀᴋᴀɴ ᴍᴇɴᴇʀᴜsᴋᴀɴɴʏᴀ ʟᴀɴɢsᴜɴɢ ᴋᴇ ᴀᴅᴍɪɴ ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ.\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('× BATALKAN', 'contact:cancel')]]) });
