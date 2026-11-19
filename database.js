@@ -231,7 +231,7 @@ async function getGlobalStats() {
 async function registerReferral(inviteeId, inviterId) {
   const invitee = String(inviteeId);
   const inviter = String(inviterId || '').replace(/^ref_/, '');
-  if (!/^\\d+$/.test(inviter) || inviter === invitee) return false;
+  if (!/^\d+$/.test(inviter) || inviter === invitee) return false;
   const inviterUser = await redis.get('user:' + inviter);
   if (!inviterUser) return false;
   const already = await redis.get('referral:invited_by:' + invitee);
