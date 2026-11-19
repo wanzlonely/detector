@@ -118,7 +118,10 @@ bot.action('home', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   return showHome(ctx);
 });
-bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {\n  await ctx.answerCbQuery().catch(() => {});\n  return showStore(ctx, true);\n});
+bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return showStore(ctx, true);
+});
 bot.action(/^pkg:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
