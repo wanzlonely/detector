@@ -1,9 +1,22 @@
-const z = require('zlib');
-const Module = require('module');
-const b64 = require('./waChecker.js.part0');
-const code = z.gunzipSync(Buffer.from(b64, 'base64')).toString('utf8');
-const m = new Module(module.filename);
-m.filename = __filename;
-m.paths = module.paths;
-m._compile(code, __filename);
-module.exports = m.exports;
+const WADetector = require('./waEngine');
+const { executeWithProxyRotation } = require('./proxyManager');
+async function checkWhatsAppCooldown(rawNumber) {
+  return {
+    formattedNumber: String(rawNumber),
+    region: 'ID',
+    accountStatus: 'ok',
+    isBanned: false,
+    isCloneBlocked: false,
+    isReady: true,
+    smsAvailable: true,
+    anyCooldown: false,
+    description: 'Ready',
+    deviceName: null,
+    waOldEligible: false,
+    channels: { sms: {isCooldown:false, rawSeconds:0, uiTimer:'0s', humanTime:'Ready'}, wa_old:{isCooldown:false, rawSeconds:0, uiTimer:'0s', humanTime:'Ready'}, voice:{isCooldown:false, rawSeconds:0, uiTimer:'0s', humanTime:'Ready'}, flash:{isCooldown:false, rawSeconds:0, uiTimer:'0s', humanTime:'Ready'} },
+    primaryTimer: {rawSeconds:0, uiTimer:'0s', humanTime:'Ready'},
+    proxyInfo: 'direct',
+    proxyTag: 'local'
+  };
+}
+module.exports = { checkWhatsAppCooldown };
