@@ -384,7 +384,7 @@ async function processNumbers(ctx, numbersList) {
       else if (result.smsAvailable === false) { stats.smsUnavailable += 1; stats.failed += 1; }
       else if (result.isReady) stats.ready += 1;
       else stats.failed += 1;
-      lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';      lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
+      lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
       await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
       const reward = await qualifyReferral(ctx.from.id);
       if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '♧ <b>ᴋᴏɪɴ ʀᴇғᴇʀᴀʟ ʙᴇʀᴛᴀᴍʙᴀʜ!</b>\n\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+5 ᴋᴏɪɴ</b>', { parse_mode: 'HTML' }).catch(() => {});
