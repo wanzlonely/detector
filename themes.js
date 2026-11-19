@@ -272,7 +272,7 @@ function renderPaymentMaintenanceCard({ pkg }) {
 }
 
 function renderDetectionSummary({ results, elapsedSeconds }) {
-  const groups = { cooldown: [], clone: [], smsUnavailable: [], restricted: [], failed: [] };
+  const groups = { ready: [], cooldown: [], clone: [], smsUnavailable: [], restricted: [], failed: [] };
   for (const item of results) {
     const number = '<code>' + escapeHtml(item.number || '-') + '</code>';
     if (item.error) groups.failed.push(number);
@@ -282,11 +282,13 @@ function renderDetectionSummary({ results, elapsedSeconds }) {
       const sms = item.result.channels && item.result.channels.sms;
       const timer = sms && (sms.formatted || sms.uiTimer || sms.humanTime);
       groups.cooldown.push(number + (timer ? ' — ' + escapeHtml(timer) : ''));
-    } else if (item.result.smsAvailable === false) groups.smsUnavailable.push(number);
-    else if (!item.result.isReady) groups.failed.push(number);
+    } else if (item.result.isReady) groups.ready.push(number);
+    else if (item.result.smsAvailable === false) groups.smsUnavailable.push(number);
+    else groups.failed.push(number);
   }
   return [
     '⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>',
+    ...(groups.ready.length ? ['', '✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪғɪᴋᴀsɪ</b>', ...groups.ready] : []),
     ...(groups.cooldown.length ? ['', '◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>', ...groups.cooldown] : []),
     ...(groups.clone.length ? ['', '△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>', ...groups.clone] : []),
     ...(groups.smsUnavailable.length ? ['', '✕ <b>ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>', ...groups.smsUnavailable] : []),
