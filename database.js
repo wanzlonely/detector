@@ -17,7 +17,8 @@ function getTodayWIB() {
   return new Date(Date.now() + 7 * 3600 * 1000).toISOString().split('T')[0];
 }
 
-function getPackagesByTier() {\n  return PACKAGES.slice();
+function getPackagesByTier() {
+  return PACKAGES.slice();
 }
 
 function getPackageById(pkgId) {
