@@ -30,7 +30,12 @@ bot.use(async (ctx, next) => {
   if (navigationText || navigationCallback) {
     await stopActiveDetection(ctx);
     if (ctx.from && (navigationText || navigationCallback)) {
-      await redis.del('detect:mode:' + ctx.from.id).catch(() => {});
+      await Promise.all([
+        redis.del('detect:mode:' + ctx.from.id),
+        redis.del('contact:state:' + ctx.from.id),
+        redis.del('owner:action:' + ctx.from.id),
+        redis.del('owner:contact:target:' + ctx.from.id)
+      ]).catch(() => {});
     }
   }
   return next();
@@ -333,7 +338,7 @@ async function processNumbers(ctx, numbersList) {
   const owner = isOwner(ctx);
   const user = await getEffectiveUser(ctx);
   const vip = owner || isUserVip(user);
-  const maxBatch = owner ? 30 : (!vip ? 1 : Math.min(30, Math.max(1, Number(user.bulk_limit || 30))));
+  const maxBatch = owner ? 30 : (!vip ? 1 : 30);
   const premiumAccess = vip;
 
   if (numbersList.length > maxBatch) {
