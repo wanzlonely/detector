@@ -375,13 +375,14 @@ async function processNumbers(ctx, numbersList) {
       const status = result.isBanned ? 'DIBLOKIR'
         : result.isCloneBlocked ? 'CLONE_UNSUPPORTED'
           : result.anyCooldown ? 'COOLDOWN'
-            : result.smsAvailable === false ? 'SMS_UNAVAILABLE'
-              : result.isReady ? 'SIAP' : 'STATUS_TIDAK_DIKENALI';
+            : result.isReady ? 'SIAP'
+              : result.smsAvailable === false ? 'SMS_UNAVAILABLE'
+                : 'STATUS_TIDAK_DIKENALI';
       if (result.isBanned) stats.banned += 1;
       else if (result.isCloneBlocked) { stats.clone += 1; stats.failed += 1; }
       else if (result.anyCooldown) stats.cooldown += 1;
-      else if (result.smsAvailable === false) { stats.smsUnavailable += 1; stats.failed += 1; }
       else if (result.isReady) stats.ready += 1;
+      else if (result.smsAvailable === false) { stats.smsUnavailable += 1; stats.failed += 1; }
       else stats.failed += 1;
       lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
       await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
