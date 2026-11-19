@@ -294,13 +294,13 @@ function buildProgressText(done, total, stage, stats, frame = 0) {
   const spinner = ['◐', '◓', '◑', '◒'][frame % 4];
   const counts = stats || { ready: 0, cooldown: 0, banned: 0, error: 0, failed: 0 };
   const failed = Number(counts.failed ?? counts.error ?? 0);
-  return '⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>\\n\\n' + bar + ' <b>' + percent + '%</b>' +
-    '\\nᴛᴀʀɢᴇᴛ ⟿ <b>' + done + ' / ' + total + '</b>' +
-    '\\n\\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + counts.ready + '</b>' +
-    '\\n✕ ɢᴀɢᴀʟ ⦂ <b>' + failed + '</b>' +
-    '\\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + counts.cooldown + '</b>' +
-    '\\n  ⊘ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + counts.banned + '</b>' +
-    (stage ? '\\n\\n' + spinner + ' ' + stage : '');
+  return '⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>\n\n' + bar + ' <b>' + percent + '%</b>' +
+    '\nᴛᴀʀɢᴇᴛ ⟿ <b>' + done + ' / ' + total + '</b>' +
+    '\n\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + counts.ready + '</b>' +
+    '\n✕ ɢᴀɢᴀʟ ⦂ <b>' + failed + '</b>' +
+    '\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + counts.cooldown + '</b>' +
+    '\n  ⊘ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + counts.banned + '</b>' +
+    (stage ? '\n\n' + spinner + ' ' + stage : '');
 }
 
 bot.action(/^detect:stop:(\d+):(\d+)$/, async (ctx) => {
@@ -420,14 +420,14 @@ async function processNumbers(ctx, numbersList) {
   const filled = Math.floor(finalPercent / 10);
   const finalBar = '●'.repeat(filled) + '○'.repeat(10 - filled);
   const finalText = (stopped ? '× <b>ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ</b>' : '✓ <b>ᴅᴇᴛᴇᴄᴛ sᴇʟᴇsᴀɪ</b>') +
-    '\\n\\n⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>' +
-    '\\n\\n' + finalBar + ' <b>' + finalPercent + '%</b>' +
-    '\\nᴛᴀʀɢᴇᴛ ⟿ <b>' + completed + ' / ' + numbersList.length + '</b>' +
-    '\\n\\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + stats.ready + '</b>' +
-    '\\n✕ ɢᴀɢᴀʟ ⦂ <b>' + Number(stats.failed || stats.error || 0) + '</b>' +
-    '\\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + stats.cooldown + '</b>' +
-    '\\n  ⊘ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + stats.banned + '</b>' +
-    '\\n\\n◐ ' + (stopped ? 'ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ' : 'sᴇʟᴜʀᴜʜ ᴛᴀʀɢᴇᴛ sᴇʟᴇsᴀɪ');
+    '\n\n⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>' +
+    '\n\n' + finalBar + ' <b>' + finalPercent + '%</b>' +
+    '\nᴛᴀʀɢᴇᴛ ⟿ <b>' + completed + ' / ' + numbersList.length + '</b>' +
+    '\n\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + stats.ready + '</b>' +
+    '\n✕ ɢᴀɢᴀʟ ⦂ <b>' + Number(stats.failed || stats.error || 0) + '</b>' +
+    '\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + stats.cooldown + '</b>' +
+    '\n  ⊘ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + stats.banned + '</b>' +
+    '\n\n◐ ' + (stopped ? 'ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ' : 'sᴇʟᴜʀᴜʜ ᴛᴀʀɢᴇᴛ sᴇʟᴇsᴀɪ');
   await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, finalText, { parse_mode: 'HTML' }).catch(() => {});
   await ctx.reply(renderDetectionSummary({
     results: detectionResults,
