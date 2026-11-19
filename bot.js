@@ -158,7 +158,8 @@ bot.command('addvip', async (ctx) => {
   if (!isOwner(ctx)) return;
   const parts = ctx.message.text.trim().split(/\s+/);
   const uid = Number(parts[1]);
-  const hasLegacyTier = ['STANDARD', 'ULTRA', 'PREMIUM'].includes(String(parts[2] || '').toUpperCase());\n  const days = Number(hasLegacyTier ? parts[3] : parts[2]);
+  const hasLegacyTier = ['STANDARD', 'ULTRA', 'PREMIUM'].includes(String(parts[2] || '').toUpperCase());
+  const days = Number(hasLegacyTier ? parts[3] : parts[2]);
   if (!uid || !Number.isFinite(days) || days <= 0) {
     return ctx.reply('Format: <code>/addvip USER_ID HARI</code>', { parse_mode: 'HTML' });
   }
@@ -187,7 +188,8 @@ async function processNumbers(ctx, numbersList) {
   const owner = isOwner(ctx);
   const user = await getEffectiveUser(ctx);
   const vip = owner || isUserVip(user);
-  const maxBatch = owner ? 30 : (!vip ? 1 : Math.min(10, Number(user.bulk_limit || 10)));\n  const premiumAccess = vip;
+  const maxBatch = owner ? 30 : (!vip ? 1 : Math.min(10, Number(user.bulk_limit || 10)));
+  const premiumAccess = vip;
 
   if (numbersList.length > maxBatch) {
     return ctx.reply('◈ <b>BATAS PEMERIKSAAN</b>\nAkun ini dapat memeriksa maksimal <b>' + maxBatch + ' nomor</b> dalam satu kiriman.', { parse_mode: 'HTML' });
