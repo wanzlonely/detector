@@ -251,12 +251,12 @@ function buildProgressText(done, total, stage, frame = 0) {
   const filled = Math.floor(percent / 10);
   const bar = '▰'.repeat(filled) + '▱'.repeat(10 - filled);
   const spinner = ['◐', '◓', '◑', '◒'][frame % 4];
-  return '⚡ <b>DETECT SEDANG BERJALAN</b>\\n' + spinner + ' ' + stage +
-    '\\n\\n<code>' + bar + '</code> <b>' + percent + '%</b>' +
-    '\\nProgres: <b>' + done + ' / ' + total + '</b> nomor' +
-    '\\n<i>Hasil akan ditampilkan otomatis.</i>';
+  return '⚡ <b>DETECT SEDANG BERJALAN</b>\n' + spinner + ' ' + stage +
+    '\n\n<code>' + bar + '</code> <b>' + percent + '%</b>' +
+    '\nProgres: <b>' + done + ' / ' + total + '</b> nomor' +
+    '\n<i>Hasil akan ditampilkan otomatis.</i>';
 }
-bot.action(/^detect:stop:(\\d+):(\\d+)$/, async (ctx) => {
+bot.action(/^detect:stop:(\d+):(\d+)$/, async (ctx) => {
   if (Number(ctx.from.id) !== Number(ctx.match[1])) return ctx.answerCbQuery('Sesi ini bukan milikmu.', { show_alert: true });
   await redis.set('detect:stop:' + ctx.match[1] + ':' + ctx.match[2], '1', { ex: 600 });
   return ctx.answerCbQuery('Permintaan berhenti diterima.');
