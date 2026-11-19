@@ -140,13 +140,13 @@ bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {
 bot.action(/^pkg:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
-  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>\\nPilihan paket ini mungkin sudah tidak tersedia. Silakan buka kembali katalog Premium dan pilih paket yang aktif.');
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>\nPilihan paket ini mungkin sudah tidak tersedia. Silakan buka kembali katalog Premium dan pilih paket yang aktif.');
   return showPackage(ctx, pkg, true);
 });
 bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
-  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>\\nSilakan buka kembali katalog Premium untuk melihat pilihan yang tersedia.');
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>\nSilakan buka kembali katalog Premium untuk melihat pilihan yang tersedia.');
   return showCheckout(ctx, pkg, true);
 });
 bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
@@ -154,7 +154,7 @@ bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
   return ctx.reply(
     ADMIN_ID
       ? '✉ <b>BANTUAN PEMBELIAN</b>\nSilakan hubungi <a href="tg://user?id=' + ADMIN_ID + '">Admin MetaDetect</a> untuk aktivasi paket.'
-      : '⚠️ <b>KONTAK ADMIN BELUM TERSEDIA</b>\\nSilakan coba kembali nanti atau hubungi pengelola melalui kanal resmi MetaDetect.',
+      : '⚠️ <b>KONTAK ADMIN BELUM TERSEDIA</b>\nSilakan coba kembali nanti atau hubungi pengelola melalui kanal resmi MetaDetect.',
     { parse_mode: 'HTML' }
   );
 });
@@ -173,7 +173,7 @@ function renderOwnerConsole(stats) {
     '',
     '⌁ ᴘɪʟɪʜ ᴀᴋsɪ ᴏᴡɴᴇʀ ᴍᴇʟᴀʟᴜɪ ᴋᴇʏʙᴏᴀʀᴅ.',
     '◈ ᴏᴡɴᴇʀ ᴍᴏᴅᴇ · ᴀᴋᴛɪғ'
-  ].join('\\n');
+  ].join('\n');
 }
 
 async function showStatus(ctx) {
@@ -196,21 +196,21 @@ bot.hears('🏆 LEADERBOARD', showLeaderboard);
 bot.hears('🎁 REFERRAL', showReferral);
 
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴛɪᴅᴀᴋ ᴅɪɪᴢɪɴᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴏᴡɴᴇʀ ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ.');
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴛɪᴅᴀᴋ ᴅɪɪᴢɪɴᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴏᴡɴᴇʀ ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ.');
   const stats = await getGlobalStats();
   return ctx.reply(renderOwnerConsole(stats), { parse_mode: 'HTML' });
 });
 bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'activate');
   return ctx.reply(`✦ ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ ✦\n\nᴍᴀsᴜᴋᴋᴀɴ ɪᴅ ᴛᴇʟᴇɢʀᴀᴍ & ᴅᴜʀᴀsɪ ʜᴀʀɪ\nᴅᴇɴɢᴀɴ ᴘᴇᴍɪsᴀʜ sᴘᴀsɪ.\n\nᴄᴏɴᴛᴏʜ ⦂ <code>123456789 7</code>\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ`, { parse_mode: 'HTML' });
 });
 bot.hears('▤ BROADCAST', async (ctx) => {
-  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
+  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });
   await setOwnerAction(ctx.from.id, 'broadcast');
-  return ctx.reply('▤ <b>ᴍᴏᴅᴇ ʙʀᴏᴀᴅᴄᴀsᴛ</b>\\n\\nᴋɪʀɪᴍ ɪsɪ ᴘᴇɴɢᴜᴍᴜᴍᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴀᴍᴘᴀɪᴋᴀɴ ᴋᴇ sᴇᴍᴜᴀ ᴘᴇɴɢɢᴜɴᴀ.', { parse_mode: 'HTML' });
+  return ctx.reply('▤ <b>ᴍᴏᴅᴇ ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ɪsɪ ᴘᴇɴɢᴜᴍᴜᴍᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴀᴍᴘᴀɪᴋᴀɴ ᴋᴇ sᴇᴍᴜᴀ ᴘᴇɴɢɢᴜɴᴀ.', { parse_mode: 'HTML' });
 });
-bot.command('admin', async (ctx) => {,  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });,  const stats = await getGlobalStats();,  return ctx.reply(renderOwnerConsole(stats), { parse_mode: 'HTML' });,});
+bot.command('admin', async (ctx) => {,  if (!isOwner(ctx)) return ctx.reply('⛔ <b>ᴀᴋsᴇs ᴏᴡɴᴇʀ ᴅɪᴘᴇʀʟᴜᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴘᴇᴍɪʟɪᴋ ʙᴏᴛ.', { parse_mode: 'HTML' });,  const stats = await getGlobalStats();,  return ctx.reply(renderOwnerConsole(stats), { parse_mode: 'HTML' });,});
 bot.command('addvip', async (ctx) => {
   if (!isOwner(ctx)) return;
   const parts = ctx.message.text.trim().split(/\s+/);
@@ -218,16 +218,16 @@ bot.command('addvip', async (ctx) => {
   const hasLegacyTier = ['STANDARD', 'ULTRA', 'PREMIUM'].includes(String(parts[2] || '').toUpperCase());
   const days = Number(hasLegacyTier ? parts[3] : parts[2]);
   if (!uid || !Number.isFinite(days) || days <= 0) {
-    return ctx.reply('✚ <b>FORMAT AKTIVASI BELUM TEPAT</b>\\nGunakan format <code>ID_TELEGRAM DURASI_HARI</code>.\\nContoh: <code>123456789 7</code>.', { parse_mode: 'HTML' });
+    return ctx.reply('✚ <b>FORMAT AKTIVASI BELUM TEPAT</b>\nGunakan format <code>ID_TELEGRAM DURASI_HARI</code>.\nContoh: <code>123456789 7</code>.', { parse_mode: 'HTML' });
   }
   const result = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
-      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\\n\\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(activated.expiry) + '</code>\\n\\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
+      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\n\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(activated.expiry) + '</code>\n\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
 });
 
 bot.command('broadcast', async (ctx) => {
   if (!isOwner(ctx)) return;
   const message = ctx.message.text.replace(/^\/broadcast\s*/i, '').trim();
-  if (!message) return ctx.reply('▤ <b>ᴘᴇsᴀɴ ʙʀᴏᴀᴅᴄᴀsᴛ ᴋᴏsᴏɴɢ</b>\\n\\nᴛᴜʟɪs ɪsɪ ᴘᴇɴɢᴜᴍᴜᴍᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴋɪʀɪᴍ, ᴀᴛᴀᴜ ɢᴜɴᴀᴋᴀɴ ᴛᴏᴍʙᴏʟ ʙʀᴏᴀᴅᴄᴀsᴛ.');
+  if (!message) return ctx.reply('▤ <b>ᴘᴇsᴀɴ ʙʀᴏᴀᴅᴄᴀsᴛ ᴋᴏsᴏɴɢ</b>\n\nᴛᴜʟɪs ɪsɪ ᴘᴇɴɢᴜᴍᴜᴍᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴋɪʀɪᴍ, ᴀᴛᴀᴜ ɢᴜɴᴀᴋᴀɴ ᴛᴏᴍʙᴏʟ ʙʀᴏᴀᴅᴄᴀsᴛ.');
   const stats = await getGlobalStats();
   let sent = 0;
   for (const uid of stats.allUserIds) {
@@ -238,7 +238,7 @@ bot.command('broadcast', async (ctx) => {
       console.error('[broadcast]', uid, err && err.message || err);
     }
   }
-      return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\\n\\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');
+      return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\n\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');
 });
 
 
@@ -266,11 +266,11 @@ async function processNumbers(ctx, numbersList) {
   const premiumAccess = vip;
 
   if (numbersList.length > maxBatch) {
-    return ctx.reply('◈ <b>ʙᴀᴛᴀs ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>\\nᴀᴋᴜɴᴍᴜ ᴅᴀᴘᴀᴛ ᴍᴇᴍᴇʀɪᴋsᴀ ᴍᴀᴋsɪᴍᴀʟ <b>' + maxBatch + ' ɴᴏᴍᴏʀ</b> ᴅᴀʟᴀᴍ sᴀᴛᴜ ᴋɪʀɪᴍᴀɴ.', { parse_mode: 'HTML' });
+    return ctx.reply('◈ <b>ʙᴀᴛᴀs ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>\nᴀᴋᴜɴᴍᴜ ᴅᴀᴘᴀᴛ ᴍᴇᴍᴇʀɪᴋsᴀ ᴍᴀᴋsɪᴍᴀʟ <b>' + maxBatch + ' ɴᴏᴍᴏʀ</b> ᴅᴀʟᴀᴍ sᴀᴛᴜ ᴋɪʀɪᴍᴀɴ.', { parse_mode: 'HTML' });
   }
   if (!owner) {
     const allowed = await consumeQuota(ctx.from.id, numbersList.length);
-    if (!allowed) return ctx.reply('◈ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\\nᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴᴍᴜ sᴜᴅᴀʜ ᴛᴇʀᴘᴀᴋᴀɪ. ᴋᴜᴏᴛᴀ ᴀᴋᴀɴ ᴅɪᴘᴇʀʙᴀʀᴜɪ ᴘᴜᴋᴜʟ 00.00 ᴡɪʙ.', { parse_mode: 'HTML' });
+    if (!allowed) return ctx.reply('◈ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\nᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴᴍᴜ sᴜᴅᴀʜ ᴛᴇʀᴘᴀᴋᴀɪ. ᴋᴜᴏᴛᴀ ᴀᴋᴀɴ ᴅɪᴘᴇʀʙᴀʀᴜɪ ᴘᴜᴋᴜʟ 00.00 ᴡɪʙ.', { parse_mode: 'HTML' });
   } else {
     await incrementUserChecks(ctx.from.id, numbersList.length);
   }
@@ -309,7 +309,7 @@ async function processNumbers(ctx, numbersList) {
       lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
       await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
       const reward = await qualifyReferral(ctx.from.id);
-      if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '🎁 <b>ʜᴀᴅɪᴀʜ ʀᴇғᴇʀᴀʟ ᴅɪᴛᴇʀɪᴍᴀ!</b>\\n\\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>', { parse_mode: 'HTML' }).catch(() => {});
+      if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '🎁 <b>ʜᴀᴅɪᴀʜ ʀᴇғᴇʀᴀʟ ᴅɪᴛᴇʀɪᴍᴀ!</b>\n\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>', { parse_mode: 'HTML' }).catch(() => {});
       const currentUser = await getEffectiveUser(ctx);
       await ctx.reply(renderCooldownCard({
         result,
@@ -325,7 +325,7 @@ async function processNumbers(ctx, numbersList) {
         : /429|rate.?limit|too many/i.test(err && err.message || '')
           ? 'sᴇʀᴠᴇʀ sᴇᴅᴀɴɢ ᴍᴇᴍʙᴀᴛᴀsɪ ᴘᴇʀᴍɪɴᴛᴀᴀɴ. ᴛᴜɴɢɢᴜ sᴇʙᴇɴᴛᴀʀ sᴇʙᴇʟᴜᴍ ᴍᴇɴᴄᴏʙᴀ ʟᴀɢɪ.'
           : 'ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴘʀᴏsᴇs. sɪʟᴀᴋᴀɴ ᴄᴏʙᴀ ʟᴀɢɪ ɴᴀɴᴛɪ.';
-      await ctx.reply('⚠️ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ɢᴀɢᴀʟ</b>\\nɴᴏᴍᴏʀ ⦂ <code>' + escapeHtml(rawNumber) + '</code>\\n' + detail, { parse_mode: 'HTML' });
+      await ctx.reply('⚠️ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ɢᴀɢᴀʟ</b>\nɴᴏᴍᴏʀ ⦂ <code>' + escapeHtml(rawNumber) + '</code>\n' + detail, { parse_mode: 'HTML' });
     }
     completed += 1;
     stage = 'Memperbarui hasil pemeriksaan';
@@ -363,7 +363,7 @@ bot.on('text', async (ctx) => {
   }
   if (text === '/cancel' || text.toUpperCase() === 'BATAL') {
     if (isOwner(ctx)) await clearOwnerAction(ctx.from.id);
-    return ctx.reply('✕ <b>ᴘʀᴏsᴇs ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\\n\\nᴛɪᴅᴀᴋ ᴀᴅᴀ ᴘᴇʀᴜʙᴀʜᴀɴ ʏᴀɴɢ ᴅɪʟᴀᴋᴜᴋᴀɴ. ᴋᴀᴍᴜ ʙɪsᴀ ᴍᴇᴍɪʟɪʜ ᴍᴇɴᴜ ʟᴀɪɴ.');
+    return ctx.reply('✕ <b>ᴘʀᴏsᴇs ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\n\nᴛɪᴅᴀᴋ ᴀᴅᴀ ᴘᴇʀᴜʙᴀʜᴀɴ ʏᴀɴɢ ᴅɪʟᴀᴋᴜᴋᴀɴ. ᴋᴀᴍᴜ ʙɪsᴀ ᴍᴇᴍɪʟɪʜ ᴍᴇɴᴜ ʟᴀɪɴ.');
   }
   if (isOwner(ctx)) {
     const action = await getOwnerAction(ctx.from.id);
@@ -372,11 +372,11 @@ bot.on('text', async (ctx) => {
       const uid = Number(uidText);
       const days = Number(daysText);
       if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isFinite(days) || days <= 0 || days > 3650) {
-        return ctx.reply('✦ <b>ғᴏʀᴍᴀᴛ ᴀᴋᴛɪᴠᴀsɪ ᴛɪᴅᴀᴋ ᴛᴇᴘᴀᴛ</b>\\n\\nᴋɪʀɪᴍ ɪᴅ ᴛᴇʟᴇɢʀᴀᴍ ᴅᴀɴ ᴅᴜʀᴀsɪ ʜᴀʀɪ ᴅᴇɴɢᴀɴ ᴘᴇᴍɪsᴀʜ sᴘᴀsɪ.\\nᴄᴏɴᴛᴏʜ ⦂ <code>123456789 7</code>', { parse_mode: 'HTML' });
+        return ctx.reply('✦ <b>ғᴏʀᴍᴀᴛ ᴀᴋᴛɪᴠᴀsɪ ᴛɪᴅᴀᴋ ᴛᴇᴘᴀᴛ</b>\n\nᴋɪʀɪᴍ ɪᴅ ᴛᴇʟᴇɢʀᴀᴍ ᴅᴀɴ ᴅᴜʀᴀsɪ ʜᴀʀɪ ᴅᴇɴɢᴀɴ ᴘᴇᴍɪsᴀʜ sᴘᴀsɪ.\nᴄᴏɴᴛᴏʜ ⦂ <code>123456789 7</code>', { parse_mode: 'HTML' });
       }
       const activated = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
       await clearOwnerAction(ctx.from.id);
-      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\\n\\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(activated.expiry) + '</code>\\n\\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
+      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\n\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(activated.expiry) + '</code>\n\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
     }
     if (action === 'broadcast') {
       await clearOwnerAction(ctx.from.id);
@@ -390,7 +390,7 @@ bot.on('text', async (ctx) => {
           console.error('[broadcast]', uid, err && err.message || err);
         }
       }
-      return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\\n\\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');\\n\\n◉ Berhasil terkirim: <b>' + sent + '</b> dari <b>' + stats.allUserIds.length + '</b> pengguna.\\n<i>Akun yang memblokir bot atau tidak dapat menerima pesan mungkin tidak terjangkau.</i>');
+      return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\n\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');\n\n◉ Berhasil terkirim: <b>' + sent + '</b> dari <b>' + stats.allUserIds.length + '</b> pengguna.\n<i>Akun yang memblokir bot atau tidak dapat menerima pesan mungkin tidak terjangkau.</i>');
     }
   }
 
