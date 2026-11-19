@@ -238,15 +238,7 @@ function renderCooldownCard({ result, user, isVip }) {
       ? 'COOLDOWN ACTIVE — Verifikasi SMS masih dalam masa tunggu.'
       : 'ALL CLEAR — Verifikasi SMS siap diproses.';
 
-  const tierFooter = String(user.vip_tier).toUpperCase() === 'OWNER'
-    ? '✧ OWNER UNLIMITED'
-    : !isVip
-      ? `QUOTA ${sisaFree}/3`
-      : String(user.vip_tier).toUpperCase() === 'ULTRA'
-        ? '♛ ULTRA UNLIMITED'
-        : '✧ STANDARD UNLIMITED';
-
-  return (
+  const tierFooter = String(user.vip_tier).toUpperCase() === 'OWNER'\n    ? '✧ OWNER ACCESS'\n    : !isVip\n      ? `KUOTA ${sisaFree}/3`\n      : '✦ PREMIUM ACCESS';\n\n  return (
     `${t.mark} <b>TELEMETRY REPORT</b>\n\n` +
     `<blockquote>` +
     `${t.bullet} <b>Target:</b> ${numberDisplay} [<code>${result.region}</code>]\n` +
