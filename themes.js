@@ -185,45 +185,41 @@ function renderStoreCatalog({ user, activeTier, packages }) {
 }
 
 function renderPackageDetailCard({ user, pkg }) {
-  const t = getTheme(user.theme);
   const isUltra = pkg.tier === 'ultra';
-  const icon = isUltra ? '👑' : '⚡';
   const perDay = Math.round(pkg.price / pkg.duration_days);
-
   const features = isUltra
     ? [
-        'Unlimited pengecekan nomor selama masa aktif',
-        'Ultra Bulk Check hingga 30 nomor dalam 1 pesan',
-        'Batch Analytics Summary (Ready / Cooldown / Banned)',
-        'Priority DataImpulse IP Rotation (hingga 7x retry)',
-        'Prioritas antrean dan dukungan operasional'
+        'Pemeriksaan tanpa batas selama masa aktif',
+        'Maksimal 30 nomor dalam satu kiriman',
+        'Rotasi proxy dengan prioritas Ultra',
+        'Ringkasan hasil pemeriksaan massal',
+        'Dirancang untuk penggunaan intensif'
       ]
     : [
-        'Unlimited pengecekan nomor selama masa aktif',
-        'Standard Bulk Check hingga 10 nomor dalam 1 pesan',
-        'DataImpulse Rotating IP per request (5x retry)',
-        'Akses penuh semua tema UI & Privacy Spoiler',
-        'Prioritas antrean di atas pengguna Free'
+        'Pemeriksaan tanpa batas selama masa aktif',
+        'Maksimal 10 nomor dalam satu kiriman',
+        'Rotasi proxy otomatis',
+        'Akses Premium Standard',
+        'Cocok untuk kebutuhan pemeriksaan rutin'
       ];
-
-  return (
-    `${t.mark} <b>PACKAGE SHOWCASE · ${icon} ${pkg.tierLabel}</b>\n\n` +
-    `<blockquote>` +
-    `${t.bullet} <b>Paket:</b> <b>${escapeHtml(pkg.durationLabel)}</b> [<code>${pkg.tag}</code>]\n` +
-    `${t.bullet} <b>Kategori:</b> <code>${pkg.tierLabel}</code>\n` +
-    `${t.bullet} <b>Harga Paket:</b> <b><code>${formatIDR(pkg.price)}</code></b>\n` +
-    `${t.bullet} <b>Efisiensi Biaya:</b> <code>${formatIDR(perDay)} / hari</code>\n` +
-    `${t.bullet} <b>Kapasitas Bulk:</b> <code>${pkg.bulk_limit} Nomor / Batch</code>` +
-    `</blockquote>\n\n` +
-    `<blockquote expandable>` +
-    `<b>✨ KEUNTUNGAN & SPESIFIKASI LENGKAP</b>\n` +
-    `${t.divider}\n` +
-    features.map((f) => `${t.bullet} ${f}`).join('\n') +
-    `</blockquote>\n\n` +
-    `<i>${escapeHtml(pkg.highlight)}</i>`
-  );
+  return [
+    (isUltra ? '♛' : '✧') + ' <b>RINCIAN PAKET ' + (isUltra ? 'ULTRA' : 'STANDARD') + '</b>',
+    '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '',
+    '◈ <b>INFORMASI PAKET</b>',
+    '✦ Durasi   <b>' + escapeHtml(pkg.durationLabel) + '</b>',
+    '✦ Harga    <b>' + formatIDR(pkg.price) + '</b>',
+    '✦ Per hari <code>' + formatIDR(perDay) + '</code>',
+    '✦ Kapasitas <code>' + pkg.bulk_limit + ' nomor / kiriman</code>',
+    '',
+    '⌁ <b>FASILITAS</b>',
+    ...features.map((feature) => '✓ ' + feature),
+    '',
+    '<i>' + escapeHtml(pkg.highlight) + '</i>',
+    '',
+    '<i>Pilih tombol BELI untuk melanjutkan.</i>'
+  ].join('\n');
 }
-
 function renderPaymentMaintenanceCard({ user, pkg }) {
   const t = getTheme(user.theme);
   const icon = pkg.tier === 'ultra' ? '👑' : '⚡';
@@ -242,6 +238,23 @@ function renderPaymentMaintenanceCard({ user, pkg }) {
     `Untuk pembelian paket saat ini, silakan hubungi Admin secara langsung agar akun Anda diaktifkan secara manual.` +
     `</blockquote>`
   );
+}
+function renderPaymentMaintenanceCard({ user, pkg }) {
+  const isUltra = pkg.tier === 'ultra';
+  return [
+    '✧ <b>KONFIRMASI PEMBELIAN</b>',
+    '<code>━━━━━━━━━━━━━━━━━━━━━━━━</code>',
+    '',
+    '◈ Paket      <b>' + (isUltra ? 'PREMIUM ULTRA' : 'PREMIUM STANDARD') + '</b>',
+    '◈ Durasi     <b>' + escapeHtml(pkg.durationLabel) + '</b>',
+    '◈ Total      <b>' + formatIDR(pkg.price) + '</b>',
+    '',
+    '⌁ <b>INFORMASI PEMBAYARAN</b>',
+    'Pembayaran otomatis sedang disiapkan.',
+    'Untuk aktivasi saat ini, hubungi admin melalui tombol di bawah.',
+    '',
+    '<i>Pastikan nama paket dan nominal sudah sesuai sebelum menghubungi admin.</i>'
+  ].join('\n');
 }
 
 function renderCooldownCard({ result, user, isVip }) {
