@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
+const { findPhoneNumbersInText } = require('libphonenumber-js');
 const {
   redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
   consumeQuota, addCheckLog, getGlobalStats, getCachedCheckResult,
@@ -14,17 +15,34 @@ const {
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
+async function stopActiveDetection(ctx) {
+  const userId = ctx.from && ctx.from.id;
+  if (!userId) return;
+  const jobId = await redis.get('detect:active:' + userId);
+  if (!jobId) return;
+  await redis.set('detect:stop:' + userId + ':' + jobId, '1', { ex: 600 });
+  await redis.set('detect:exit:' + userId + ':' + jobId, 'navigation', { ex: 600 });
+}
+bot.use(async (ctx, next) => {
+  const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
+  const callbackData = ctx.callbackQuery && ctx.callbackQuery.data || '';
+  const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
+  const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
+  if (navigationText || navigationCallback) await stopActiveDetection(ctx);
+  return next();
+});
+
 const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
 const USER_KEYBOARD = Markup.keyboard([
   [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
   [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
-  [{ text: '♧ REFERRAL' }]
+  [{ text: '♧ REFERRAL' }, { text: '✉ HUBUNGI ADMIN' }]
 ]).resize().persistent().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
   [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
   [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
-  [{ text: '♧ REFERRAL' }],
+  [{ text: '♧ REFERRAL' }, { text: '✉ HUBUNGI ADMIN' }],
   [{ text: '♛ OWNER CONSOLE' }],
   [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
 ]).resize().persistent().placeholder('Pilih fungsi owner…');
@@ -106,12 +124,7 @@ async function showPackage(ctx, pkg, edit) {
 async function showCheckout(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPaymentMaintenanceCard({ user, pkg });
-  const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('⌁ HUBUNGI ADMIN', 'contact:' + pkg.id)],
-    [
-      Markup.button.callback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier)
-    ]
-  ]);
+  const keyboard = Markup.inlineKeyboard([[Markup.button.callback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier)]]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
 }
@@ -128,7 +141,7 @@ bot.start(async (ctx) => {
   return showHome(ctx);
 });
 bot.command('detect', (ctx) => ctx.reply(
-  '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>6282298902274\n6281234567890</code>',
+  '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX\n62858XXXXX</code>',
   { parse_mode: 'HTML' }
 ));
 bot.command('store', (ctx) => showStore(ctx, false));
@@ -149,10 +162,21 @@ bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
   if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>\nSilakan buka kembali katalog Premium untuk melihat pilihan yang tersedia.');
   return showCheckout(ctx, pkg, true);
 });
-bot.action(/^contact:(?!cancel$)([a-z0-9_]+)$/, async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
+async function startContact(ctx) {
   await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
   return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\nᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ, ʙᴏᴛ ᴀᴋᴀɴ ᴍᴇɴᴇʀᴜsᴋᴀɴɴʏᴀ ʟᴀɴɢsᴜɴɢ ᴋᴇ ᴀᴅᴍɪɴ ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ.\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('× BATALKAN', 'contact:cancel')]]) });
+}
+bot.hears('✉ HUBUNGI ADMIN', startContact);
+bot.action(/^contact:(?!cancel$|reply:)([a-z0-9_]+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return startContact(ctx);
+});
+bot.action(/^contact:reply:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return ctx.answerCbQuery('Akses owner diperlukan.', { show_alert: true });
+  const targetId = ctx.match[1];
+  await redis.set('owner:contact:target:' + ctx.from.id, targetId, { ex: 600 });
+  return ctx.reply('↩ <b>ᴍᴏᴅᴇ ʙᴀʟᴀs ᴘᴇsᴀɴ</b>\n\nᴛᴜᴊᴜᴀɴ ⦂ <code>' + targetId + '</code>\nᴋɪʀɪᴍ ʙᴀʟᴀsᴀɴ ᴀɴᴅᴀ ᴅᴀʟᴀᴍ 10 ᴍᴇɴɪᴛ.\n\nᴋᴇᴛɪᴋ /cancel ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML' });
 });
 bot.action('contact:cancel', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
@@ -283,6 +307,29 @@ bot.action(/^detect:stop:(\d+):(\d+)$/, async (ctx) => {
   return ctx.answerCbQuery('Permintaan berhenti diterima.');
 });
 
+function extractPhoneNumbers(input) {
+  const source = String(input || '');
+  const results = [];
+  const seen = new Set();
+  const add = (raw) => {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length < 5 || digits.length > 15 || seen.has(digits)) return;
+    seen.add(digits);
+    results.push(digits);
+  };
+  try {
+    for (const match of findPhoneNumbersInText(source, 'ID')) {
+      const value = match.number && match.number.number;
+      if (value) add(value);
+    }
+  } catch (err) {
+    console.warn('[phone parser]', err && err.message || err);
+  }
+  const candidates = source.match(/\+?\d[\d\s().-]{3,}\d|\+?\d{5,15}/g) || [];
+  for (const candidate of candidates) add(candidate);
+  return results;
+}
+
 async function processNumbers(ctx, numbersList) {
   const owner = isOwner(ctx);
   const user = await getEffectiveUser(ctx);
@@ -302,6 +349,7 @@ async function processNumbers(ctx, numbersList) {
 
   const jobId = String(Date.now());
   const stopKey = 'detect:stop:' + ctx.from.id + ':' + jobId;
+  await redis.set('detect:active:' + ctx.from.id, jobId, { ex: 600 });
   let completed = 0;
   const startedAt = Date.now();
   let stage = 'ᴍᴇɴʏɪᴀᴘᴋᴀɴ sᴇsɪ ᴅᴇᴛᴇᴄᴛ';
@@ -357,6 +405,13 @@ async function processNumbers(ctx, numbersList) {
 
   clearInterval(timer);
   await redis.del(stopKey).catch(() => {});
+  const exitReason = await redis.get('detect:exit:' + ctx.from.id + ':' + jobId);
+  await redis.del('detect:exit:' + ctx.from.id + ':' + jobId).catch(() => {});
+  if (String(await redis.get('detect:active:' + ctx.from.id) || '') === jobId) await redis.del('detect:active:' + ctx.from.id).catch(() => {});
+  if (exitReason === 'navigation') {
+    await ctx.telegram.deleteMessage(ctx.chat.id, progress.message_id).catch(() => {});
+    return;
+  }
   const finalText = (stopped ? '× <b>ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ</b>' : '✓ <b>ᴅᴇᴛᴇᴄᴛ sᴇʟᴇsᴀɪ</b>') + '\n\n' + buildProgressText(completed, numbersList.length, stopped ? 'ᴅɪʜᴇɴᴛɪᴋᴀɴ ᴘᴇɴɢɢᴜɴᴀ' : 'sᴇʟᴜʀᴜʜ ᴛᴀʀɢᴇᴛ sᴇʟᴇsᴀɪ', stats);
   await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, finalText, { parse_mode: 'HTML' }).catch(() => {});
   await ctx.reply(renderDetectionSummary({
@@ -378,17 +433,29 @@ bot.on('text', async (ctx) => {
       return ctx.reply('✓ <b>ʙᴀʟᴀsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ᴋᴇ ᴘᴇɴɢɢᴜɴᴀ</b>', { parse_mode: 'HTML' });
     }
   }
+  if (isOwner(ctx)) {
+    const targetId = await redis.get('owner:contact:target:' + ctx.from.id);
+    if (targetId) {
+      if (text === '/cancel' || text.toUpperCase() === 'BATAL') {
+        await redis.del('owner:contact:target:' + ctx.from.id);
+        return ctx.reply('✕ <b>ʙᴀʟᴀsᴀɴ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+      }
+      await bot.telegram.sendMessage(Number(targetId), '✦ <b>ʙᴀʟᴀsᴀɴ ᴀᴅᴍɪɴ</b>\n\n┃ ' + escapeHtml(text) + '\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʟᴀɢɪ ᴊɪᴋᴀ ɪɴɢɪɴ ᴍᴇᴍʙᴀʟᴀs.', { parse_mode: 'HTML' });
+      await redis.del('owner:contact:target:' + ctx.from.id);
+      return ctx.reply('✓ <b>ʙᴀʟᴀsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\nᴛᴜᴊᴜᴀɴ ⦂ <code>' + targetId + '</code>', { parse_mode: 'HTML' });
+    }
+  }
   if (await redis.get('contact:state:' + ctx.from.id)) {
     await redis.del('contact:state:' + ctx.from.id);
     if (!ADMIN_ID) return ctx.reply('✕ ᴀᴅᴍɪɴ ʙᴇʟᴜᴍ ᴅɪᴀᴛᴜʀ.');
     const sender = ctx.from.username ? '@' + ctx.from.username : (ctx.from.first_name || 'Pengguna');
-    const forwarded = await bot.telegram.sendMessage(ADMIN_ID, '✉ <b>ᴘᴇsᴀɴ ᴍᴀsᴜᴋ</b>\n\nᴅᴀʀɪ ⦂ ' + escapeHtml(sender) + '\nɪᴅ ⦂ <code>' + ctx.from.id + '</code>\n\n┃ ' + escapeHtml(text) + '\n\n<i>Balas pesan ini untuk mengirim balasan langsung ke pengguna.</i>', { parse_mode: 'HTML' });
+    const forwarded = await bot.telegram.sendMessage(ADMIN_ID, '✉ <b>ᴘᴇsᴀɴ ᴍᴀsᴜᴋ</b>\n\nᴅᴀʀɪ ⦂ ' + escapeHtml(sender) + '\nɪᴅ ⦂ <code>' + ctx.from.id + '</code>\n\n┃ ' + escapeHtml(text) + '\n\n<i>Gunakan tombol di bawah agar balasan terkirim ke akun yang tepat.</i>', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('↩ BALAS PENGGUNA · ' + String(ctx.from.id).slice(-5), 'contact:reply:' + ctx.from.id)]]) });
     await redis.set('contact:message:' + forwarded.message_id, String(ctx.from.id), { ex: 604800 });
     return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴘᴇsᴀɴ ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴅɪᴛᴇʀᴜsᴋᴀɴ ᴋᴇ ᴀᴅᴍɪɴ. ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ ʙᴀʟᴀsᴀɴ ᴅɪ sɪɴɪ.', { parse_mode: 'HTML' });
   }
   if (text === '⌖ DETECT' || text === '⌖ Detect' || text === 'Detect') {
     return ctx.reply(
-      '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>6282298902274\n6281234567890</code>',
+      '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX\n62858XXXXX</code>',
       { parse_mode: 'HTML' }
     );
   }
@@ -428,10 +495,8 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  const numbers = text.split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => /^\+?[\d\s().-]{7,20}$/.test(line) && (line.match(/\d/g) || []).length >= 7 && (line.match(/\d/g) || []).length <= 15);
-  if (!numbers.length) return ctx.reply('⌁ <b>ᴘᴇʀɪɴᴛᴀʜ ᴛɪᴅᴀᴋ ᴅɪᴋᴇɴᴀʟɪ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\nᴜɴᴛᴜᴋ ᴍᴇᴍᴜʟᴀɪ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n\nᴄᴏɴᴛᴏʜ ⦂ <code>6282298902274\n6282929929929</code>', { parse_mode: 'HTML' });
+  const numbers = extractPhoneNumbers(text);
+  if (!numbers.length) return ctx.reply('⌁ <b>ᴘᴇʀɪɴᴛᴀʜ ᴛɪᴅᴀᴋ ᴅɪᴋᴇɴᴀʟɪ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\nᴜɴᴛᴜᴋ ᴍᴇᴍᴜʟᴀɪ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX</code>', { parse_mode: 'HTML' });
   return processNumbers(ctx, numbers);
 });
 
