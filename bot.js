@@ -325,7 +325,7 @@ function extractPhoneNumbers(input) {
   } catch (err) {
     console.warn('[phone parser]', err && err.message || err);
   }
-  const candidates = source.split(/\r?\n/).flatMap((line) => line.match(/\+?\d[\d \t().-]{3,}\d|\+?\d{5,15}/g) || []);
+  const candidates = [...source.matchAll(/(?:^|[^\d])(\+?\d{5,15})(?!\d)/g)].map((match) => match[1]);
   for (const candidate of candidates) add(candidate);
   return results;
 }
