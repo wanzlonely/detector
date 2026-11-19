@@ -140,13 +140,13 @@ bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {
 bot.action(/^pkg:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
-  if (!pkg) return ctx.reply('Paket tidak ditemukan. Silakan buka katalog kembali.');
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>\\nPilihan paket ini mungkin sudah tidak tersedia. Silakan buka kembali katalog Premium dan pilih paket yang aktif.');
   return showPackage(ctx, pkg, true);
 });
 bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
-  if (!pkg) return ctx.reply('Paket tidak ditemukan. Silakan buka katalog kembali.');
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>\\nSilakan buka kembali katalog Premium untuk melihat pilihan yang tersedia.');
   return showCheckout(ctx, pkg, true);
 });
 bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
@@ -154,7 +154,7 @@ bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
   return ctx.reply(
     ADMIN_ID
       ? '✉ <b>BANTUAN PEMBELIAN</b>\nSilakan hubungi <a href="tg://user?id=' + ADMIN_ID + '">Admin MetaDetect</a> untuk aktivasi paket.'
-      : 'Kontak admin belum dikonfigurasi.',
+      : '⚠️ <b>KONTAK ADMIN BELUM TERSEDIA</b>\\nSilakan coba kembali nanti atau hubungi pengelola melalui kanal resmi MetaDetect.',
     { parse_mode: 'HTML' }
   );
 });
@@ -214,7 +214,7 @@ bot.command('addvip', async (ctx) => {
   const hasLegacyTier = ['STANDARD', 'ULTRA', 'PREMIUM'].includes(String(parts[2] || '').toUpperCase());
   const days = Number(hasLegacyTier ? parts[3] : parts[2]);
   if (!uid || !Number.isFinite(days) || days <= 0) {
-    return ctx.reply('Format: <code>/addvip USER_ID HARI</code>', { parse_mode: 'HTML' });
+    return ctx.reply('✚ <b>FORMAT AKTIVASI BELUM TEPAT</b>\\nGunakan format <code>ID_TELEGRAM DURASI_HARI</code>.\\nContoh: <code>123456789 7</code>.', { parse_mode: 'HTML' });
   }
   const result = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
   return ctx.reply('✧ Premium aktif untuk <code>' + uid + '</code> sampai <code>' + formatDateWIB(result.expiry) + '</code>.', { parse_mode: 'HTML' });
@@ -223,7 +223,7 @@ bot.command('addvip', async (ctx) => {
 bot.command('broadcast', async (ctx) => {
   if (!isOwner(ctx)) return;
   const message = ctx.message.text.replace(/^\/broadcast\s*/i, '').trim();
-  if (!message) return ctx.reply('Format: /broadcast Isi pengumuman');
+  if (!message) return ctx.reply('▤ <b>PESAN PENGUMUMAN KOSONG</b>\\nTambahkan isi pesan setelah perintah broadcast, atau gunakan tombol BROADCAST pada keyboard Owner.');
   const stats = await getGlobalStats();
   let sent = 0;
   for (const uid of stats.allUserIds) {
