@@ -20,8 +20,8 @@ async function stopActiveDetection(ctx) {
   if (!userId) return;
   const jobId = await redis.get('detect:active:' + userId);
   if (!jobId) return;
-  await redis.set('detect:stop:' + userId + ':' + jobId, '1', { ex: 600 });
-  await redis.set('detect:exit:' + userId + ':' + jobId, 'navigation', { ex: 600 });
+  await redis.set('detect:stop:' + userId + ':' + jobId, '1', { ex: 3600 });
+  await redis.set('detect:exit:' + userId + ':' + jobId, 'navigation', { ex: 3600 });
 }
 bot.use(async (ctx, next) => {
   const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
