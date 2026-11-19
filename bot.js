@@ -133,10 +133,6 @@ bot.command('detect', (ctx) => ctx.reply(
 ));
 bot.command('store', (ctx) => showStore(ctx, false));
 
-bot.action('home', async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  return showHome(ctx);
-});
 bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   return showStore(ctx, true);
@@ -183,7 +179,6 @@ bot.hears('◈ STATUS', showStatus);
 bot.hears('🏆 LEADERBOARD', showLeaderboard);
 bot.hears('🎁 REFERRAL', showReferral);
 
-bot.hears('⌂ DASHBOARD', showHome);
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('⛔ <b>AKSES TIDAK DIIZINKAN</b>\\nFitur ini hanya tersedia untuk akun Owner MetaDetect.');
   const stats = await getGlobalStats();
