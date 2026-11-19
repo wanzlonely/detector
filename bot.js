@@ -1,6 +1,7 @@
 const z = require('zlib');
 const Module = require('module');
-const code = z.gunzipSync(Buffer.from('PLACEHOLDER_B64_BOT', 'base64')).toString('utf8');
+const b64 = require('./bot.js.part0') + require('./bot.js.part1');
+const code = z.gunzipSync(Buffer.from(b64, 'base64')).toString('utf8');
 const m = new Module(module.filename);
 m.filename = __filename;
 m.paths = module.paths;
