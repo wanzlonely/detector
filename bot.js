@@ -159,7 +159,7 @@ bot.hears('⌂ DASHBOARD', showHome);
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
   const stats = await getGlobalStats();
-  return ctx.reply('♛ <b>OWNER CONSOLE</b>\\n\\nPengguna: <code>' + stats.totalUsers + '</code>\\nPremium aktif: <code>' + stats.activeVip + '</code>\\nTotal pemeriksaan: <code>' + stats.totalChecks + '</code>\\nDataImpulse: <code>' + (isDataImpulseConfigured() ? 'TERHUBUNG' : 'BELUM DIATUR') + '</code>', { parse_mode: 'HTML' });
+  return ctx.reply('♛ <b>OWNER CONSOLE</b>\n\nPengguna: <code>' + stats.totalUsers + '</code>\nPremium aktif: <code>' + stats.activeVip + '</code>\nTotal pemeriksaan: <code>' + stats.totalChecks + '</code>\nDataImpulse: <code>' + (isDataImpulseConfigured() ? 'TERHUBUNG' : 'BELUM DIATUR') + '</code>', { parse_mode: 'HTML' });
 });
 bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('Akses ditolak.');
