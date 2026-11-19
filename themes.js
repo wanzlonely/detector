@@ -112,8 +112,9 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
   const quota = isOwner ? 'TANPA BATAS · AKSES OWNER' : isVip ? 'TANPA BATAS · 10 NOMOR / KIRIM' : remaining + ' / 3 PEMERIKSAAN TERSISA';
   const identity = escapeHtml(user.full_name || 'Pengguna');
   const username = user.username && user.username !== '-' ? '@' + escapeHtml(user.username) : 'Belum diatur';
-  const total = Number(user.total_checks || 0).toLocaleString('id-ID');
-  const level = isOwner ? 'OWNER' : isVip ? 'PREMIUM' : total >= 100 ? 'ADVANCED' : total >= 25 ? 'ACTIVE' : 'REGULER';
+  const totalCount = Number(user.total_checks || 0);
+  const total = totalCount.toLocaleString('id-ID');
+  const level = isOwner ? 'OWNER' : isVip ? 'PREMIUM' : totalCount >= 100 ? 'ADVANCED' : totalCount >= 25 ? 'ACTIVE' : 'REGULER';
   return [
     '✦ <b>' + escapeHtml(brandName || 'META DETECT') + '</b>',
     '<i>ADVANCED WHATSAPP TELEMETRY</i>',
