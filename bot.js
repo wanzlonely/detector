@@ -160,6 +160,22 @@ bot.action(/^contact:([a-z0-9_]+)$/, async (ctx) => {
 });
 
 
+function renderOwnerConsole(stats) {
+  return [
+    '♛ <b>ᴏᴡɴᴇʀ ᴄᴏɴsᴏʟᴇ</b> ♛',
+    '<i>ʀɪɴɢᴋᴀsᴀɴ ᴏᴘᴇʀᴀsɪ sɪsᴛᴇᴍ</i>',
+    '',
+    '⚙ <b>sᴛᴀᴛɪsᴛɪᴋ ᴜᴛᴀᴍᴀ</b>',
+    '▸ ᴘᴇɴɢɢᴜɴᴀ ⦂ <code>' + stats.totalUsers + '</code>',
+    '▸ ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ ⦂ <code>' + stats.activeVip + '</code>',
+    '▸ ᴛᴏᴛᴀʟ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ⦂ <code>' + stats.totalChecks + '</code>',
+    '▸ ᴅᴀᴛᴀɪᴍᴘᴜʟsᴇ ⦂ <b>' + (isDataImpulseConfigured() ? 'ᴛᴇʀʜᴜʙᴜɴɢ' : 'ʙᴇʟᴜᴍ ᴅɪᴀᴛᴜʀ') + '</b>',
+    '',
+    '⌁ ᴘɪʟɪʜ ᴀᴋsɪ ᴏᴡɴᴇʀ ᴍᴇʟᴀʟᴜɪ ᴋᴇʏʙᴏᴀʀᴅ.',
+    '◈ ᴏᴡɴᴇʀ ᴍᴏᴅᴇ · ᴀᴋᴛɪғ'
+  ].join('\\n');
+}
+
 async function showStatus(ctx) {
   const user = await getEffectiveUser(ctx);
   const referralStats = await getReferralStats(ctx.from.id);
@@ -217,7 +233,7 @@ bot.command('addvip', async (ctx) => {
     return ctx.reply('✚ <b>FORMAT AKTIVASI BELUM TEPAT</b>\\nGunakan format <code>ID_TELEGRAM DURASI_HARI</code>.\\nContoh: <code>123456789 7</code>.', { parse_mode: 'HTML' });
   }
   const result = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
-  return ctx.reply('✧ Premium aktif untuk <code>' + uid + '</code> sampai <code>' + formatDateWIB(result.expiry) + '</code>.', { parse_mode: 'HTML' });
+  return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\\n\\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ ᴀᴋᴜɴ <code>' + uid + '</code>.\\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(result.expiry) + '</code>\\n\\n◈ ᴘʀᴏsᴇs ᴀᴋᴛɪᴠᴀsɪ sᴇʟᴇsᴀɪ.', { parse_mode: 'HTML' });
 });
 
 bot.command('broadcast', async (ctx) => {
@@ -234,7 +250,7 @@ bot.command('broadcast', async (ctx) => {
       console.error('[broadcast]', uid, err && err.message || err);
     }
   }
-  return ctx.reply('Pengumuman berhasil dikirim ke ' + sent + ' pengguna.');
+  return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\\n\\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ᴋᴇ <b>' + sent + '</b> ᴘᴇɴɢɢᴜɴᴀ.');
 });
 
 
@@ -305,7 +321,7 @@ async function processNumbers(ctx, numbersList) {
       lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
       await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
       const reward = await qualifyReferral(ctx.from.id);
-      if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '🎁 <b>HADIAH REFERRAL!</b> Teman undanganmu menyelesaikan 3 pemeriksaan. Kamu mendapat tambahan <b>1 hari Premium</b>.', { parse_mode: 'HTML' }).catch(() => {});
+      if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '🎁 <b>ʜᴀᴅɪᴀʜ ʀᴇғᴇʀᴀʟ ᴅɪᴛᴇʀɪᴍᴀ!</b>\\n\\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>', { parse_mode: 'HTML' }).catch(() => {});
       const currentUser = await getEffectiveUser(ctx);
       await ctx.reply(renderCooldownCard({
         result,
@@ -368,11 +384,11 @@ bot.on('text', async (ctx) => {
       const uid = Number(uidText);
       const days = Number(daysText);
       if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isFinite(days) || days <= 0 || days > 3650) {
-        return ctx.reply('Format belum benar. Kirim <code>ID_TELEGRAM DURASI_HARI</code>, contoh <code>123456789 7</code>.', { parse_mode: 'HTML' });
+        return ctx.reply('✦ <b>ғᴏʀᴍᴀᴛ ᴀᴋᴛɪᴠᴀsɪ ᴛɪᴅᴀᴋ ᴛᴇᴘᴀᴛ</b>\\n\\nᴋɪʀɪᴍ ɪᴅ ᴛᴇʟᴇɢʀᴀᴍ ᴅᴀɴ ᴅᴜʀᴀsɪ ʜᴀʀɪ ᴅᴇɴɢᴀɴ ᴘᴇᴍɪsᴀʜ sᴘᴀsɪ.\\nᴄᴏɴᴛᴏʜ ⦂ <code>123456789 7</code>', { parse_mode: 'HTML' });
       }
       const activated = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
       await clearOwnerAction(ctx.from.id);
-      return ctx.reply('✦ Premium berhasil diaktifkan untuk <code>' + uid + '</code> hingga <code>' + formatDateWIB(activated.expiry) + '</code>.', { parse_mode: 'HTML' });
+      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\\n\\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(activated.expiry) + '</code>\\n\\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
     }
     if (action === 'broadcast') {
       await clearOwnerAction(ctx.from.id);
