@@ -117,7 +117,22 @@ async function consumeQuota(telegramId, count = 1) {
   const today = getTodayWIB();
   const quotaKey = `quota:${telegramId}:${today}`;
   const used = Number((await redis.get(quotaKey)) || 0);
-
+  const bonusKey='referral:bonus_quota:'+telegramId;
+  const bonus=Number(await redis.get(bonusKey)||0);
+  if(bonus>=count){
+    await redis.incrby(bonusKey,-count);
+    user.total_checks=Number(user.total_checks||0)+count;
+    await redis.set(userKey,user); await redis.incrby('stats:total_checks',count);
+    await redis.zadd('leaderboard:checks',{score:Number(user.total_checks||0),member:String(telegramId)});
+    return true;
+  }
+  if(bonus>0 && used+(count-bonus)<=3){
+    await redis.incrby(bonusKey,-bonus); await redis.incrby(quotaKey,count-bonus); await redis.expire(quotaKey,90000);
+    user.total_checks=Number(user.total_checks||0)+count;
+    await redis.set(userKey,user); await redis.incrby('stats:total_checks',count);
+    await redis.zadd('leaderboard:checks',{score:Number(user.total_checks||0),member:String(telegramId)});
+    return true;
+  }
   if (used + count <= 3) {
     await redis.incrby(quotaKey, count);
     await redis.expire(quotaKey, 90000);
@@ -237,7 +252,6 @@ async function registerReferral(inviteeId, inviterId) {
   const already = await redis.get('referral:invited_by:' + invitee);
   if (already) return false;
   const count = Number(await redis.scard('referrals:' + inviter) || 0);
-  if (count >= 10) return false;
   const saved = await redis.set('referral:invited_by:' + invitee, inviter, { nx: true });
   if (!saved) return false;
   await redis.sadd('referrals:' + inviter, invitee);
@@ -245,23 +259,36 @@ async function registerReferral(inviteeId, inviterId) {
 }
 
 async function qualifyReferral(inviteeId) {
-  const invitee = String(inviteeId);
-  const inviter = await redis.get('referral:invited_by:' + invitee);
-  if (!inviter) return { rewarded: false };
-  const completed = Number(await redis.incr('referral:completed:' + invitee));
-  if (completed < 3) return { rewarded: false, completed };
-  const claimed = await redis.set('referral:rewarded:' + invitee, '1', { nx: true });
-  if (!claimed) return { rewarded: false, completed };
-  const result = await activateVip(Number(inviter), 1, 'PREMIUM', 'HADIAH REFERRAL · 1 HARI');
-  await redis.incr('referral:rewards:' + inviter);
-  return { rewarded: true, inviter: Number(inviter), expiry: result.expiry };
+  const invitee=String(inviteeId);
+  const inviter=await redis.get('referral:invited_by:'+invitee);
+  if(!inviter || await redis.get('referral:rewarded:'+invitee)) return {rewarded:false};
+  const completed=Number(await redis.incr('referral:completed:'+invitee));
+  if(completed<3) return {rewarded:false,completed};
+  const claimed=await redis.set('referral:rewarded:'+invitee,'1',{nx:true});
+  if(!claimed) return {rewarded:false,completed};
+  await redis.incrby('referral:coins:'+inviter,5);
+  await redis.incr('referral:rewards:'+inviter);
+  return {rewarded:true,inviter:Number(inviter),coins:5};
+}
+async function getReferralCoinBalance(id) {
+  return Number(await redis.get('referral:coins:'+id)||0);
+}
+async function redeemReferralReward(id,offer) {
+  const key='referral:coins:'+id;
+  const balance=await getReferralCoinBalance(id);
+  if(balance<offer.cost) return {ok:false,balance};
+  const after=Number(await redis.incrby(key,-offer.cost));
+  if(offer.type==='quota') await redis.incrby('referral:bonus_quota:'+id,offer.amount);
+  else await activateVip(id,offer.amount,'PREMIUM','PREMIUM · '+offer.amount+' Hari');
+  return {ok:true,balance:after};
 }
 
 async function getReferralStats(telegramId) {
   const id = String(telegramId);
   const invitees = await redis.smembers('referrals:' + id);
   const rewarded = Number(await redis.get('referral:rewards:' + id) || 0);
-  return { total: (invitees || []).length, rewarded };
+  const coins = await getReferralCoinBalance(id);
+  return { total: (invitees || []).length, rewarded, coins };
 }
 
 async function getLeaderboard(limit = 10) {
@@ -305,6 +332,7 @@ module.exports = {
   registerReferral,
   qualifyReferral,
   getReferralStats,
+  redeemReferralReward,
   getLeaderboard
 };
 
