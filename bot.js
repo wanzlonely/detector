@@ -378,7 +378,6 @@ bot.on('text', async (ctx) => {
       return ctx.reply('✓ <b>ʙᴀʟᴀsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ᴋᴇ ᴘᴇɴɢɢᴜɴᴀ</b>', { parse_mode: 'HTML' });
     }
   }
-  if (text.startsWith('/')) return;
   if (await redis.get('contact:state:' + ctx.from.id)) {
     await redis.del('contact:state:' + ctx.from.id);
     if (!ADMIN_ID) return ctx.reply('✕ ᴀᴅᴍɪɴ ʙᴇʟᴜᴍ ᴅɪᴀᴛᴜʀ.');
