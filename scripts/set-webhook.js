@@ -9,7 +9,17 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
-if (!VERCEL_URL) {
+if (!WEBHOOK_SECRET) {
+  console.error('WEBHOOK_SECRET wajib diatur di environment sebelum memasang webhook.');
+  process.exit(1);
+}
+
+if (!/^[A-Za-z0-9_-]{1,256}$/.test(WEBHOOK_SECRET)) {
+  console.error('WEBHOOK_SECRET harus 1-256 karakter: huruf, angka, underscore, atau hyphen.');
+  process.exit(1);
+}
+
+if (!VERCEL_URL || !/^https:\/\//i.test(VERCEL_URL)) {
   console.error('Pakai: node scripts/set-webhook.js https://nama-project-kamu.vercel.app');
   process.exit(1);
 }
@@ -26,10 +36,13 @@ async function main() {
     body: JSON.stringify(body)
   });
   const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error('setWebhook gagal: ' + (data.description || res.status));
   console.log('setWebhook result:', data);
 
   const info = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo`);
-  console.log('getWebhookInfo:', await info.json());
+  const infoData = await info.json();
+  if (!info.ok || !infoData.ok) throw new Error('getWebhookInfo gagal: ' + (infoData.description || info.status));
+  console.log('getWebhookInfo:', infoData);
 }
 
 main().catch((err) => {

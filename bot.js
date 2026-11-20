@@ -1,15 +1,12 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
-const { findPhoneNumbersInText } = require('libphonenumber-js');
 const {
   redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
-  consumeQuota, addCheckLog, getGlobalStats, incrementUserChecks, activateVip, registerReferral, qualifyReferral, getReferralStats, getLeaderboard, redeemReferralReward
+  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, redeemReferralReward
 } = require('./database');
-const { isDataImpulseConfigured } = require('./proxyManager');
-const { checkWhatsAppCooldown } = require('./waChecker');
 const {
   escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
-  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary
+  renderPackageDetailCard, renderPaymentMaintenanceCard
 } = require('./themes');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -28,14 +25,18 @@ bot.use(async (ctx, next) => {
   const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
   if (navigationText || navigationCallback) {
-    await stopActiveDetection(ctx);
-    if (ctx.from && (navigationText || navigationCallback)) {
-      await Promise.all([
-        redis.del('detect:mode:' + ctx.from.id),
-        redis.del('contact:state:' + ctx.from.id),
-        redis.del('owner:action:' + ctx.from.id),
-        redis.del('owner:contact:target:' + ctx.from.id)
-      ]).catch(() => {});
+    try {
+      await stopActiveDetection(ctx);
+      if (ctx.from) {
+        await Promise.all([
+          redis.del('detect:mode:' + ctx.from.id),
+          redis.del('contact:state:' + ctx.from.id),
+          redis.del('owner:action:' + ctx.from.id),
+          redis.del('owner:contact:target:' + ctx.from.id)
+        ]);
+      }
+    } catch (err) {
+      console.error('[navigation cleanup]', err && err.message || err);
     }
   }
   return next();
@@ -143,8 +144,7 @@ bot.start(async (ctx) => {
   return showHome(ctx);
 });
 bot.command('detect', async (ctx) => {
-  await redis.set('detect:mode:' + ctx.from.id, 'active', { ex: 1800 });
-  return ctx.reply('⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\n\nᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ ᴜɴᴛᴜᴋ ᴘʀᴇᴍɪᴜᴍ.\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX\n62858XXXXX</code>', { parse_mode: 'HTML' });
+  return ctx.reply('⚠️ <b>ғɪᴛᴜʀ ᴅᴇᴛᴇᴋsɪ sᴇᴅᴀɴɢ ᴅɪɴᴏɴᴀᴋᴛɪғᴋᴀɴ</b>\n\nᴘᴇᴍᴜʟɪʜᴀɴ sɪsᴛᴇᴍ sᴇᴅᴀɴɢ ʙᴇʀʟᴀɴɢsᴜɴɢ. ᴍᴇɴᴜ ʟᴀɪɴ sᴇᴘᴇʀᴛɪ sᴛᴀᴛᴜs, ʀᴇғᴇʀʀᴀʟ, ᴅᴀɴ ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ ᴛᴇᴛᴀᴘ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ.', { parse_mode: 'HTML' });
 });
 bot.command('store', (ctx) => showStore(ctx, false));
 
@@ -195,7 +195,7 @@ function renderOwnerConsole(stats) {
     '▸ ᴘᴇɴɢɢᴜɴᴀ ⦂ <code>' + stats.totalUsers + '</code>',
     '▸ ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ ⦂ <code>' + stats.activeVip + '</code>',
     '▸ ᴛᴏᴛᴀʟ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ⦂ <code>' + stats.totalChecks + '</code>',
-    '▸ ᴅᴀᴛᴀɪᴍᴘᴜʟsᴇ ⦂ <b>' + (isDataImpulseConfigured() ? '● ᴛᴇʀʜᴜʙᴜɴɢ' : 'ʙᴇʟᴜᴍ ᴅɪᴀᴛᴜʀ') + '</b>',
+    '▸ ᴅɪᴀɢɴᴏsᴛɪᴋ ᴇᴋsᴛᴇʀɴᴀʟ ⦂ <b>ɴᴏɴᴀᴋᴛɪғ</b>',
     '',
     '◈ ᴏᴡɴᴇʀ ᴍᴏᴅᴇ · ᴀᴋᴛɪғ'
   ].join('\n');
@@ -264,11 +264,11 @@ bot.command('addvip', async (ctx) => {
   const uid = Number(parts[1]);
   const hasLegacyTier = ['STANDARD', 'ULTRA', 'PREMIUM'].includes(String(parts[2] || '').toUpperCase());
   const days = Number(hasLegacyTier ? parts[3] : parts[2]);
-  if (!uid || !Number.isFinite(days) || days <= 0) {
+  if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(days) || days <= 0 || days > 3650) {
     return ctx.reply('✚ <b>FORMAT AKTIVASI BELUM TEPAT</b>\nGunakan format <code>ID_TELEGRAM DURASI_HARI</code>.\nContoh: <code>123456789 7</code>.', { parse_mode: 'HTML' });
   }
   const result = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
-      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\n\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(activated.expiry) + '</code>\n\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
+      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\n\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(result.expiry) + '</code>\n\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
 });
 
 bot.command('broadcast', async (ctx) => {
@@ -288,158 +288,6 @@ bot.command('broadcast', async (ctx) => {
       return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\n\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');
 });
 
-
-function buildProgressText(done, total, stage, stats, frame = 0) {
-  const percent = Math.min(100, Math.floor(done / Math.max(1, total) * 100));
-  const filled = Math.floor(percent / 10);
-  const bar = '●'.repeat(filled) + '○'.repeat(10 - filled);
-  const spinner = ['◐', '◓', '◑', '◒'][frame % 4];
-  const counts = stats || { ready: 0, cooldown: 0, banned: 0, error: 0, failed: 0 };
-  const failed = Number(counts.failed ?? counts.error ?? 0);
-  return '⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>\n\n' + bar + ' <b>' + percent + '%</b>' +
-    '\nᴛᴀʀɢᴇᴛ ⟿ <b>' + done + ' / ' + total + '</b>' +
-    '\n\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + counts.ready + '</b>' +
-    '\n✕ ɢᴀɢᴀʟ ⦂ <b>' + failed + '</b>' +
-    '\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + counts.cooldown + '</b>' +
-    '\n  ⊘ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + counts.banned + '</b>' +
-    (stage ? '\n\n' + spinner + ' ' + stage : '');
-}
-
-bot.action(/^detect:stop:(\d+):(\d+)$/, async (ctx) => {
-  if (Number(ctx.from.id) !== Number(ctx.match[1])) return ctx.answerCbQuery('Sesi ini bukan milikmu.', { show_alert: true });
-  await redis.set('detect:stop:' + ctx.match[1] + ':' + ctx.match[2], '1', { ex: 600 });
-  return ctx.answerCbQuery('Permintaan berhenti diterima.');
-});
-
-function extractPhoneNumbers(input) {
-  const source = String(input || '');
-  const results = [];
-  const seen = new Set();
-  const add = (raw) => {
-    const digits = String(raw || '').replace(/\D/g, '');
-    if (digits.length < 5 || digits.length > 15 || seen.has(digits)) return;
-    seen.add(digits);
-    results.push(digits);
-  };
-  try {
-    for (const match of findPhoneNumbersInText(source, 'ID')) {
-      const value = match.number && match.number.number;
-      if (value) add(value);
-    }
-  } catch (err) {
-    console.warn('[phone parser]', err && err.message || err);
-  }
-  const candidates = [...source.matchAll(/(?:^|[^\d])(\+?\d{5,15})(?!\d)/g)].map((match) => match[1]);
-  for (const candidate of candidates) add(candidate);
-  return results;
-}
-
-async function processNumbers(ctx, numbersList) {
-  const owner = isOwner(ctx);
-  const user = await getEffectiveUser(ctx);
-  const vip = owner || isUserVip(user);
-  const maxBatch = owner ? 30 : (!vip ? 1 : 30);
-  const premiumAccess = vip;
-
-  if (numbersList.length > maxBatch) {
-    return ctx.reply('◈ <b>ʙᴀᴛᴀs ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>\nᴀᴋᴜɴᴍᴜ ᴅᴀᴘᴀᴛ ᴍᴇᴍᴇʀɪᴋsᴀ ᴍᴀᴋsɪᴍᴀʟ <b>' + maxBatch + ' ɴᴏᴍᴏʀ</b> ᴅᴀʟᴀᴍ sᴀᴛᴜ ᴋɪʀɪᴍᴀɴ.', { parse_mode: 'HTML' });
-  }
-  if (!owner) {
-    const allowed = await consumeQuota(ctx.from.id, numbersList.length);
-    if (!allowed) return ctx.reply('◈ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\nᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴᴍᴜ sᴜᴅᴀʜ ᴛᴇʀᴘᴀᴋᴀɪ. ᴋᴜᴏᴛᴀ ᴀᴋᴀɴ ᴅɪᴘᴇʀʙᴀʀᴜɪ ᴘᴜᴋᴜʟ 00.00 ᴡɪʙ.', { parse_mode: 'HTML' });
-  } else {
-    await incrementUserChecks(ctx.from.id, numbersList.length);
-  }
-
-  const jobId = String(Date.now());
-  const stopKey = 'detect:stop:' + ctx.from.id + ':' + jobId;
-  await redis.set('detect:active:' + ctx.from.id, jobId, { ex: 3600 });
-  let completed = 0;
-  const startedAt = Date.now();
-  let stage = 'ᴍᴇɴʏɪᴀᴘᴋᴀɴ sᴇsɪ ᴅᴇᴛᴇᴄᴛ';
-  let frame = 0;
-  const stopMarkup = Markup.inlineKeyboard([[Markup.button.callback('× HENTIKAN DETEKSI', 'detect:stop:' + ctx.from.id + ':' + jobId)]]);
-  const progress = await ctx.reply(buildProgressText(0, numbersList.length, stage, { ready: 0, cooldown: 0, banned: 0, error: 0, failed: 0, clone: 0, smsUnavailable: 0 }), { parse_mode: 'HTML', ...stopMarkup });
-  const timer = setInterval(() => {
-    frame = (frame + 1) % 4;
-    ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, stats, frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
-  }, 2200);
-  const stats = { ready: 0, cooldown: 0, banned: 0, error: 0, failed: 0, clone: 0, smsUnavailable: 0 };
-  const detectionResults = [];
-  let lastReaction = '👀';
-  let stopped = false;
-
-  for (const rawNumber of numbersList) {
-    if (await redis.get(stopKey)) { stopped = true; break; }
-    stage = 'Memeriksa target ' + (completed + 1) + ' dari ' + numbersList.length;
-    try {
-      const result = await checkWhatsAppCooldown(rawNumber);
-      if (!result || typeof result !== 'object') throw new Error('Engine mengembalikan hasil kosong atau format tidak valid.');
-      const status = result.isBanned ? 'DIBLOKIR'
-        : result.isCloneBlocked ? 'CLONE_UNSUPPORTED'
-          : result.anyCooldown ? 'COOLDOWN'
-            : result.isReady ? 'SIAP'
-              : result.smsAvailable === false ? 'SMS_UNAVAILABLE'
-                : 'STATUS_TIDAK_DIKENALI';
-      if (result.isBanned) stats.banned += 1;
-      else if (result.isCloneBlocked) { stats.clone += 1; stats.failed += 1; }
-      else if (result.anyCooldown) stats.cooldown += 1;
-      else if (result.isReady) stats.ready += 1;
-      else if (result.smsAvailable === false) { stats.smsUnavailable += 1; stats.failed += 1; }
-      else stats.failed += 1;
-      lastReaction = result.isBanned ? '🚫' : result.anyCooldown ? '⏳' : '✧';
-      await addCheckLog(ctx.from.id, result.formattedNumber, status, result.proxyTag);
-      const reward = await qualifyReferral(ctx.from.id);
-      if (reward.rewarded) await bot.telegram.sendMessage(reward.inviter, '♧ <b>ᴋᴏɪɴ ʀᴇғᴇʀᴀʟ ʙᴇʀᴛᴀᴍʙᴀʜ!</b>\n\nᴛᴇᴍᴀɴ ʏᴀɴɢ ᴋᴀᴍᴜ ᴜɴᴅᴀɴɢ ᴛᴇʟᴀʜ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.\n✦ ʜᴀᴅɪᴀʜᴍᴜ ⦂ <b>+5 ᴋᴏɪɴ</b>', { parse_mode: 'HTML' }).catch(() => {});
-      detectionResults.push({ number: result.formattedNumber, result, status });
-    } catch (err) {
-      stats.error += 1;
-      stats.failed += 1;
-      lastReaction = '⚠️';
-      console.error('[detect] target failed:', rawNumber, err && err.stack || err);
-      const detail = /timeout|timed out/i.test(err && err.message || '')
-        ? 'ᴋᴏɴᴇᴋsɪ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴇʟᴇᴡᴀᴛɪ ʙᴀᴛᴀs ᴡᴀᴋᴛᴜ. ᴄᴏʙᴀ ʟᴀɢɪ ʙᴇʙᴇʀᴀᴘᴀ sᴀᴀᴛ.'
-        : /429|rate.?limit|too many/i.test(err && err.message || '')
-          ? 'sᴇʀᴠᴇʀ sᴇᴅᴀɴɢ ᴍᴇᴍʙᴀᴛᴀsɪ ᴘᴇʀᴍɪɴᴛᴀᴀɴ. ᴛᴜɴɢɢᴜ sᴇʙᴇɴᴛᴀʀ sᴇʙᴇʟᴜᴍ ᴍᴇɴᴄᴏʙᴀ ʟᴀɢɪ.'
-          : 'ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴘʀᴏsᴇs. sɪʟᴀᴋᴀɴ ᴄᴏʙᴀ ʟᴀɢɪ ɴᴀɴᴛɪ.';
-      detectionResults.push({ number: rawNumber, error: true, detail });
-    }
-    completed += 1;
-    stage = 'ᴍᴇᴍᴘᴇʀʙᴀʀᴜɪ ʜᴀsɪʟ ᴅᴇᴛᴇᴄᴛ';
-    await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, buildProgressText(completed, numbersList.length, stage, stats, ++frame), { parse_mode: 'HTML', ...stopMarkup }).catch(() => {});
-  }
-
-
-  clearInterval(timer);
-  await redis.del(stopKey).catch(() => {});
-  const exitReason = await redis.get('detect:exit:' + ctx.from.id + ':' + jobId);
-  await redis.del('detect:exit:' + ctx.from.id + ':' + jobId).catch(() => {});
-  if (String(await redis.get('detect:active:' + ctx.from.id) || '') === jobId) await redis.del('detect:active:' + ctx.from.id).catch(() => {});
-  if (exitReason === 'navigation') {
-    await ctx.telegram.deleteMessage(ctx.chat.id, progress.message_id).catch(() => {});
-    return;
-  }
-  const finalPercent = Math.min(100, Math.floor(completed / Math.max(1, numbersList.length) * 100));
-  const filled = Math.floor(finalPercent / 10);
-  const finalBar = '●'.repeat(filled) + '○'.repeat(10 - filled);
-  const finalText = (stopped ? '× <b>ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ</b>' : '✓ <b>ᴅᴇᴛᴇᴄᴛ sᴇʟᴇsᴀɪ</b>') +
-    '\n\n⌖ <b>ᴅᴇᴛᴇᴄᴛ sᴇᴅᴀɴɢ ʙᴇʀᴊᴀʟᴀɴ</b>' +
-    '\n\n' + finalBar + ' <b>' + finalPercent + '%</b>' +
-    '\nᴛᴀʀɢᴇᴛ ⟿ <b>' + completed + ' / ' + numbersList.length + '</b>' +
-    '\n\n✧ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + stats.ready + '</b>' +
-    '\n✕ ɢᴀɢᴀʟ ⦂ <b>' + Number(stats.failed || stats.error || 0) + '</b>' +
-    '\n  ◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + stats.cooldown + '</b>' +
-    '\n  ⊘ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + stats.banned + '</b>' +
-    '\n\n◐ ' + (stopped ? 'ᴅᴇᴛᴇᴄᴛ ᴅɪʜᴇɴᴛɪᴋᴀɴ' : 'sᴇʟᴜʀᴜʜ ᴛᴀʀɢᴇᴛ sᴇʟᴇsᴀɪ');
-  await ctx.telegram.editMessageText(ctx.chat.id, progress.message_id, undefined, finalText, { parse_mode: 'HTML' }).catch(() => {});
-  await ctx.reply(renderDetectionSummary({
-    results: detectionResults,
-    elapsedSeconds: Math.ceil((Date.now() - startedAt) / 1000)
-  }), { parse_mode: 'HTML' });
-  if (ctx.message && ctx.message.message_id) {
-    ctx.telegram.setMessageReaction(ctx.chat.id, ctx.message.message_id, [{ type: 'emoji', emoji: lastReaction }]).catch(() => {});
-  }
-}
 
 bot.on('text', async (ctx) => {
   const text = ctx.message.text.trim();
@@ -472,11 +320,7 @@ bot.on('text', async (ctx) => {
     return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴘᴇsᴀɴ ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴅɪᴛᴇʀᴜsᴋᴀɴ ᴋᴇ ᴀᴅᴍɪɴ. ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ ʙᴀʟᴀsᴀɴ ᴅɪ sɪɴɪ.', { parse_mode: 'HTML' });
   }
   if (text === '⌖ DETECT' || text === '⌖ Detect' || text === 'Detect') {
-    await redis.set('detect:mode:' + ctx.from.id, 'active', { ex: 1800 });
-    return ctx.reply(
-      '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ sɪᴀᴘ</b> ⌖\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ\nᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ ᴜɴᴛᴜᴋ ᴘʀᴇᴍɪᴜᴍ.\n\nᴄᴏɴᴛᴏʜ ⦂\n<code>62822XXXXX\n62858XXXXX</code>',
-      { parse_mode: 'HTML' }
-    );
+    return ctx.reply('⚠️ <b>ғɪᴛᴜʀ ᴅᴇᴛᴇᴋsɪ sᴇᴅᴀɴɢ ᴅɪɴᴏɴᴀᴋᴛɪғᴋᴀɴ</b>\n\nᴘᴇᴍᴜʟɪʜᴀɴ sɪsᴛᴇᴍ sᴇᴅᴀɴɢ ʙᴇʀʟᴀɴɢsᴜɴɢ. ᴍᴇɴᴜ ʟᴀɪɴ ᴛᴇᴛᴀᴘ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ.', { parse_mode: 'HTML' });
   }
   if (text === '✧ BELI PREMIUM' || text === '✧ Beli Premium' || text === 'Beli Premium') {
     return showStore(ctx, false);
@@ -514,11 +358,7 @@ bot.on('text', async (ctx) => {
     }
   }
 
-  const numbers = extractPhoneNumbers(text);
-  if (!numbers.length) return ctx.reply('⌁ <b>ᴘᴇʀɪɴᴛᴀʜ ᴛɪᴅᴀᴋ ᴅɪᴋᴇɴᴀʟɪ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ᴅᴇɴɢᴀɴ ᴋᴏᴅᴇ ɴᴇɢᴀʀᴀ.\nᴜɴᴛᴜᴋ ᴍᴇᴍᴜʟᴀɪ, ᴀᴋᴛɪғᴋᴀɴ ᴍᴇɴᴜ Detect ᴛᴇʀʟᴇʙɪʜ ᴅᴀʜᴜʟᴜ.', { parse_mode: 'HTML' });
-  const detectMode = await redis.get('detect:mode:' + ctx.from.id);
-  if (detectMode !== 'active') return ctx.reply('⌁ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ ᴛɪᴅᴀᴋ ᴀᴋᴛɪғ</b>\n\nᴘɪʟɪʜ ᴍᴇɴᴜ ⌖ DETECT ᴜɴᴛᴜᴋ ᴍᴇᴍᴜʟᴀɪ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.', { parse_mode: 'HTML' });
-  return processNumbers(ctx, numbers);
+  return ctx.reply('⌁ <b>ᴘᴇʀɪɴᴛᴀʜ ᴛɪᴅᴀᴋ ᴅɪᴋᴇɴᴀʟ</b>\n\nᴘɪʟɪʜ sᴀʟᴀʜ sᴀᴛᴜ ᴍᴇɴᴜ ʏᴀɴɢ ᴛᴇʀsᴇᴅɪᴀ ᴅɪ ʙᴀᴡᴀʜ.', { parse_mode: 'HTML' });
 });
 
 bot.catch((err, ctx) => {

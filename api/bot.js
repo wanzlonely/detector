@@ -1,16 +1,19 @@
 const bot = require('../bot');
 const { waitUntil } = require('@vercel/functions');
+const { redis } = require('../database');
 
 module.exports = async (req, res) => {
   if (req.method === 'GET') {
     try {
-      const [webhook, identity] = await Promise.all([
+      const [webhook, identity, redisStatus] = await Promise.all([
         bot.telegram.getWebhookInfo(),
-        bot.telegram.getMe()
+        bot.telegram.getMe(),
+        redis.ping()
       ]);
       return res.status(200).json({
         ok: true,
         bot: { id: identity.id, username: identity.username },
+        redis: { connected: redisStatus === 'PONG' },
         webhook: {
           configured: Boolean(webhook.url),
           url: webhook.url || null,
@@ -24,7 +27,7 @@ module.exports = async (req, res) => {
       console.error('[webhook health]', err && err.message || err);
       return res.status(502).json({
         ok: false,
-        error: 'Tidak dapat menghubungi Telegram Bot API',
+        error: 'Pemeriksaan kesehatan Telegram atau Redis gagal',
         detail: err && err.message ? err.message : 'Unknown Telegram API error'
       });
     }
@@ -36,8 +39,15 @@ module.exports = async (req, res) => {
   }
 
   const secret = process.env.WEBHOOK_SECRET;
-  if (secret && req.headers['x-telegram-bot-api-secret-token'] !== secret) {
+  if (!secret || !/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
+    return res.status(503).send('Webhook security is not configured correctly');
+  }
+  if (req.headers['x-telegram-bot-api-secret-token'] !== secret) {
     return res.status(401).send('Unauthorized');
+  }
+
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || !Number.isInteger(req.body.update_id)) {
+    return res.status(400).send('Invalid update payload');
   }
 
   res.status(200).send('OK');
