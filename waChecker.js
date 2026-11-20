@@ -1,13 +1,20 @@
 const WADetector = require('./waEngine');
 const { executeWithProxyRotation } = require('./proxyManager');
 
-const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 5500);
+const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 9000);
+const INTERNAL_RETRIES = Math.min(3, Math.max(1, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 2)));
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function buildHeaders(userAgent) {
   return {
     'Content-Type': 'application/x-www-form-urlencoded',
     'User-Agent': userAgent,
-    Accept: '*/*'
+    Accept: '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    Connection: 'keep-alive'
   };
 }
 
@@ -23,13 +30,22 @@ async function postWithTimeout(url, body, headers, dispatcher) {
       signal: controller.signal
     });
     const text = await res.text();
-    if (!res.ok) throw new Error('WhatsApp HTTP ' + res.status + ': ' + text.slice(0, 180));
-    if (!text) throw new Error('WhatsApp mengembalikan respons kosong.');
+    if (!res.ok) {
+      const err = new Error('WhatsApp HTTP ' + res.status + ': ' + text.slice(0, 180));
+      err.status = res.status;
+      throw err;
+    }
+    if (!text || !String(text).trim()) {
+      throw new Error('WhatsApp mengembalikan respons kosong.');
+    }
     return text;
   } catch (err) {
     const cause = err && err.cause;
     const detail = cause && (cause.code || cause.message) ? ' [' + (cause.code || cause.message) + ']' : '';
-    throw new Error((err && err.message || 'Permintaan jaringan gagal') + detail);
+    const message = (err && err.message) || 'Permintaan jaringan gagal';
+    const out = new Error(message + detail);
+    out.status = err && err.status;
+    throw out;
   } finally {
     clearTimeout(timer);
   }
@@ -155,34 +171,80 @@ function extractChannelTimers(existRaw, codeRaw) {
   if (!isWaOldEcho && smsSeconds === 0 && retryAfter > 180) smsSeconds = retryAfter;
   const waOldEligible = Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1 || Boolean(exist.wa_old_device_name || code.wa_old_device_name);
   const deviceName = exist.wa_old_device_name || code.wa_old_device_name || exist.device_name || code.device_name || null;
-  return { sms: smsSeconds, wa_old: waOldWait, voice: voiceWait, flash: flashWait, retry_after: retryAfter, wa_old_eligible: waOldEligible, device_name: deviceName, is_wa_old_echo: isWaOldEcho, exist_no_routes: existNoRoutes, code_no_routes: codeNoRoutes };
+  return {
+    sms: smsSeconds,
+    wa_old: waOldWait,
+    voice: voiceWait,
+    flash: flashWait,
+    retry_after: retryAfter,
+    wa_old_eligible: waOldEligible,
+    device_name: deviceName,
+    is_wa_old_echo: isWaOldEcho,
+    exist_no_routes: existNoRoutes,
+    code_no_routes: codeNoRoutes
+  };
 }
 
 function buildChannel(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  return { isCooldown: sec > 0, rawSeconds: sec, uiTimer: toShortTimer(sec), humanTime: toWaUiTimer(sec), formatted: toShortTimer(sec) };
+  return {
+    isCooldown: sec > 0,
+    rawSeconds: sec,
+    uiTimer: toShortTimer(sec),
+    humanTime: toWaUiTimer(sec),
+    formatted: toShortTimer(sec)
+  };
 }
 
 function detectBanSignals(exist, code, parsed) {
-  const statusBanned = exist.status === 'banned' || code.status === 'banned' || exist.reason === 'blocked' || code.reason === 'blocked' || exist.reason === 'banned' || code.reason === 'banned';
-  const hardViolation = Boolean(exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal);
+  const statusBanned =
+    exist.status === 'banned' || code.status === 'banned' ||
+    exist.reason === 'blocked' || code.reason === 'blocked' ||
+    exist.reason === 'banned' || code.reason === 'banned';
+  const hardViolation = Boolean(
+    exist.violation_type || code.violation_type ||
+    exist.in_app_ban_appeal || code.in_app_ban_appeal
+  );
   const appealToken = Boolean(exist.appeal_token || code.appeal_token);
   const weakBanHint = appealToken && (statusBanned || hardViolation);
   return Boolean(statusBanned || hardViolation || weakBanHint || (parsed && parsed.isBanned));
 }
 
 function detectCloneSignals(exist, code, parsed) {
-  const blockScreen = String(exist.custom_block_screen || code.custom_block_screen || exist.block_screen || code.block_screen || '').toLowerCase();
+  const blockScreen = String(
+    exist.custom_block_screen || code.custom_block_screen ||
+    exist.block_screen || code.block_screen || ''
+  ).toLowerCase();
   const reason = String(exist.reason || code.reason || '').toLowerCase();
   const status = String(exist.status || code.status || '').toLowerCase();
   const textBlob = JSON.stringify({ exist, code }).toLowerCase();
-  const unofficial = blockScreen.includes('unofficial') || blockScreen.includes('clone') || reason.includes('unofficial') || (textBlob.includes('whatsapp business') && textBlob.includes('official app')) || Boolean(parsed && parsed.isCloneBlocked);
-  const security = blockScreen.includes('security') || reason.includes('security') || status.includes('security') || textBlob.includes('demi keamanan') || textBlob.includes('login not available right now') || textBlob.includes('tidak dapat masuk saat ini') || Boolean(parsed && parsed.isSecurityBlock);
-  return { isCloneBlocked: Boolean(unofficial || (parsed && parsed.isCloneBlocked)), isSecurityBlock: Boolean(security) };
+  const unofficial =
+    blockScreen.includes('unofficial') ||
+    blockScreen.includes('clone') ||
+    reason.includes('unofficial') ||
+    (textBlob.includes('whatsapp business') && textBlob.includes('official app')) ||
+    Boolean(parsed && parsed.isCloneBlocked);
+  const security =
+    blockScreen.includes('security') ||
+    reason.includes('security') ||
+    status.includes('security') ||
+    textBlob.includes('demi keamanan') ||
+    textBlob.includes('login not available right now') ||
+    textBlob.includes('tidak dapat masuk saat ini') ||
+    Boolean(parsed && parsed.isSecurityBlock);
+  return {
+    isCloneBlocked: Boolean(unofficial || (parsed && parsed.isCloneBlocked)),
+    isSecurityBlock: Boolean(security)
+  };
 }
 
 function resolveSmsAvailability(exist, code, timers) {
-  const toBool = (v) => { if (typeof v === 'boolean') return v; if (v === 1 || v === '1') return true; if (v === 0 || v === '0') return false; return null; };
+  const toBool = (v) => {
+    if (typeof v === 'boolean') return v;
+    if (v === 1 || v === '1') return true;
+    if (v === 0 || v === '0') return false;
+    return null;
+  };
   const eB = toBool(exist.send_sms_eligible);
   const cB = toBool(code.send_sms_eligible);
   if (eB === true || cB === true) return true;
@@ -193,24 +255,57 @@ function resolveSmsAvailability(exist, code, timers) {
   return null;
 }
 
-async function checkWhatsAppCooldown(rawNumber) {
-  const payloads = await WADetector.buildDualPayloads(String(rawNumber));
-  if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
-  const headers = buildHeaders(payloads.userAgent);
-  const countryIso2 = resolveCountryIso2(payloads.phoneInfo, null);
+/**
+ * Core dual-probe with partial-response tolerance.
+ * Uses Promise.allSettled so one failing leg does not kill the whole check.
+ */
+async function runDualProbe(payloads, headers, countryIso2) {
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    const [existText, codeText] = await Promise.all([
+    const [existSettled, codeSettled] = await Promise.allSettled([
       postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher),
       postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher)
     ]);
-    return { existText, codeText };
+
+    const existText = existSettled.status === 'fulfilled' ? existSettled.value : null;
+    const codeText = codeSettled.status === 'fulfilled' ? codeSettled.value : null;
+
+    // Both failed → force retry via proxy layer
+    if (!existText && !codeText) {
+      const e1 = existSettled.reason && existSettled.reason.message;
+      const e2 = codeSettled.reason && codeSettled.reason.message;
+      throw new Error('Dual probe gagal: ' + (e1 || e2 || 'jaringan'));
+    }
+
+    return { existText, codeText, partial: !existText || !codeText };
   }, undefined, countryIso2);
-  const parsed = WADetector.parseDualResponse(payloads.phoneInfo, data.existText, data.codeText);
-  const existResponse = safeJson(data.existText);
-  const codeResponse = safeJson(data.codeText);
+
+  return {
+    existText: data.existText || null,
+    codeText: data.codeText || null,
+    partial: Boolean(data.partial),
+    proxyMode,
+    sessionTag
+  };
+}
+
+function classifyFromResponses(payloads, existText, codeText, proxyMode, sessionTag, countryIso2) {
+  const existResponse = safeJson(existText);
+  const codeResponse = safeJson(codeText);
+  const parsed = WADetector.parseDualResponse(
+    payloads.phoneInfo,
+    existText || '{}',
+    codeText || '{}'
+  );
+
   const timers = extractChannelTimers(existResponse, codeResponse);
   const smsAvailable = resolveSmsAvailability(existResponse, codeResponse, timers);
-  const channels = { sms: buildChannel(timers.sms), wa_old: buildChannel(timers.wa_old), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash) };
+  const channels = {
+    sms: buildChannel(timers.sms),
+    wa_old: buildChannel(timers.wa_old),
+    voice: buildChannel(timers.voice),
+    flash: buildChannel(timers.flash)
+  };
+
   const smsCooldownActive = channels.sms.rawSeconds > 0;
   const otherOtpCooldown = !smsCooldownActive && (channels.voice.rawSeconds > 120 || channels.flash.rawSeconds > 120);
   const meaningfulCooldown = smsCooldownActive || otherOtpCooldown;
@@ -230,16 +325,36 @@ async function checkWhatsAppCooldown(rawNumber) {
   const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
   const isCloneBlocked = cloneSig.isCloneBlocked && !isBanned;
   const isSecurityBlock = cloneSig.isSecurityBlock && !isBanned && !isCloneBlocked;
-  const hasOpenPath = smsAvailable === true || timers.wa_old_eligible || (smsAvailable !== false && !timers.exist_no_routes) || (channels.voice.rawSeconds === 0 && !timers.exist_no_routes);
+
+  const hasOpenPath =
+    smsAvailable === true ||
+    timers.wa_old_eligible ||
+    (smsAvailable !== false && !timers.exist_no_routes) ||
+    (channels.voice.rawSeconds === 0 && !timers.exist_no_routes);
+
   const isReady = !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && hasOpenPath;
-  const smsOptionMissing = !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && !isReady && smsAvailable === false && !timers.wa_old_eligible;
+  const smsOptionMissing =
+    !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown &&
+    !isReady && smsAvailable === false && !timers.wa_old_eligible;
+
   let description = parsed.description || '';
   if (isBanned) description = 'Nomor dibatasi / diblokir oleh WhatsApp.';
   else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone/unofficial).';
   else if (isSecurityBlock) description = 'Demi keamanan: login sementara tidak tersedia.';
-  else if (meaningfulCooldown) description = 'Cooldown aktif · ' + (channels.sms.rawSeconds > 0 ? channels.sms.humanTime : (channels.voice.humanTime || channels.flash.humanTime));
-  else if (isReady) description = timers.wa_old_eligible && timers.device_name ? 'Siap diverifikasi · terdaftar di ' + timers.device_name : 'Nomor siap menerima verifikasi.';
-  else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
+  else if (meaningfulCooldown) {
+    description = 'Cooldown aktif · ' + (
+      channels.sms.rawSeconds > 0
+        ? channels.sms.humanTime
+        : (channels.voice.humanTime || channels.flash.humanTime)
+    );
+  } else if (isReady) {
+    description = timers.wa_old_eligible && timers.device_name
+      ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
+      : 'Nomor siap menerima verifikasi.';
+  } else if (smsOptionMissing) {
+    description = 'Opsi SMS tidak tersedia untuk nomor ini.';
+  }
+
   let accountStatus = 'UNKNOWN';
   if (isBanned) accountStatus = 'BANNED';
   else if (isCloneBlocked) accountStatus = 'CLONE_OR_UNOFFICIAL_APP_BLOCK';
@@ -247,19 +362,81 @@ async function checkWhatsAppCooldown(rawNumber) {
   else if (meaningfulCooldown) accountStatus = 'IN_COOLDOWN';
   else if (isReady) accountStatus = timers.wa_old_eligible ? 'REGISTERED_ON_DEVICE' : 'AVAILABLE_READY';
   else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
-  const primarySeconds = channels.sms.rawSeconds > 0 ? channels.sms.rawSeconds : (otherOtpCooldown ? Math.max(channels.voice.rawSeconds, channels.flash.rawSeconds) : 0);
+
+  const primarySeconds = channels.sms.rawSeconds > 0
+    ? channels.sms.rawSeconds
+    : (otherOtpCooldown ? Math.max(channels.voice.rawSeconds, channels.flash.rawSeconds) : 0);
+
   return {
-    formattedNumber: parsed.phone || payloads.phoneInfo?.full || String(rawNumber),
+    formattedNumber: parsed.phone || payloads.phoneInfo?.full || String(payloads.rawNumber || ''),
     region: parsed.country || payloads.phoneInfo?.country_name || '-',
-    accountStatus, isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
+    accountStatus,
+    isBanned,
+    isCloneBlocked,
+    isSecurityBlock,
+    isReady,
+    smsAvailable,
+    smsOptionMissing,
     anyCooldown: meaningfulCooldown && !isBanned && !isCloneBlocked && !isSecurityBlock,
-    description, deviceName: timers.device_name || null, waOldEligible: timers.wa_old_eligible, channels,
-    primaryTimer: { rawSeconds: primarySeconds, uiTimer: toShortTimer(primarySeconds), humanTime: toWaUiTimer(primarySeconds) },
-    proxyInfo: `${proxyMode} · ${sessionTag}`, proxyTag: sessionTag, proxyCountry: countryIso2,
+    description,
+    deviceName: timers.device_name || null,
+    waOldEligible: timers.wa_old_eligible,
+    channels,
+    primaryTimer: {
+      rawSeconds: primarySeconds,
+      uiTimer: toShortTimer(primarySeconds),
+      humanTime: toWaUiTimer(primarySeconds)
+    },
+    proxyInfo: `${proxyMode} · ${sessionTag}`,
+    proxyTag: sessionTag,
+    proxyCountry: countryIso2,
     rawStatus: parsed.rawStatus || existResponse.status || codeResponse.status || null,
     rawReason: parsed.rawReason || existResponse.reason || codeResponse.reason || null,
-    isWaOldEcho: timers.is_wa_old_echo
+    isWaOldEcho: timers.is_wa_old_echo,
+    partialResponse: !existText || !codeText
   };
+}
+
+async function checkWhatsAppCooldown(rawNumber) {
+  const payloads = await WADetector.buildDualPayloads(String(rawNumber));
+  if (!payloads.success) {
+    throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
+  }
+  payloads.rawNumber = String(rawNumber);
+
+  const headers = buildHeaders(payloads.userAgent);
+  const countryIso2 = resolveCountryIso2(payloads.phoneInfo, null);
+
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= INTERNAL_RETRIES; attempt++) {
+    try {
+      const probe = await runDualProbe(payloads, headers, countryIso2);
+      const result = classifyFromResponses(
+        payloads,
+        probe.existText,
+        probe.codeText,
+        probe.proxyMode,
+        probe.sessionTag,
+        countryIso2
+      );
+      // If we only got partial data and status is still UNKNOWN, retry once more
+      if (result.accountStatus === 'UNKNOWN' && probe.partial && attempt < INTERNAL_RETRIES) {
+        lastError = new Error('Partial response dengan status UNKNOWN');
+        await sleep(250 + Math.floor(Math.random() * 350));
+        continue;
+      }
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (attempt < INTERNAL_RETRIES) {
+        await sleep(300 + Math.floor(Math.random() * 500));
+        continue;
+      }
+    }
+  }
+
+  throw lastError || new Error('Gagal memeriksa nomor setelah beberapa percobaan.');
 }
 
 module.exports = { checkWhatsAppCooldown };
