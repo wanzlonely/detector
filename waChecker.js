@@ -214,7 +214,19 @@ async function checkWhatsAppCooldown(rawNumber) {
   const smsCooldownActive = channels.sms.rawSeconds > 0;
   const otherOtpCooldown = !smsCooldownActive && (channels.voice.rawSeconds > 120 || channels.flash.rawSeconds > 120);
   const meaningfulCooldown = smsCooldownActive || otherOtpCooldown;
-  const isBanned = detectBanSignals(existResponse, codeResponse, parsed);
+
+  // Cooldown with visible timers = NOT banned unless HARD ban signals
+  let isBanned = detectBanSignals(existResponse, codeResponse, parsed);
+  if (isBanned && meaningfulCooldown) {
+    const hard =
+      existResponse.status === 'banned' || codeResponse.status === 'banned' ||
+      existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
+      existResponse.reason === 'blocked' || codeResponse.reason === 'blocked' ||
+      Boolean(existResponse.violation_type || codeResponse.violation_type) ||
+      Boolean(existResponse.in_app_ban_appeal || codeResponse.in_app_ban_appeal);
+    if (!hard) isBanned = false;
+  }
+
   const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
   const isCloneBlocked = cloneSig.isCloneBlocked && !isBanned;
   const isSecurityBlock = cloneSig.isSecurityBlock && !isBanned && !isCloneBlocked;
