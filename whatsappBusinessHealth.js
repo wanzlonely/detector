@@ -1,7 +1,7 @@
-const GRAPH_TIMEOUT_MS = Math.min(
-  15000,
-  Math.max(3000, Number(process.env.META_GRAPH_TIMEOUT_MS || 10000))
-);
+const configuredTimeout = Number(process.env.META_GRAPH_TIMEOUT_MS || 10000);
+const GRAPH_TIMEOUT_MS = Number.isFinite(configuredTimeout)
+  ? Math.min(15000, Math.max(3000, configuredTimeout))
+  : 10000;
 
 function getConfig() {
   const wabaId = String(process.env.META_WABA_ID || "").trim();
@@ -90,6 +90,8 @@ async function getPhoneNumbers(wabaId, accessToken, apiVersion) {
     "verified_name",
     "quality_rating",
     "code_verification_status",
+    "status",
+    "name_status",
     "platform_type",
     "throughput"
   ].join(",");
