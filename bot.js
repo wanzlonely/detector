@@ -264,7 +264,7 @@ bot.command('addvip', async (ctx) => {
   const uid = Number(parts[1]);
   const hasLegacyTier = ['STANDARD', 'ULTRA', 'PREMIUM'].includes(String(parts[2] || '').toUpperCase());
   const days = Number(hasLegacyTier ? parts[3] : parts[2]);
-  if (!uid || !Number.isFinite(days) || days <= 0) {
+  if (!Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(days) || days <= 0 || days > 3650) {
     return ctx.reply('✚ <b>FORMAT AKTIVASI BELUM TEPAT</b>\nGunakan format <code>ID_TELEGRAM DURASI_HARI</code>.\nContoh: <code>123456789 7</code>.', { parse_mode: 'HTML' });
   }
   const result = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
