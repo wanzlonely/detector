@@ -5,30 +5,23 @@ const { redis } = require('../database');
 module.exports = async (req, res) => {
   if (req.method === 'GET') {
     try {
-      const [webhook, identity, redisStatus] = await Promise.all([
+      const [webhook, redisStatus] = await Promise.all([
         bot.telegram.getWebhookInfo(),
-        bot.telegram.getMe(),
         redis.ping()
       ]);
       return res.status(200).json({
         ok: true,
-        bot: { id: identity.id, username: identity.username },
         redis: { connected: redisStatus === 'PONG' },
         webhook: {
           configured: Boolean(webhook.url),
-          url: webhook.url || null,
-          pendingUpdates: webhook.pending_update_count || 0,
-          lastErrorDate: webhook.last_error_date || null,
-          lastErrorMessage: webhook.last_error_message || null,
-          maxConnections: webhook.max_connections || null
+          pendingUpdates: webhook.pending_update_count || 0
         }
       });
     } catch (err) {
       console.error('[webhook health]', err && err.message || err);
       return res.status(502).json({
         ok: false,
-        error: 'Pemeriksaan kesehatan Telegram atau Redis gagal',
-        detail: err && err.message ? err.message : 'Unknown Telegram API error'
+        error: 'Pemeriksaan kesehatan Telegram atau Redis gagal'
       });
     }
   }
