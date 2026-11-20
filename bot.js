@@ -151,11 +151,11 @@ async function beginDetection(ctx) {
   const limit = premium ? Math.min(30, Math.max(1, Number(user.bulk_limit) || 30)) : 1;
   await redis.set('detect:mode:' + ctx.from.id, String(limit), { ex: 300 });
   return ctx.reply(
-    '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ</b>\\n\\n' +
-    'Kirim nomor milikmu yang ingin divalidasi, satu nomor per baris.\\n' +
-    'Batas input: <b>' + limit + ' nomor</b> · ' + (premium ? 'Premium' : 'Free') + '\\n\\n' +
-    'Contoh: <code>+6281234567890</code>\\n\\n' +
-    '⚠️ <b>Pemulihan bertahap:</b> saat ini bot hanya memvalidasi format dan duplikasi nomor. Pemeriksaan status WhatsApp/cooldown belum dijalankan karena endpoint internal belum dapat dipastikan aman. Tidak ada OTP yang dikirim dan kuota tidak dipotong.\\n\\n' +
+    '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ</b>\n\n' +
+    'Kirim nomor milikmu yang ingin divalidasi, satu nomor per baris.\n' +
+    'Batas input: <b>' + limit + ' nomor</b> · ' + (premium ? 'Premium' : 'Free') + '\n\n' +
+    'Contoh: <code>+6281234567890</code>\n\n' +
+    '⚠️ <b>Pemulihan bertahap:</b> saat ini bot hanya memvalidasi format dan duplikasi nomor. Pemeriksaan status WhatsApp/cooldown belum dijalankan karena endpoint internal belum dapat dipastikan aman. Tidak ada OTP yang dikirim dan kuota tidak dipotong.\n\n' +
     'Ketik /cancel untuk membatalkan.',
     { parse_mode: 'HTML' }
   );
@@ -334,7 +334,7 @@ bot.on('text', async (ctx) => {
     }
     const parsed = parseDetectionInput(text, Number(detectLimit));
     if (!parsed.ok) {
-      return ctx.reply('⚠️ <b>ɪɴᴘᴜᴛ ʙᴇʟᴜᴍ ᴠᴀʟɪᴅ</b>\\n\\n' + escapeHtml(parsed.error) + '\\n\\nKirim ulang nomor, satu nomor per baris, atau /cancel.', { parse_mode: 'HTML' });
+      return ctx.reply('⚠️ <b>ɪɴᴘᴜᴛ ʙᴇʟᴜᴍ ᴠᴀʟɪᴅ</b>\n\n' + escapeHtml(parsed.error) + '\n\nKirim ulang nomor, satu nomor per baris, atau /cancel.', { parse_mode: 'HTML' });
     }
     await redis.del('detect:mode:' + ctx.from.id);
     const lines = [
@@ -351,7 +351,7 @@ bot.on('text', async (ctx) => {
     ];
     if (parsed.invalid.length) lines.push('', '<b>Format tidak valid:</b>', ...parsed.invalid.map((value) => '• <code>' + escapeHtml(value) + '</code>'));
     if (parsed.duplicates.length) lines.push('', '<b>Duplikat:</b>', ...parsed.duplicates.map((value) => '• <code>' + escapeHtml(value) + '</code>'));
-    return ctx.reply(lines.join('\\n'), { parse_mode: 'HTML' });
+    return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
   }
   if (await redis.get('contact:state:' + ctx.from.id)) {
     await redis.del('contact:state:' + ctx.from.id);
