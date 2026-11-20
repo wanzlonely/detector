@@ -1,16 +1,19 @@
 const bot = require('../bot');
 const { waitUntil } = require('@vercel/functions');
+const { redis } = require('../database');
 
 module.exports = async (req, res) => {
   if (req.method === 'GET') {
     try {
-      const [webhook, identity] = await Promise.all([
+      const [webhook, identity, redisStatus] = await Promise.all([
         bot.telegram.getWebhookInfo(),
-        bot.telegram.getMe()
+        bot.telegram.getMe(),
+        redis.ping()
       ]);
       return res.status(200).json({
         ok: true,
         bot: { id: identity.id, username: identity.username },
+        redis: { connected: redisStatus === 'PONG' },
         webhook: {
           configured: Boolean(webhook.url),
           url: webhook.url || null,
@@ -36,8 +39,15 @@ module.exports = async (req, res) => {
   }
 
   const secret = process.env.WEBHOOK_SECRET;
-  if (secret && req.headers['x-telegram-bot-api-secret-token'] !== secret) {
+  if (!secret) {
+    return res.status(503).send('Webhook security is not configured');
+  }
+  if (req.headers['x-telegram-bot-api-secret-token'] !== secret) {
     return res.status(401).send('Unauthorized');
+  }
+
+  if (!req.body || typeof req.body !== 'object') {
+    return res.status(400).send('Invalid update payload');
   }
 
   res.status(200).send('OK');
