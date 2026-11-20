@@ -220,6 +220,9 @@ function extractPhoneCandidates(text) {
 }
 
 async function startDetect(ctx) {
+  if (process.env.DETECTION_ENABLED !== 'true') {
+    return ctx.reply('⚠️ <b>Fitur deteksi sedang dinonaktifkan sementara.</b>\n\nLayanan bot lainnya tetap tersedia.', { parse_mode: 'HTML' });
+  }
   const user = await getEffectiveUser(ctx);
   const isVip = isOwner(ctx) || isUserVip(user);
   const remaining = isVip ? 999 : Math.max(0, 3 - Number(user.free_used_today || 0));
