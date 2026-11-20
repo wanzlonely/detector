@@ -377,7 +377,14 @@ async function processDetection(ctx, numbers) {
     if (r.isBanned) groups.banned.push(num);
     else if (r.isCloneBlocked) groups.clone.push(num);
     else if (r.anyCooldown || r.softFallback) {
-      groups.cooldown.push(num);
+      const timerCandidates = [r.primaryTimer, r.channels && r.channels.sms, r.channels && r.channels.voice, r.channels && r.channels.flash]
+        .filter((timer) => timer && Number(timer.rawSeconds) > 0)
+        .sort((a, b) => Number(b.rawSeconds) - Number(a.rawSeconds));
+      const timer = timerCandidates[0];
+      groups.cooldown.push({
+        number: num,
+        duration: timer ? (timer.uiTimer || timer.formatted || 'durasi tersedia') : 'durasi belum diketahui'
+      });
     } else if (r.smsOptionMissing || (r.smsAvailable === false && !r.isReady && !r.waOldEligible)) {
       groups.smsUnavailable.push(num);
     } else {
@@ -409,7 +416,7 @@ async function processDetection(ctx, numbers) {
   if (groups.cooldown.length) {
     lines.push('');
     lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
-    lines.push(...groups.cooldown.map(n => '<code>' + n + '</code>'));
+    lines.push(...groups.cooldown.map(item => '· <code>' + item.number + '</code> ⦂ ' + item.duration));
   }
   if (groups.clone.length) {
     lines.push('');
