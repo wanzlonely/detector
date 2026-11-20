@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const VERCEL_URL = process.argv[2];
+const SITE_URL = process.argv[2] || process.env.NETLIFY_URL || process.env.SITE_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 if (!BOT_TOKEN) {
@@ -19,12 +19,12 @@ if (!/^[A-Za-z0-9_-]{1,256}$/.test(WEBHOOK_SECRET)) {
   process.exit(1);
 }
 
-if (!VERCEL_URL || !/^https:\/\//i.test(VERCEL_URL)) {
-  console.error('Pakai: node scripts/set-webhook.js https://nama-project-kamu.vercel.app');
+if (!SITE_URL || !/^https:\/\//i.test(SITE_URL)) {
+  console.error('Pakai: node scripts/set-webhook.js https://nama-project-kamu.netlify.app');
   process.exit(1);
 }
 
-const webhookUrl = `${VERCEL_URL.replace(/\/$/, '')}/api/bot`;
+const webhookUrl = `${SITE_URL.replace(/\/$/, '')}/api/bot`;
 
 async function main() {
   const body = { url: webhookUrl };
