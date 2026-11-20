@@ -258,7 +258,9 @@ function renderWhatsAppBusinessHealth(report) {
     return [
       String(index + 1) + '. <b>' + escapeHtml(value(phone.display_phone_number)) + '</b>',
       '   Nama: ' + escapeHtml(value(phone.verified_name)),
-      '   Verifikasi: <b>' + escapeHtml(verificationLabel) + '</b>',
+      '   Verifikasi OTP pendaftaran: <b>' + escapeHtml(verificationLabel) + '</b>',
+      '   Status Cloud API: <b>' + escapeHtml(value(phone.status)) + '</b>',
+      '   Status nama: ' + escapeHtml(value(phone.name_status)),
       '   Quality: <b>' + escapeHtml(value(phone.quality_rating)) + '</b>',
       '   Platform: ' + escapeHtml(value(phone.platform_type)),
       '   Throughput: ' + escapeHtml(value(phone.throughput))
