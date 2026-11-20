@@ -11,7 +11,6 @@ const {
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
-const { getWhatsAppBusinessHealth } = require('./whatsappBusinessHealth');
 async function stopActiveDetection(ctx) {
   const userId = ctx.from && ctx.from.id;
   if (!userId) return;
@@ -23,7 +22,7 @@ async function stopActiveDetection(ctx) {
 bot.use(async (ctx, next) => {
   const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
   const callbackData = ctx.callbackQuery && ctx.callbackQuery.data || '';
-  const navigationText = /^(⌖ DETECT|♧ WA BUSINESS HEALTH|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
+  const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
   if (navigationText || navigationCallback) {
     try {
@@ -54,7 +53,6 @@ const OWNER_KEYBOARD = Markup.keyboard([
   [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
   [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
   [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }],
-  [{ text: '♧ WA BUSINESS HEALTH' }],
   [{ text: '♛ OWNER CONSOLE' }],
   [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
 ]).resize().oneTime().placeholder('Pilih fungsi owner…');
@@ -239,77 +237,6 @@ bot.action(/^referral:redeem:(quota10|vip3|vip7|vip30)$/, async (ctx) => {
   if(!result.ok) return ctx.reply('✕ <b>ᴋᴏɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴄᴜᴋᴜᴘɪ</b>\n\nsᴀʟᴅᴏ ᴀɴᴅᴀ ⦂ '+result.balance+' ᴋᴏɪɴ\nᴅɪʙᴜᴛᴜʜᴋᴀɴ ⦂ '+offer.cost+' ᴋᴏɪɴ\n\nᴜɴᴅᴀɴɢ ʟᴇʙɪʜ ʙᴀɴʏᴀᴋ ᴛᴇᴍᴀɴ ᴜɴᴛᴜᴋ ᴍᴇɴᴅᴀᴘᴀᴛᴋᴀɴ ᴛᴀᴍʙᴀʜᴀɴ ᴋᴏɪɴ.',{parse_mode:'HTML'});
   return ctx.reply('✓ <b>ᴘᴇɴᴜᴋᴀʀᴀɴ ʙᴇʀʜᴀsɪʟ</b>\n\nᴘᴀᴋᴇᴛ ⦂ '+offer.label+'\nsɪsᴀ ᴋᴏɪɴ ⦂ '+result.balance+' ᴋᴏɪɴ\n\n'+(offer.type==='vip'?'ᴀᴋsᴇs ᴛᴇʟᴀʜ ᴀᴋᴛɪꜰ ᴏᴛᴏᴍᴀᴛɪs ᴅɪ ᴀᴋᴜɴ ᴀɴᴅᴀ.':'ᴋᴜᴏᴛᴀ ᴛᴀᴍʙᴀʜᴀɴ ᴛᴇʟᴀʜ ᴅɪᴛᴀᴍʙᴀʜᴋᴀɴ ᴋᴇ ᴀᴋᴜɴ ᴀɴᴅᴀ.'),{parse_mode:'HTML'});
 });
-
-
-function renderWhatsAppBusinessHealth(report) {
-  const account = report.account || {};
-  const value = (input) => {
-    if (input === null || input === undefined || input === '') return 'Tidak disediakan API';
-    if (typeof input === 'object') return JSON.stringify(input);
-    return String(input);
-  };
-  const phoneLines = (report.phones || []).slice(0, 10).map((phone, index) => {
-    const verification = String(phone.code_verification_status || '').toUpperCase();
-    const verificationLabel = verification === 'VERIFIED'
-      ? 'TERVERIFIKASI CLOUD API'
-      : verification
-        ? verification
-        : 'STATUS VERIFIKASI TIDAK DISEDIAKAN';
-    return [
-      String(index + 1) + '. <b>' + escapeHtml(value(phone.display_phone_number)) + '</b>',
-      '   Nama: ' + escapeHtml(value(phone.verified_name)),
-      '   Verifikasi OTP pendaftaran: <b>' + escapeHtml(verificationLabel) + '</b>',
-      '   Status Cloud API: <b>' + escapeHtml(value(phone.status)) + '</b>',
-      '   Status nama: ' + escapeHtml(value(phone.name_status)),
-      '   Quality: <b>' + escapeHtml(value(phone.quality_rating)) + '</b>',
-      '   Platform: ' + escapeHtml(value(phone.platform_type)),
-      '   Throughput: ' + escapeHtml(value(phone.throughput))
-    ].join('\n');
-  });
-  const lines = [
-    '♧ <b>WHATSAPP BUSINESS HEALTH</b>',
-    '<i>Read-only · Sumber resmi Meta Graph API ' + escapeHtml(report.apiVersion) + '</i>',
-    '',
-    '◈ <b>AKUN BISNIS</b>',
-    'Nama: <b>' + escapeHtml(value(account.name)) + '</b>',
-    'WABA ID: <code>' + escapeHtml(value(account.id)) + '</code>',
-    'Status akun: <b>' + escapeHtml(value(account.status)) + '</b>',
-    'Verifikasi bisnis: <b>' + escapeHtml(value(account.business_verification_status)) + '</b>',
-    'Health: ' + escapeHtml(value(account.health_status)),
-    'Messaging limit: <b>' + escapeHtml(value(account.whatsapp_business_manager_messaging_limit)) + '</b>',
-    '',
-    '◈ <b>NOMOR MILIK WABA</b>',
-    ...(phoneLines.length ? phoneLines : ['Belum ada nomor yang dikembalikan API.']),
-    report.phonesTruncated ? '\n<i>Daftar dipotong pada batas halaman aman; masih ada data berikutnya.</i>' : '',
-    '',
-    '<i>Catatan: code_verification_status adalah status verifikasi nomor milik WABA di Cloud API. API ini tidak memberikan timer cooldown login OTP konsumen, kesiapan SMS/telepon, atau status clone untuk nomor sembarang.</i>',
-    '<i>Pemeriksaan ini tidak mengirim OTP dan tidak melakukan registrasi ulang.</i>',
-    '',
-    '<i>Dicek: ' + escapeHtml(report.checkedAt) + '</i>'
-  ];
-  return lines.filter(Boolean).join('\n');
-}
-
-async function showWhatsAppBusinessHealth(ctx) {
-  if (!isOwner(ctx)) {
-    return ctx.reply('⊘ <b>AKSES DITOLAK</b>\nFitur kesehatan WhatsApp Business hanya tersedia untuk owner.', { parse_mode: 'HTML' });
-  }
-  await ctx.reply('⌁ Mengambil status aset WhatsApp Business dari Meta Graph API…');
-  try {
-    const report = await getWhatsAppBusinessHealth();
-    return ctx.reply(renderWhatsAppBusinessHealth(report), { parse_mode: 'HTML' });
-  } catch (error) {
-    const message = escapeHtml(error && error.message || 'Pemeriksaan gagal.');
-    return ctx.reply(
-      '⚠ <b>WHATSAPP BUSINESS HEALTH TIDAK TERSEDIA</b>\n\n' + message +
-      '\n\n<i>Periksa META_WABA_ID, META_ACCESS_TOKEN, izin token, dan versi Graph API. Tidak ada hasil yang ditebak.</i>',
-      { parse_mode: 'HTML' }
-    );
-  }
-}
-
-bot.command('wahealth', showWhatsAppBusinessHealth);
-bot.hears('♧ WA BUSINESS HEALTH', showWhatsAppBusinessHealth);
 
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('⊘ <b>ᴀᴋsᴇs ᴛɪᴅᴀᴋ ᴅɪɪᴢɪɴᴋᴀɴ</b>\nғɪᴛᴜʀ ɪɴɪ ʜᴀɴʏᴀ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ ᴏʟᴇʜ ᴏᴡɴᴇʀ ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ.');
