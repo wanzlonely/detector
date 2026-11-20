@@ -1,7 +1,9 @@
 const WADetector = require('./waEngine');
 const { executeWithProxyRotation } = require('./proxyManager');
 
-const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 8000);
+// 5.5s is a good balance: fast enough for bulk (<30s for 30 numbers with concurrency 8)
+// while still tolerating normal WA latency
+const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 5500);
 
 function buildHeaders(userAgent) {
   return {
@@ -211,10 +213,6 @@ async function checkWhatsAppCooldown(rawNumber) {
   const isSecurityBlock = Boolean(parsed.isSecurityBlock);
 
   // isReady yang lebih ketat & akurat
-  // - Tidak banned / tidak clone-block / tidak security-block
-  // - Tidak ada channel yang sedang cooldown
-  // - parsed bilang ready ATAU primary timer = 0
-  // - smsAvailable tidak secara eksplisit false (kecuali kita tahu jalur lain aktif)
   const isReady =
     !isBanned &&
     !isCloneBlocked &&
@@ -284,7 +282,6 @@ async function checkWhatsAppCooldown(rawNumber) {
     },
     proxyInfo: `${proxyMode} · ${sessionTag}`,
     proxyTag: sessionTag,
-    // Extra diagnostic (berguna untuk debugging / future UI)
     rawStatus: parsed.rawStatus || null,
     rawReason: parsed.rawReason || null,
     isWaOldEcho: timers.is_wa_old_echo
