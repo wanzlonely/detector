@@ -1,8 +1,7 @@
 const WADetector = require('./waEngine');
 const { executeWithProxyRotation } = require('./proxyManager');
 
-// 5.5s is a good balance: fast enough for bulk (<30s for 30 numbers with concurrency 8)
-// while still tolerating normal WA latency
+// 5.5s balance for bulk speed + accuracy
 const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 5500);
 
 function buildHeaders(userAgent) {
@@ -50,7 +49,6 @@ function num(v) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** Format detik ke label UI WhatsApp: "Coba lagi dalam 2.00" */
 function toWaUiTimer(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
   if (sec <= 0) return 'Ready';
@@ -77,8 +75,8 @@ function toShortTimer(seconds) {
 }
 
 /**
- * Ambil timer multi-channel langsung dari response mentah WhatsApp.
- * Lebih akurat & tahan perubahan struktur response.
+ * Multi-channel timer extraction — SMS is primary for "cooldown WhatsApp".
+ * Ignore wa_old echo that pollutes sms_wait on method=wa_old probe.
  */
 function extractChannelTimers(existRaw, codeRaw) {
   const exist = existRaw || {};
@@ -97,29 +95,28 @@ function extractChannelTimers(existRaw, codeRaw) {
     codeNoRoutes ? 0 : num(code.retry_after)
   );
 
-  // Deteksi echo timer wa_old di field sms (probe method=wa_old sering mengisi sms_wait ~125s)
   const isCodeSent = code.status === 'sent' || code.status === 'ok';
+  // wa_old probe often echoes ~60-180s into sms_wait — treat as echo, not real SMS cooldown
   const isWaOldEcho =
     existSms === 0 &&
     codeSms > 0 &&
     codeSms <= 180 &&
     (
       isCodeSent ||
-      (waOldWait > 0 && Math.abs(codeSms - waOldWait) <= 8) ||
-      (voiceWait > 0 && Math.abs(codeSms - voiceWait) <= 8 && num(code.send_sms_wait) === 0)
+      (waOldWait > 0 && Math.abs(codeSms - waOldWait) <= 12) ||
+      (voiceWait > 0 && Math.abs(codeSms - voiceWait) <= 12 && num(code.send_sms_wait) === 0) ||
+      (code.method === 'wa_old' || String(code.login_method || '').includes('wa_old'))
     );
 
-  // SMS cooldown efektif: prioritaskan exist.sms_wait; abaikan echo wa_old
-  let smsSeconds = isWaOldEcho ? 0 : Math.max(existSms, codeSms);
+  // Effective SMS cooldown: prefer exist.sms_wait; drop echo
+  let smsSeconds = isWaOldEcho ? 0 : Math.max(existSms, codeSms === existSms ? codeSms : (existSms > 0 ? existSms : codeSms));
+  if (isWaOldEcho) smsSeconds = 0;
+  else if (existSms > 0) smsSeconds = existSms; // exist is more reliable for real SMS cooldown
+  else smsSeconds = codeSms;
 
-  // retry_after hanya dipakai sebagai fallback jika benar-benar tidak ada timer channel lain
-  // dan nilainya masuk akal (bukan probe timer pendek)
-  if (!isWaOldEcho && retryAfter > smsSeconds && retryAfter > 0) {
-    if (existSms > 0) {
-      smsSeconds = existSms;
-    } else if (smsSeconds === 0 && retryAfter > 180) {
-      smsSeconds = retryAfter;
-    }
+  // retry_after only as last-resort real cooldown (>3 min, not probe noise)
+  if (!isWaOldEcho && smsSeconds === 0 && retryAfter > 180) {
+    smsSeconds = retryAfter;
   }
 
   const waOldEligible =
@@ -156,6 +153,66 @@ function buildChannel(seconds) {
   };
 }
 
+/** Stricter ban detection from raw responses */
+function detectBanSignals(exist, code, parsed) {
+  const statusBanned =
+    exist.status === 'banned' ||
+    code.status === 'banned' ||
+    exist.reason === 'blocked' ||
+    code.reason === 'blocked' ||
+    exist.reason === 'banned' ||
+    code.reason === 'banned';
+
+  const hardViolation = Boolean(
+    exist.violation_type ||
+    code.violation_type ||
+    exist.in_app_ban_appeal ||
+    code.in_app_ban_appeal
+  );
+
+  // appeal_token alone is weak — only treat as ban if combined with banned-like status/reason
+  const appealToken = Boolean(exist.appeal_token || code.appeal_token);
+  const weakBanHint = appealToken && (statusBanned || hardViolation);
+
+  const parsedBan = Boolean(parsed && parsed.isBanned);
+
+  return Boolean(statusBanned || hardViolation || weakBanHint || parsedBan);
+}
+
+/** Clone / unofficial / security block */
+function detectCloneSignals(exist, code, parsed) {
+  const blockScreen = String(
+    exist.custom_block_screen || code.custom_block_screen ||
+    exist.block_screen || code.block_screen || ''
+  ).toLowerCase();
+
+  const reason = String(exist.reason || code.reason || '').toLowerCase();
+  const status = String(exist.status || code.status || '').toLowerCase();
+
+  const textBlob = JSON.stringify({ exist: exist, code: code }).toLowerCase();
+
+  const unofficial =
+    blockScreen.includes('unofficial') ||
+    blockScreen.includes('clone') ||
+    reason.includes('unofficial') ||
+    textBlob.includes('whatsapp business') && textBlob.includes('official app') ||
+    Boolean(parsed && parsed.isCloneBlocked);
+
+  const security =
+    blockScreen.includes('security') ||
+    reason.includes('security') ||
+    status.includes('security') ||
+    textBlob.includes('demi keamanan') ||
+    textBlob.includes('login not available right now') ||
+    textBlob.includes('tidak dapat masuk saat ini') ||
+    Boolean(parsed && parsed.isSecurityBlock);
+
+  return {
+    isCloneBlocked: Boolean(unofficial || (parsed && parsed.isCloneBlocked)),
+    isSecurityBlock: Boolean(security)
+  };
+}
+
 async function checkWhatsAppCooldown(rawNumber) {
   const payloads = await WADetector.buildDualPayloads(String(rawNumber));
   if (!payloads.success) {
@@ -177,16 +234,12 @@ async function checkWhatsAppCooldown(rawNumber) {
   const codeResponse = safeJson(data.codeText);
   const timers = extractChannelTimers(existResponse, codeResponse);
 
-  // Normalisasi smsAvailable — tahan terhadap perubahan tipe field
+  // SMS eligibility
   const rawSmsEligible = existResponse.send_sms_eligible ?? codeResponse.send_sms_eligible;
   let smsAvailable = null;
-  if (typeof rawSmsEligible === 'boolean') {
-    smsAvailable = rawSmsEligible;
-  } else if (rawSmsEligible === 0 || rawSmsEligible === '0' || rawSmsEligible === false) {
-    smsAvailable = false;
-  } else if (rawSmsEligible === 1 || rawSmsEligible === '1' || rawSmsEligible === true) {
-    smsAvailable = true;
-  }
+  if (typeof rawSmsEligible === 'boolean') smsAvailable = rawSmsEligible;
+  else if (rawSmsEligible === 0 || rawSmsEligible === '0') smsAvailable = false;
+  else if (rawSmsEligible === 1 || rawSmsEligible === '1') smsAvailable = true;
 
   const channels = {
     sms: buildChannel(timers.sms),
@@ -195,71 +248,59 @@ async function checkWhatsAppCooldown(rawNumber) {
     flash: buildChannel(timers.flash)
   };
 
-  const anyChannelCooldown =
-    channels.sms.isCooldown ||
-    channels.wa_old.isCooldown ||
-    channels.voice.isCooldown ||
-    channels.flash.isCooldown;
+  // Primary signal for "cooldown WhatsApp" = real SMS cooldown (after echo filter)
+  const smsCooldownActive = channels.sms.rawSeconds > 0;
+  // Secondary channels only if SMS is 0 but voice/flash clearly blocked for OTP
+  const otherOtpCooldown =
+    !smsCooldownActive &&
+    (channels.voice.rawSeconds > 120 || channels.flash.rawSeconds > 120);
 
-  const primarySeconds =
-    timers.sms ||
-    timers.wa_old ||
-    timers.voice ||
-    timers.flash ||
-    0;
+  const meaningfulCooldown = smsCooldownActive || otherOtpCooldown;
 
-  const isBanned = Boolean(parsed.isBanned);
-  const isCloneBlocked = Boolean(parsed.isCloneBlocked);
-  const isSecurityBlock = Boolean(parsed.isSecurityBlock);
+  const isBanned = detectBanSignals(existResponse, codeResponse, parsed);
+  const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
+  const isCloneBlocked = cloneSig.isCloneBlocked && !isBanned;
+  const isSecurityBlock = cloneSig.isSecurityBlock && !isBanned && !isCloneBlocked;
 
-  // isReady yang lebih ketat & akurat
+  // READY rules (strict, user-facing accuracy):
+  // - not banned / not clone / not security
+  // - no meaningful SMS (or long voice/flash) cooldown
+  // - smsAvailable is not explicitly false OR wa_old path exists
   const isReady =
     !isBanned &&
     !isCloneBlocked &&
     !isSecurityBlock &&
-    !anyChannelCooldown &&
-    (Boolean(parsed.isReady) || primarySeconds === 0) &&
-    (smsAvailable !== false || timers.wa_old_eligible || channels.voice.rawSeconds === 0);
+    !meaningfulCooldown &&
+    (smsAvailable !== false || timers.wa_old_eligible);
 
-  // Bangun deskripsi yang lebih informatif & konsisten dengan UI WhatsApp
+  // Description
   let description = parsed.description || '';
-
   if (isBanned) {
-    description = description || 'Nomor diblokir / banned oleh WhatsApp.';
-  } else if (isCloneBlocked || isSecurityBlock) {
-    description = description || (isSecurityBlock
-      ? 'Demi keamanan: login sementara tidak tersedia.'
-      : 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone/unofficial).');
-  } else {
-    if (timers.wa_old_eligible && timers.device_name) {
-      description = `Nomor terdaftar di perangkat lain (${timers.device_name}).`;
-    } else if (timers.wa_old_eligible) {
-      description = 'Nomor terdaftar aktif di perangkat lain.';
-    } else if (!description || description.includes('UNKNOWN')) {
-      description = isReady
-        ? 'Nomor siap menerima verifikasi.'
-        : 'Status nomor sedang diperiksa.';
-    }
-
-    if (anyChannelCooldown) {
-      const bits = [];
-      if (channels.sms.isCooldown) bits.push('SMS ' + channels.sms.humanTime);
-      if (channels.wa_old.isCooldown) bits.push('Perangkat lain ' + channels.wa_old.humanTime);
-      if (channels.voice.isCooldown) bits.push('Telepon ' + channels.voice.humanTime);
-      if (channels.flash.isCooldown) bits.push('Flash ' + channels.flash.humanTime);
-      if (bits.length) {
-        description = (description ? description + ' · ' : '') + bits.join(' · ');
-      }
-    }
+    description = 'Nomor dibatasi / diblokir oleh WhatsApp.';
+  } else if (isCloneBlocked) {
+    description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone/unofficial).';
+  } else if (isSecurityBlock) {
+    description = 'Demi keamanan: login sementara tidak tersedia.';
+  } else if (meaningfulCooldown) {
+    const t = channels.sms.rawSeconds > 0 ? channels.sms.humanTime : (channels.voice.humanTime || channels.flash.humanTime);
+    description = 'Cooldown aktif · ' + t;
+  } else if (isReady) {
+    description = timers.wa_old_eligible && timers.device_name
+      ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
+      : 'Nomor siap menerima verifikasi.';
   }
 
-  // Normalisasi accountStatus agar konsisten
-  let accountStatus = parsed.state || 'UNKNOWN';
+  let accountStatus = 'UNKNOWN';
   if (isBanned) accountStatus = 'BANNED';
   else if (isCloneBlocked) accountStatus = 'CLONE_OR_UNOFFICIAL_APP_BLOCK';
   else if (isSecurityBlock) accountStatus = 'SECURITY_BLOCK';
+  else if (meaningfulCooldown) accountStatus = 'IN_COOLDOWN';
   else if (isReady) accountStatus = timers.wa_old_eligible ? 'REGISTERED_ON_DEVICE' : 'AVAILABLE_READY';
-  else if (anyChannelCooldown) accountStatus = 'IN_COOLDOWN';
+
+  // primary timer for display = SMS first
+  const primarySeconds = channels.sms.rawSeconds > 0
+    ? channels.sms.rawSeconds
+    : (otherOtpCooldown ? Math.max(channels.voice.rawSeconds, channels.flash.rawSeconds) : 0);
 
   return {
     formattedNumber: parsed.phone || payloads.phoneInfo?.full || String(rawNumber),
@@ -270,7 +311,8 @@ async function checkWhatsAppCooldown(rawNumber) {
     isSecurityBlock,
     isReady,
     smsAvailable,
-    anyCooldown: anyChannelCooldown && !isBanned && !isCloneBlocked && !isSecurityBlock,
+    // only true cooldown that should go to "cooldown WhatsApp" group
+    anyCooldown: meaningfulCooldown && !isBanned && !isCloneBlocked && !isSecurityBlock,
     description,
     deviceName: timers.device_name || null,
     waOldEligible: timers.wa_old_eligible,
@@ -282,8 +324,8 @@ async function checkWhatsAppCooldown(rawNumber) {
     },
     proxyInfo: `${proxyMode} · ${sessionTag}`,
     proxyTag: sessionTag,
-    rawStatus: parsed.rawStatus || null,
-    rawReason: parsed.rawReason || null,
+    rawStatus: parsed.rawStatus || existResponse.status || codeResponse.status || null,
+    rawReason: parsed.rawReason || existResponse.reason || codeResponse.reason || null,
     isWaOldEcho: timers.is_wa_old_echo
   };
 }
