@@ -2,7 +2,7 @@ const { parsePhoneNumberFromString } = require('libphonenumber-js');
 
 function parseDetectionInput(input, limit = 1) {
   const entries = String(input || '')
-    .split(/[\\n,;]+/)
+    .split(/[\n,;]+/)
     .map((value) => value.trim())
     .filter(Boolean);
 
@@ -21,7 +21,7 @@ function parseDetectionInput(input, limit = 1) {
   const seen = new Set();
 
   for (const entry of entries) {
-    const compact = entry.replace(/[\\s().-]/g, '');
+    const compact = entry.replace(/[\s().-]/g, '');
     const parsed = parsePhoneNumberFromString(compact, 'ID');
     if (!parsed || !parsed.isValid()) {
       invalid.push(entry);
