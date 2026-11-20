@@ -6,6 +6,12 @@ const ENV_KEYS = [
   'UPSTASH_REDIS_REST_TOKEN',
   'WEBHOOK_SECRET',
   'CHECK_CACHE_TTL_SECONDS',
+  'DATAIMPULSE_HOST',
+  'DATAIMPULSE_PORT',
+  'DATAIMPULSE_LOGIN',
+  'DATAIMPULSE_PASSWORD',
+  'PROXY_MAX_RETRIES',
+  'WA_CHECK_TIMEOUT_MS',
   'DETECTION_ENABLED'
 ];
 
@@ -85,11 +91,7 @@ exports.handler = async (event, context) => {
 
   try {
     const bot = getBot();
-    const work = bot.handleUpdate(update).catch((err) => {
-      console.error('[webhook update failed]', err && err.stack || err);
-    });
-    if (context && typeof context.waitUntil === 'function') context.waitUntil(work);
-    else await work;
+    await bot.handleUpdate(update);
     return { statusCode: 200, body: 'OK' };
   } catch (err) {
     console.error('[webhook handler]', err && err.message || err);
