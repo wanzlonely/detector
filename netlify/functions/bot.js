@@ -17,7 +17,7 @@ const ENV_KEYS = [
 
 for (const key of ENV_KEYS) {
   if (!process.env[key]) {
-    const value = Netlify.env.get(key);
+    const value = typeof Netlify !== 'undefined' ? Netlify.env.get(key) : process.env[key];
     if (value) process.env[key] = value;
   }
 }
@@ -33,10 +33,11 @@ function getBot() {
 }
 
 function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8' }
-  });
+  return {
+    statusCode: status,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+    body: JSON.stringify(data)
+  };
 }
 
 exports.handler = async (event, context) => {
@@ -71,11 +72,11 @@ exports.handler = async (event, context) => {
     };
   }
 
-  const secret = process.env.WEBHOOK_SECRET || Netlify.env.get('WEBHOOK_SECRET');
+  const secret = process.env.WEBHOOK_SECRET || (typeof Netlify !== 'undefined' ? Netlify.env.get('WEBHOOK_SECRET') : '');
   if (!secret || !/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
     return { statusCode: 503, body: 'Webhook security is not configured correctly' };
   }
-  if (event.headers['x-telegram-bot-api-secret-token'] !== secret) {
+  if (((event.headers || {})['x-telegram-bot-api-secret-token']) !== secret) {
     return { statusCode: 401, body: 'Unauthorized' };
   }
 
