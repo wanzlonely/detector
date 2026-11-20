@@ -268,7 +268,6 @@ async function processDetection(ctx, numbers) {
   const total = numbers.length;
   let processed = 0;
   const results = new Array(total);
-  const CONCURRENCY = Math.min(8, total);
 
   let progressMsg;
   try {
@@ -288,35 +287,63 @@ async function processDetection(ctx, numbers) {
     } catch (_) {}
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async function checkOne(index, raw) {
     const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
     if (stop) return { cancelled: true };
+
+    // Prefer cache only for successful previous results
     try {
       const cached = await getCachedCheckResult(raw);
-      let result = cached;
-      if (!result) {
-        result = await checkWhatsAppCooldown(raw);
-        await setCachedCheckResult(raw, result);
+      if (cached && !cached.error && cached.accountStatus && cached.accountStatus !== 'UNKNOWN') {
+        await addCheckLog(userId, cached.formattedNumber || raw, cached.accountStatus || cached.description || '-', cached.proxyTag || cached.proxyInfo || '-');
+        return cached;
       }
-      await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
-      return result;
-    } catch (err) {
-      return {
-        formattedNumber: raw,
-        isBanned: false,
-        isCloneBlocked: false,
-        isReady: false,
-        anyCooldown: false,
-        smsAvailable: null,
-        smsOptionMissing: false,
-        error: true,
-        description: (err && err.message) || 'Gagal memeriksa'
-      };
+    } catch (_) {}
+
+    let lastErr = null;
+    const maxAttempts = 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const stop2 = await redis.get('detect:stop:' + userId + ':' + jobId);
+      if (stop2) return { cancelled: true };
+      try {
+        const result = await checkWhatsAppCooldown(raw);
+        if (result && !result.error) {
+          await setCachedCheckResult(raw, result);
+          await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
+          return result;
+        }
+        lastErr = new Error((result && result.description) || 'Hasil tidak valid');
+      } catch (err) {
+        lastErr = err;
+      }
+      if (attempt < maxAttempts) {
+        await sleep(350 + Math.floor(Math.random() * 450));
+      }
     }
+
+    return {
+      formattedNumber: String(raw),
+      isBanned: false,
+      isCloneBlocked: false,
+      isReady: false,
+      anyCooldown: false,
+      smsAvailable: null,
+      smsOptionMissing: false,
+      error: true,
+      description: (lastErr && lastErr.message) || 'Gagal memeriksa'
+    };
   }
 
   let nextIndex = 0;
-  async function worker() {
+  // Slightly lower concurrency + small stagger reduces rate-limit failures
+  const CONCURRENCY_SAFE = Math.min(6, total);
+  async function worker(workerId) {
+    // Stagger start so bursts do not hit WhatsApp at the exact same millisecond
+    if (workerId > 0) await sleep(workerId * 80);
     while (nextIndex < total) {
       const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
       if (stop) return;
@@ -327,7 +354,7 @@ async function processDetection(ctx, numbers) {
     }
   }
 
-  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+  await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
 
   const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
   await redis.del('detect:active:' + userId);
@@ -343,9 +370,9 @@ async function processDetection(ctx, numbers) {
   let ok = 0, fail = 0;
   for (const r of results) {
     if (!r || r.cancelled) continue;
-    if (r.error) { groups.error.push(r.formattedNumber || '?'); fail += 1; continue; }
+    if (r.error) { groups.error.push(String(r.formattedNumber || 'unknown')); fail += 1; continue; }
     ok += 1;
-    const num = r.formattedNumber || '?';
+    const num = String(r.formattedNumber || 'unknown');
     if (r.isBanned) groups.banned.push(num);
     else if (r.isCloneBlocked) groups.clone.push(num);
     else if (r.anyCooldown) {
