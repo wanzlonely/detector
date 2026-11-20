@@ -24,7 +24,8 @@ async function stopActiveDetection(ctx) {
 bot.use(async (ctx, next) => {
   const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
   const callbackData = ctx.callbackQuery && ctx.callbackQuery.data || '';
-  const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
+  // Match main menu buttons (symbol-tolerant) and major commands. /cancel is handled separately.
+  const navigationText = /^(⌖\s*DETECT|✧\s*BELI\s*PREMIUM|◈\s*STATUS|♛\s*LEADERBOARD|♧\s*REFERRAL|✉︎?\s*HUBUNGI\s*ADMIN|♛\s*OWNER\s*CONSOLE|✚\s*AKTIVASI\s*PREMIUM|▤\s*BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
   if (navigationText || navigationCallback) {
     try {
@@ -69,6 +70,27 @@ async function getOwnerAction(userId) {
 async function clearOwnerAction(userId) {
   await redis.del('owner:action:' + userId);
 }
+
+// Global cancel — always clears temporary modes so user is never stuck
+async function handleCancel(ctx) {
+  const uid = ctx.from && ctx.from.id;
+  if (uid) {
+    await stopActiveDetection(ctx);
+    await Promise.all([
+      redis.del('detect:mode:' + uid),
+      redis.del('contact:state:' + uid),
+      redis.del('owner:action:' + uid),
+      redis.del('owner:contact:target:' + uid)
+    ]);
+  }
+  return ctx.reply('✕ <b>ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\n\nᴋᴇᴍʙᴀʟɪ ᴋᴇ ᴍᴇɴᴜ ᴜᴛᴀᴍᴀ.', {
+    parse_mode: 'HTML',
+    ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
+  });
+}
+bot.command('cancel', handleCancel);
+bot.hears(/^\/?cancel$/i, handleCancel);
+bot.hears(/^batal$/i, handleCancel);
 
 function isOwner(ctx) {
   return Boolean(ADMIN_ID) && Number(ctx.from && ctx.from.id) === ADMIN_ID;
@@ -348,7 +370,9 @@ async function processDetection(ctx, rawText) {
 
   let phones = extractPhoneCandidates(rawText);
   if (phones.length === 0) {
-    return ctx.reply('⚠️ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ: <code>+6281234567890</code>', { parse_mode: 'HTML' });
+    // Keep user in detect mode so they can try again with a valid number
+    await redis.set('detect:mode:' + userId, 'waiting_numbers', { ex: 300 });
+    return ctx.reply('⚠️ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ: <code>+6281234567890</code>\n\nᴋᴇᴛɪᴋ /cancel ᴜɴᴛᴜᴋ ᴋᴇʟᴜᴀʀ.', { parse_mode: 'HTML' });
   }
 
   if (phones.length > bulkLimit) {
@@ -372,7 +396,7 @@ async function processDetection(ctx, rawText) {
 
   const statusMsg = await ctx.reply(
     '⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs ' + phones.length + ' ɴᴏᴍᴏʀ...</b>\n\n' +
-    'ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ, ʜᴀsɪʟ ᴀᴋᴀɴ ᴅɪᴋɪʀɪᴍ sᴇᴛᴇʟᴀʜ sᴇʟᴇsᴀɪ.',
+    'ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ, ʜᴀsɪʟ ᴀᴋᴀɴ ᴅɪᴋɪʀɪᴍ ssᴇᴛᴇʟᴀʜ sᴇʟᴇsᴀɪ.',
     { parse_mode: 'HTML' }
   );
 
@@ -469,15 +493,20 @@ bot.on('text', async (ctx) => {
   // Detect mode: user is expected to send numbers
   const detectMode = await redis.get('detect:mode:' + ctx.from.id);
   if (detectMode === 'waiting_numbers') {
-    if (text === '/cancel' || text.toLowerCase() === 'batal' || text.toLowerCase() === 'cancel') {
+    // Cancel always exits cleanly
+    if (/^\/?cancel$/i.test(text) || /^batal$/i.test(text)) {
       await redis.del('detect:mode:' + ctx.from.id);
-      return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+      return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\n\nᴋᴇᴍʙᴀʟɪ ᴋᴇ ᴍᴇɴᴜ ᴜᴛᴀᴍᴀ.', {
+        parse_mode: 'HTML',
+        ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
+      });
     }
-    // ignore pure menu presses (already handled above)
-    if (/^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN)/i.test(text)) {
-      return;
+    // Main menu buttons must never be treated as phone numbers
+    if (/^(⌖\s*DETECT|✧\s*BELI\s*PREMIUM|◈\s*STATUS|♛\s*LEADERBOARD|♧\s*REFERRAL|✉︎?\s*HUBUNGI\s*ADMIN|♛\s*OWNER|✚\s*AKTIVASI|▤\s*BROADCAST)/i.test(text)) {
+      await redis.del('detect:mode:' + ctx.from.id);
+      return; // let the specific hears / later handlers process the menu
     }
-    await redis.del('detect:mode:' + ctx.from.id);
+    // Real input → process (mode cleared inside processDetection or kept on invalid number)
     return processDetection(ctx, text);
   }
 
@@ -509,9 +538,6 @@ bot.on('text', async (ctx) => {
       await redis.set('contact:message:' + forwarded.message_id, String(ctx.from.id), { ex: 86400 });
     }
     return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴘᴇsᴀɴ ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴅɪᴛᴇʀᴜsᴋᴀɴ ᴋᴇ ᴀᴅᴍɪɴ. ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ ʙᴀʟᴀsᴀɴ ᴅɪ sɪɴɪ.', { parse_mode: 'HTML' });
-  }
-  if (text === '⌖ DETECT' || text === '⌖ Detect' || text === 'Detect') {
-    return startDetect(ctx);
   }
   if (text === '✧ BELI PREMIUM' || text === '✧ Beli Premium' || text === 'Beli Premium') {
     return showStore(ctx, false);
