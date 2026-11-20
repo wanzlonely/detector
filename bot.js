@@ -248,7 +248,7 @@ function renderWhatsAppBusinessHealth(report) {
     if (typeof input === 'object') return JSON.stringify(input);
     return String(input);
   };
-  const phoneLines = (report.phones || []).slice(0, 15).map((phone, index) => {
+  const phoneLines = (report.phones || []).slice(0, 10).map((phone, index) => {
     const verification = String(phone.code_verification_status || '').toUpperCase();
     const verificationLabel = verification === 'VERIFIED'
       ? 'TERVERIFIKASI CLOUD API'
@@ -262,7 +262,7 @@ function renderWhatsAppBusinessHealth(report) {
       '   Quality: <b>' + escapeHtml(value(phone.quality_rating)) + '</b>',
       '   Platform: ' + escapeHtml(value(phone.platform_type)),
       '   Throughput: ' + escapeHtml(value(phone.throughput))
-    ].join('\\n');
+    ].join('\n');
   });
   const lines = [
     '♧ <b>WHATSAPP BUSINESS HEALTH</b>',
@@ -278,19 +278,19 @@ function renderWhatsAppBusinessHealth(report) {
     '',
     '◈ <b>NOMOR MILIK WABA</b>',
     ...(phoneLines.length ? phoneLines : ['Belum ada nomor yang dikembalikan API.']),
-    report.phonesTruncated ? '\\n<i>Daftar dipotong pada batas halaman aman; masih ada data berikutnya.</i>' : '',
+    report.phonesTruncated ? '\n<i>Daftar dipotong pada batas halaman aman; masih ada data berikutnya.</i>' : '',
     '',
     '<i>Catatan: code_verification_status adalah status verifikasi nomor milik WABA di Cloud API. API ini tidak memberikan timer cooldown login OTP konsumen, kesiapan SMS/telepon, atau status clone untuk nomor sembarang.</i>',
     '<i>Pemeriksaan ini tidak mengirim OTP dan tidak melakukan registrasi ulang.</i>',
     '',
     '<i>Dicek: ' + escapeHtml(report.checkedAt) + '</i>'
   ];
-  return lines.filter(Boolean).join('\\n');
+  return lines.filter(Boolean).join('\n');
 }
 
 async function showWhatsAppBusinessHealth(ctx) {
   if (!isOwner(ctx)) {
-    return ctx.reply('⊘ <b>AKSES DITOLAK</b>\\nFitur kesehatan WhatsApp Business hanya tersedia untuk owner.', { parse_mode: 'HTML' });
+    return ctx.reply('⊘ <b>AKSES DITOLAK</b>\nFitur kesehatan WhatsApp Business hanya tersedia untuk owner.', { parse_mode: 'HTML' });
   }
   await ctx.reply('⌁ Mengambil status aset WhatsApp Business dari Meta Graph API…');
   try {
@@ -299,8 +299,8 @@ async function showWhatsAppBusinessHealth(ctx) {
   } catch (error) {
     const message = escapeHtml(error && error.message || 'Pemeriksaan gagal.');
     return ctx.reply(
-      '⚠ <b>WHATSAPP BUSINESS HEALTH TIDAK TERSEDIA</b>\\n\\n' + message +
-      '\\n\\n<i>Periksa META_WABA_ID, META_ACCESS_TOKEN, izin token, dan versi Graph API. Tidak ada hasil yang ditebak.</i>',
+      '⚠ <b>WHATSAPP BUSINESS HEALTH TIDAK TERSEDIA</b>\n\n' + message +
+      '\n\n<i>Periksa META_WABA_ID, META_ACCESS_TOKEN, izin token, dan versi Graph API. Tidak ada hasil yang ditebak.</i>',
       { parse_mode: 'HTML' }
     );
   }
