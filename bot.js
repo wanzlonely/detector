@@ -9,6 +9,8 @@ const {
   renderPackageDetailCard, renderPaymentMaintenanceCard
 } = require('./themes');
 
+const { parseDetectionInput } = require('./detectInput');
+
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
 async function stopActiveDetection(ctx) {
@@ -22,7 +24,7 @@ async function stopActiveDetection(ctx) {
 bot.use(async (ctx, next) => {
   const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
   const callbackData = ctx.callbackQuery && ctx.callbackQuery.data || '';
-  const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
+  const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
   if (navigationText || navigationCallback) {
     try {
@@ -133,7 +135,15 @@ async function showCheckout(ctx, pkg, edit) {
 }
 
 // Semua navigasi tersedia melalui Reply Keyboard sesuai peran akun.
-bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
+bot.telegram.setMyCommands([
+  { command: 'start', description: 'Buka menu utama' },
+  { command: 'detect', description: 'Mulai validasi nomor' },
+  { command: 'store', description: 'Lihat paket Premium' },
+  { command: 'status', description: 'Lihat status akun' },
+  { command: 'referral', description: 'Lihat program referral' },
+  { command: 'help', description: 'Lihat panduan penggunaan' },
+  { command: 'cancel', description: 'Batalkan proses aktif' }
+]).catch((err) => console.error('[set commands]', err && err.message || err));
 
 bot.start(async (ctx) => {
   const payload = String(ctx.startPayload || '');
@@ -143,9 +153,37 @@ bot.start(async (ctx) => {
   }
   return showHome(ctx);
 });
-bot.command('detect', async (ctx) => {
-  return ctx.reply('⚠️ <b>ғɪᴛᴜʀ ᴅᴇᴛᴇᴋsɪ sᴇᴅᴀɴɢ ᴅɪɴᴏɴᴀᴋᴛɪғᴋᴀɴ</b>\n\nᴘᴇᴍᴜʟɪʜᴀɴ sɪsᴛᴇᴍ sᴇᴅᴀɴɢ ʙᴇʀʟᴀɴɢsᴜɴɢ. ᴍᴇɴᴜ ʟᴀɪɴ sᴇᴘᴇʀᴛɪ sᴛᴀᴛᴜs, ʀᴇғᴇʀʀᴀʟ, ᴅᴀɴ ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ ᴛᴇᴛᴀᴘ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ.', { parse_mode: 'HTML' });
+async function beginDetection(ctx) {
+  const user = await getEffectiveUser(ctx);
+  const premium = isOwner(ctx) || isUserVip(user);
+  const limit = premium ? Math.min(30, Math.max(1, Number(user.bulk_limit) || 30)) : 1;
+  await redis.set('detect:mode:' + ctx.from.id, String(limit), { ex: 300 });
+  return ctx.reply(
+    '⌖ <b>ᴍᴏᴅᴇ ᴅᴇᴛᴇᴄᴛ</b>\n\n' +
+    'Kirim nomor milikmu yang ingin divalidasi, satu nomor per baris.\n' +
+    'Batas input: <b>' + limit + ' nomor</b> · ' + (premium ? 'Premium' : 'Free') + '\n\n' +
+    'Contoh: <code>+6281234567890</code>\n\n' +
+    '⚠️ <b>Pemulihan bertahap:</b> saat ini bot hanya memvalidasi format dan duplikasi nomor. Pemeriksaan status WhatsApp/cooldown belum dijalankan karena endpoint internal belum dapat dipastikan aman. Tidak ada OTP yang dikirim dan kuota tidak dipotong.\n\n' +
+    'Ketik /cancel untuk membatalkan.',
+    { parse_mode: 'HTML' }
+  );
+}
+bot.command('detect', beginDetection);
+bot.command('help', async (ctx) => {
+  return ctx.reply(
+    '⌁ <b>PANDUAN META DETECT</b>\n\n' +
+    '/detect — validasi format nomor milikmu.\n' +
+    '/store — lihat paket Premium.\n' +
+    '/status — lihat status akun dan kuota.\n' +
+    '/referral — lihat tautan dan hadiah referral.\n' +
+    '/cancel — batalkan input yang sedang aktif.\n\n' +
+    'Catatan: validasi format tidak sama dengan pemeriksaan status akun WhatsApp. Pemeriksaan status live saat ini belum tersedia.',
+    { parse_mode: 'HTML' }
+  );
 });
+bot.command('status', showStatus);
+bot.command('referral', showReferral);
+
 bot.command('store', (ctx) => showStore(ctx, false));
 
 bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {
@@ -311,6 +349,33 @@ bot.on('text', async (ctx) => {
       return ctx.reply('✓ <b>ʙᴀʟᴀsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\nᴛᴜᴊᴜᴀɴ ⦂ <code>' + targetId + '</code>', { parse_mode: 'HTML' });
     }
   }
+  const detectLimit = await redis.get('detect:mode:' + ctx.from.id);
+  if (detectLimit) {
+    if (text === '/cancel' || text.toUpperCase() === 'BATAL') {
+      await redis.del('detect:mode:' + ctx.from.id);
+      return ctx.reply('✕ <b>ᴘʀᴏsᴇs ᴅᴇᴛᴇᴄᴛ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+    }
+    const parsed = parseDetectionInput(text, Number(detectLimit));
+    if (!parsed.ok) {
+      return ctx.reply('⚠️ <b>ɪɴᴘᴜᴛ ʙᴇʟᴜᴍ ᴠᴀʟɪᴅ</b>\n\n' + escapeHtml(parsed.error) + '\n\nKirim ulang nomor, satu nomor per baris, atau /cancel.', { parse_mode: 'HTML' });
+    }
+    await redis.del('detect:mode:' + ctx.from.id);
+    const lines = [
+      '⌖ <b>ʜᴀsɪʟ ᴠᴀʟɪᴅᴀsɪ ɪɴᴘᴜᴛ</b>',
+      '',
+      '✓ Nomor valid: <b>' + parsed.valid.length + '</b>',
+      '↺ Duplikat dihapus: <b>' + parsed.duplicates.length + '</b>',
+      '✕ Format tidak valid: <b>' + parsed.invalid.length + '</b>',
+      '',
+      ...parsed.valid.map((number, index) => (index + 1) + '. <code>' + escapeHtml(number) + '</code>'),
+      '',
+      '⚠️ <b>Status WhatsApp/cooldown belum diperiksa.</b>',
+      'Endpoint internal tidak dipanggil, OTP tidak dikirim, dan kuota tidak dipotong.'
+    ];
+    if (parsed.invalid.length) lines.push('', '<b>Format tidak valid:</b>', ...parsed.invalid.map((value) => '• <code>' + escapeHtml(value) + '</code>'));
+    if (parsed.duplicates.length) lines.push('', '<b>Duplikat:</b>', ...parsed.duplicates.map((value) => '• <code>' + escapeHtml(value) + '</code>'));
+    return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
+  }
   if (await redis.get('contact:state:' + ctx.from.id)) {
     await redis.del('contact:state:' + ctx.from.id);
     if (!ADMIN_ID) return ctx.reply('✕ ᴀᴅᴍɪɴ ʙᴇʟᴜᴍ ᴅɪᴀᴛᴜʀ.');
@@ -320,7 +385,7 @@ bot.on('text', async (ctx) => {
     return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴘᴇsᴀɴ ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴅɪᴛᴇʀᴜsᴋᴀɴ ᴋᴇ ᴀᴅᴍɪɴ. ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ ʙᴀʟᴀsᴀɴ ᴅɪ sɪɴɪ.', { parse_mode: 'HTML' });
   }
   if (text === '⌖ DETECT' || text === '⌖ Detect' || text === 'Detect') {
-    return ctx.reply('⚠️ <b>ғɪᴛᴜʀ ᴅᴇᴛᴇᴋsɪ sᴇᴅᴀɴɢ ᴅɪɴᴏɴᴀᴋᴛɪғᴋᴀɴ</b>\n\nᴘᴇᴍᴜʟɪʜᴀɴ sɪsᴛᴇᴍ sᴇᴅᴀɴɢ ʙᴇʀʟᴀɴɢsᴜɴɢ. ᴍᴇɴᴜ ʟᴀɪɴ ᴛᴇᴛᴀᴘ ᴅᴀᴘᴀᴛ ᴅɪɢᴜɴᴀᴋᴀɴ.', { parse_mode: 'HTML' });
+    return beginDetection(ctx);
   }
   if (text === '✧ BELI PREMIUM' || text === '✧ Beli Premium' || text === 'Beli Premium') {
     return showStore(ctx, false);
