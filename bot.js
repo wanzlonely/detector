@@ -24,7 +24,6 @@ async function stopActiveDetection(ctx) {
 bot.use(async (ctx, next) => {
   const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
   const callbackData = ctx.callbackQuery && ctx.callbackQuery.data || '';
-  // Match main menu buttons (symbol-tolerant) and major commands. /cancel is handled separately.
   const navigationText = /^(⌖\s*DETECT|✧\s*BELI\s*PREMIUM|◈\s*STATUS|♛\s*LEADERBOARD|♧\s*REFERRAL|✉︎?\s*HUBUNGI\s*ADMIN|♛\s*OWNER\s*CONSOLE|✚\s*AKTIVASI\s*PREMIUM|▤\s*BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
   if (navigationText || navigationCallback) {
@@ -71,7 +70,6 @@ async function clearOwnerAction(userId) {
   await redis.del('owner:action:' + userId);
 }
 
-// Global cancel — always clears temporary modes so user is never stuck
 async function handleCancel(ctx) {
   const uid = ctx.from && ctx.from.id;
   if (uid) {
@@ -96,10 +94,7 @@ function isOwner(ctx) {
   return Boolean(ADMIN_ID) && Number(ctx.from && ctx.from.id) === ADMIN_ID;
 }
 
-// Reply Keyboard selalu dipasang pada balasan biasa; katalog memakai inline button.
-bot.use((ctx, next) => {
-  return next();
-});
+bot.use((ctx, next) => next());
 
 async function getEffectiveUser(ctx) {
   const user = await getOrCreateUser(ctx.from);
@@ -140,9 +135,7 @@ async function showPackage(ctx, pkg, edit) {
   const message = renderPackageDetailCard({ user, pkg });
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id)],
-    [
-      Markup.button.callback('↶ KEMBALI KE PAKET', 'store:premium')
-    ]
+    [Markup.button.callback('↶ KEMBALI KE PAKET', 'store:premium')]
   ]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
@@ -156,7 +149,6 @@ async function showCheckout(ctx, pkg, edit) {
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
 }
 
-// Semua navigasi tersedia melalui Reply Keyboard sesuai peran akun.
 bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
 
 bot.start(async (ctx) => {
@@ -167,7 +159,6 @@ bot.start(async (ctx) => {
   }
   return showHome(ctx);
 });
-/* detect command moved to full handler */
 bot.command('store', (ctx) => showStore(ctx, false));
 
 bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {
@@ -207,7 +198,6 @@ bot.action('contact:cancel', async (ctx) => {
   await redis.del('contact:state:' + ctx.from.id);
   return ctx.reply('✕ <b>ᴘᴇɴɢɪʀɪᴍᴀɴ ᴘᴇsᴀɴ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 });
-
 
 function renderOwnerConsole(stats) {
   return [
@@ -290,7 +280,7 @@ bot.command('addvip', async (ctx) => {
     return ctx.reply('✚ <b>FORMAT AKTIVASI BELUM TEPAT</b>\nGunakan format <code>ID_TELEGRAM DURASI_HARI</code>.\nContoh: <code>123456789 7</code>.', { parse_mode: 'HTML' });
   }
   const result = await activateVip(uid, days, 'PREMIUM', 'PREMIUM · ' + days + ' Hari');
-      return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\n\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(result.expiry) + '</code>\n\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
+  return ctx.reply('✦ <b>ᴀᴋᴛɪᴠᴀsɪ ʙᴇʀʜᴀsɪʟ</b> ✦\n\nᴘʀᴇᴍɪᴜᴍ ᴛᴇʟᴀʜ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + uid + '</code>.\nᴍᴀsᴀ ᴀᴋᴛɪғ ʙᴇʀᴀᴋʜɪʀ ⦂ <code>' + formatDateWIB(result.expiry) + '</code>\n\n◈ sᴛᴀᴛᴜs ⦂ ᴀᴋᴛɪғ', { parse_mode: 'HTML' });
 });
 
 bot.command('broadcast', async (ctx) => {
@@ -307,11 +297,8 @@ bot.command('broadcast', async (ctx) => {
       console.error('[broadcast]', uid, err && err.message || err);
     }
   }
-      return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\n\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');
+  return ctx.reply('✦ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b> ✦\n\nᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ⦂ <b>' + sent + '</b> / <b>' + stats.allUserIds.length + '</b> ᴘᴇɴɢɢᴜɴᴀ.\n<i>ᴀᴋᴜɴ ʏᴀɴɢ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪʜᴜʙᴜɴɢɪ ᴍᴜɴɢᴋɪɴ ᴛɪᴅᴀᴋ ᴍᴇɴᴇʀɪᴍᴀ ᴘᴇsᴀɴ.</i>');
 });
-
-
-// ===================== DETECT FEATURE (re-enabled + improved) =====================
 
 function extractPhoneCandidates(text) {
   if (!text) return [];
@@ -319,15 +306,12 @@ function extractPhoneCandidates(text) {
   const phones = [];
   const seen = new Set();
   for (const line of lines) {
-    // simple cleanup
     let cleaned = line.replace(/[^\d+\-\s().]/g, '').trim();
     if (!cleaned) continue;
-    // keep only reasonable length candidates
     const digits = cleaned.replace(/\D/g, '');
     if (digits.length < 8 || digits.length > 15) continue;
-    const key = digits;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (seen.has(digits)) continue;
+    seen.add(digits);
     phones.push(cleaned);
   }
   return phones;
@@ -370,9 +354,14 @@ async function processDetection(ctx, rawText) {
 
   let phones = extractPhoneCandidates(rawText);
   if (phones.length === 0) {
-    // Keep user in detect mode so they can try again with a valid number
     await redis.set('detect:mode:' + userId, 'waiting_numbers', { ex: 300 });
-    return ctx.reply('⚠️ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ: <code>+6281234567890</code>\n\nᴋᴇᴛɪᴋ /cancel ᴜɴᴛᴜᴋ ᴋᴇʟᴜᴀʀ.', { parse_mode: 'HTML' });
+    return ctx.reply(
+      '⚠️ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n' +
+      'ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\n' +
+      'ᴄᴏɴᴛᴏʜ: <code>+6281234567890</code>\n\n' +
+      'ᴋᴇᴛɪᴋ /cancel ᴜɴᴛᴜᴋ ᴋᴇʟᴜᴀʀ.',
+      { parse_mode: 'HTML' }
+    );
   }
 
   if (phones.length > bulkLimit) {
@@ -380,120 +369,213 @@ async function processDetection(ctx, rawText) {
     await ctx.reply('ℹ️ Hanya ' + bulkLimit + ' nomor pertama yang akan diproses (batas akun Anda).', { parse_mode: 'HTML' });
   }
 
-  // Quota check for free users
   if (!isVip) {
     const ok = await consumeQuota(userId, phones.length);
     if (!ok) {
       return ctx.reply('⚠️ <b>ᴋᴜᴏᴛᴀ ᴛɪᴅᴀᴋ ᴄᴜᴋᴜᴘ</b>\n\nᴀɴᴅᴀ ᴛɪᴅᴀᴋ ᴍᴇᴍɪʟɪᴋɪ ᴋᴜᴏᴛᴀ ʏᴀɴɢ ᴄᴜᴋᴜᴘ ᴜɴᴛᴜᴋ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ɪɴɪ.', { parse_mode: 'HTML' });
     }
   } else {
-    // still count for leaderboard
     await consumeQuota(userId, phones.length);
   }
 
   const jobId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   await redis.set('detect:active:' + userId, jobId, { ex: 600 });
+  await redis.del('detect:mode:' + userId);
+
+  const total = phones.length;
+  const startTs = Date.now();
 
   const statusMsg = await ctx.reply(
-    '⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs ' + phones.length + ' ɴᴏᴍᴏʀ...</b>\n\n' +
-    'ᴍᴏʜᴏɴ ᴛᴜɴɢɢᴜ, ʜᴀsɪʟ ᴀᴋᴀɴ ᴅɪᴋɪʀɪᴍ ssᴇᴛᴇʟᴀʜ sᴇʟᴇsᴀɪ.',
+    '⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs...</b>\n\n' +
+    '○'.repeat(10) + ' 0%\n' +
+    'ᴘʀᴏɢʀᴇs ⦂ 0 / ' + total + ' ɴᴏᴍᴏʀ',
     { parse_mode: 'HTML' }
   );
 
-  const results = [];
-  const startTs = Date.now();
+  const results = new Array(total);
+  let completed = 0;
+  let successCount = 0;
+  let failCount = 0;
+  let readyCount = 0;
+  let cooldownCount = 0;
+  let cloneCount = 0;
+  let smsUnavailableCount = 0;
+  let bannedCount = 0;
 
-  for (let i = 0; i < phones.length; i++) {
-    // check stop signal
-    const stopFlag = await redis.get('detect:stop:' + userId + ':' + jobId);
-    if (stopFlag) {
-      await ctx.reply('✕ Pemeriksaan dihentikan.', { parse_mode: 'HTML' });
-      break;
-    }
+  function buildProgressText() {
+    const pct = total === 0 ? 0 : Math.round((completed / total) * 100);
+    const filled = Math.round(pct / 10);
+    const bar = '●'.repeat(filled) + '○'.repeat(10 - filled);
+    return (
+      '⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs...</b>\n\n' +
+      bar + ' ' + pct + '%\n' +
+      'ᴘʀᴏɢʀᴇs ⦂ ' + completed + ' / ' + total + ' ɴᴏᴍᴏʀ'
+    );
+  }
 
-    const phone = phones[i];
+  async function updateProgress() {
     try {
-      // cache first
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        statusMsg.message_id,
+        undefined,
+        buildProgressText(),
+        { parse_mode: 'HTML' }
+      );
+    } catch (_) {}
+  }
+
+  async function checkOne(phone, index) {
+    const stopFlag = await redis.get('detect:stop:' + userId + ':' + jobId);
+    if (stopFlag) return;
+
+    try {
       let result = await getCachedCheckResult(phone);
       if (!result) {
         result = await checkWhatsAppCooldown(phone);
         await setCachedCheckResult(phone, result);
       }
 
-      results.push({ number: result.formattedNumber || phone, result });
+      results[index] = { number: result.formattedNumber || phone, result };
 
-      // log
+      successCount += 1;
+      if (result.isBanned) bannedCount += 1;
+      else if (result.isCloneBlocked) cloneCount += 1;
+      else if (result.anyCooldown) cooldownCount += 1;
+      else if (result.isReady) readyCount += 1;
+      else if (result.smsAvailable === false) smsUnavailableCount += 1;
+
       const summary = result.isBanned ? 'BANNED' :
         result.isCloneBlocked ? 'CLONE_BLOCK' :
         result.anyCooldown ? 'COOLDOWN' :
         result.isReady ? 'READY' : (result.accountStatus || 'UNKNOWN');
       await addCheckLog(userId, result.formattedNumber || phone, summary, result.proxyTag);
-
-      // single number → rich card
-      if (phones.length === 1) {
-        const card = renderCooldownCard({ result, user, isVip });
-        await ctx.reply(card, { parse_mode: 'HTML' });
-      }
     } catch (err) {
       console.error('[detect]', phone, err && err.message || err);
-      results.push({ number: phone, error: err && err.message || 'Gagal memproses' });
-    }
-
-    // small progress for multi
-    if (phones.length > 1 && (i + 1) % 5 === 0) {
-      try {
-        await ctx.telegram.editMessageText(
-          ctx.chat.id,
-          statusMsg.message_id,
-          undefined,
-          '⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs...</b> ' + (i + 1) + '/' + phones.length,
-          { parse_mode: 'HTML' }
-        );
-      } catch (_) {}
+      results[index] = { number: phone, error: err && err.message || 'Gagal memproses' };
+      failCount += 1;
+    } finally {
+      completed += 1;
+      if (completed === total || completed % Math.max(1, Math.floor(total / 8)) === 0) {
+        await updateProgress();
+      }
     }
   }
+
+  const CONCURRENCY = Math.min(8, total);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const idx = nextIndex++;
+      if (idx >= total) break;
+      const stopFlag = await redis.get('detect:stop:' + userId + ':' + jobId);
+      if (stopFlag) break;
+      await checkOne(phones[idx], idx);
+    }
+  }
+
+  const workers = [];
+  for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
+  await Promise.all(workers);
 
   await redis.del('detect:active:' + userId);
   await redis.del('detect:mode:' + userId);
 
-  // qualify referral if applicable
+  try { await qualifyReferral(userId); } catch (_) {}
+
+  const elapsed = Math.max(1, Math.round((Date.now() - startTs) / 1000));
+
   try {
-    const refResult = await qualifyReferral(userId);
-    if (refResult && refResult.rewarded) {
-      // silent or notify inviter later
-    }
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      statusMsg.message_id,
+      undefined,
+      '✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>\n\n' +
+      '●●●●●●●●●● 100%\n' +
+      'ᴘʀᴏɢʀᴇs ⦂ ' + total + ' / ' + total + ' ɴᴏᴍᴏʀ\n\n' +
+      '✧ ʙᴇʀʜᴀsɪʟ ⦂ ' + successCount + '\n' +
+      '✕ ɢᴀɢᴀʟ ⦂ ' + failCount + '\n' +
+      '   · sɪᴀᴘ ᴅɪᴠᴇʀɪғɪᴋᴀsɪ ⦂ ' + readyCount + '\n' +
+      '   · ᴄᴏᴏʟᴅᴏᴡɴ ⦂ ' + cooldownCount + '\n' +
+      '   · ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ⦂ ' + smsUnavailableCount + '\n' +
+      '   · ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ ' + cloneCount +
+      (bannedCount ? '\n   · ᴅɪʙᴀᴛᴀsɪ ⦂ ' + bannedCount : ''),
+      { parse_mode: 'HTML' }
+    );
   } catch (_) {}
 
-  const elapsed = Math.round((Date.now() - startTs) / 1000);
-
-  if (phones.length > 1) {
-    const summary = renderDetectionSummary({ results, elapsedSeconds: elapsed });
-    await ctx.reply(summary, { parse_mode: 'HTML' });
-  } else if (results.length === 1 && results[0].error) {
-    await ctx.reply('⚠️ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴘʀᴏsᴇs</b>\n\n' + escapeHtml(results[0].error), { parse_mode: 'HTML' });
+  if (total === 1) {
+    const item = results[0];
+    if (item && item.result) {
+      const card = renderCooldownCard({ result: item.result, user, isVip });
+      await ctx.reply(card, { parse_mode: 'HTML' });
+    } else if (item && item.error) {
+      await ctx.reply('⚠️ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴘʀᴏsᴇs</b>\n\n' + escapeHtml(item.error), { parse_mode: 'HTML' });
+    }
+    return;
   }
 
-  // cleanup status message for multi
-  if (phones.length > 1) {
-    try {
-      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-    } catch (_) {}
+  const groups = { ready: [], cooldown: [], clone: [], smsUnavailable: [], banned: [], failed: [] };
+
+  for (const item of results) {
+    if (!item) continue;
+    const num = item.number || '-';
+    if (item.error) { groups.failed.push(num); continue; }
+    const r = item.result;
+    if (r.isBanned) groups.banned.push(num);
+    else if (r.isCloneBlocked) groups.clone.push(num);
+    else if (r.anyCooldown) {
+      const timer = (r.channels && r.channels.sms && (r.channels.sms.uiTimer || r.channels.sms.humanTime)) ||
+                    (r.primaryTimer && r.primaryTimer.uiTimer) || '';
+      groups.cooldown.push(num + (timer ? ' — ' + timer : ''));
+    } else if (r.isReady) groups.ready.push(num);
+    else if (r.smsAvailable === false) groups.smsUnavailable.push(num);
+    else groups.failed.push(num);
   }
+
+  const lines = ['⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>'];
+  if (groups.ready.length) {
+    lines.push('', '✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪғɪᴋᴀsɪ</b>');
+    groups.ready.forEach(n => lines.push('<code>' + escapeHtml(n) + '</code>'));
+  }
+  if (groups.cooldown.length) {
+    lines.push('', '◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
+    groups.cooldown.forEach(n => {
+      const parts = n.split(' — ');
+      lines.push('<code>' + escapeHtml(parts[0]) + '</code>' + (parts[1] ? ' — ' + escapeHtml(parts.slice(1).join(' — ')) : ''));
+    });
+  }
+  if (groups.clone.length) {
+    lines.push('', '△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
+    groups.clone.forEach(n => lines.push('<code>' + escapeHtml(n) + '</code>'));
+  }
+  if (groups.smsUnavailable.length) {
+    lines.push('', '✕ <b>ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
+    groups.smsUnavailable.forEach(n => lines.push('<code>' + escapeHtml(n) + '</code>'));
+  }
+  if (groups.banned.length) {
+    lines.push('', '⊘ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
+    groups.banned.forEach(n => lines.push('<code>' + escapeHtml(n) + '</code>'));
+  }
+  if (groups.failed.length) {
+    lines.push('', '⚠ <b>ɢᴀɢᴀʟ ᴅɪᴘʀᴏsᴇs</b>');
+    groups.failed.forEach(n => lines.push('<code>' + escapeHtml(n) + '</code>'));
+  }
+  lines.push('', 'ᴘʀᴏsᴇs ⟿ ' + elapsed + 'd');
+
+  await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
 
-// Command + keyboard entry
 bot.command('detect', startDetect);
 bot.hears('⌖ DETECT', startDetect);
-
 
 bot.on('text', async (ctx) => {
   const text = ctx.message.text.trim();
   if (!text) return;
 
-  // Detect mode: user is expected to send numbers
   const detectMode = await redis.get('detect:mode:' + ctx.from.id);
   if (detectMode === 'waiting_numbers') {
-    // Cancel always exits cleanly
     if (/^\/?cancel$/i.test(text) || /^batal$/i.test(text)) {
       await redis.del('detect:mode:' + ctx.from.id);
       return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\n\nᴋᴇᴍʙᴀʟɪ ᴋᴇ ᴍᴇɴᴜ ᴜᴛᴀᴍᴀ.', {
@@ -501,12 +583,10 @@ bot.on('text', async (ctx) => {
         ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
       });
     }
-    // Main menu buttons must never be treated as phone numbers
     if (/^(⌖\s*DETECT|✧\s*BELI\s*PREMIUM|◈\s*STATUS|♛\s*LEADERBOARD|♧\s*REFERRAL|✉︎?\s*HUBUNGI\s*ADMIN|♛\s*OWNER|✚\s*AKTIVASI|▤\s*BROADCAST)/i.test(text)) {
       await redis.del('detect:mode:' + ctx.from.id);
-      return; // let the specific hears / later handlers process the menu
+      return;
     }
-    // Real input → process (mode cleared inside processDetection or kept on invalid number)
     return processDetection(ctx, text);
   }
 
