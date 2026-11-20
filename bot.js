@@ -360,17 +360,29 @@ async function processDetection(ctx, rawText) {
   await redis.del('detect:mode:' + userId);
   const total = phones.length;
   const startTs = Date.now();
-  const statusMsg = await ctx.reply('⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs...</b>\n\n' + '○'.repeat(10) + ' 0%\nᴘʀᴏɢʀᴇs ⦂ 0 / ' + total + ' ɴᴏᴍᴏʀ', { parse_mode: 'HTML' });
+  const statusMsg = await ctx.reply(
+    '⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ</b>\n\n' +
+    '○'.repeat(10) + '  0%\n' +
+    'ᴘʀᴏɢʀᴇs ⦂ 0 / ' + total + ' ɴᴏᴍᴏʀ',
+    { parse_mode: 'HTML' }
+  );
   const results = new Array(total);
   let completed = 0, successCount = 0, failCount = 0, readyCount = 0, cooldownCount = 0, cloneCount = 0, smsUnavailableCount = 0, bannedCount = 0;
 
   function buildProgressText() {
     const pct = total === 0 ? 0 : Math.round((completed / total) * 100);
     const filled = Math.round(pct / 10);
-    return '⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs...</b>\n\n' + '●'.repeat(filled) + '○'.repeat(10 - filled) + ' ' + pct + '%\nᴘʀᴏɢʀᴇs ⦂ ' + completed + ' / ' + total + ' ɴᴏᴍᴏʀ';
+    const bar = '●'.repeat(filled) + '○'.repeat(10 - filled);
+    return (
+      '⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ</b>\n\n' +
+      bar + '  ' + pct + '%\n' +
+      'ᴘʀᴏɢʀᴇs ⦂ ' + completed + ' / ' + total + ' ɴᴏᴍᴏʀ'
+    );
   }
   async function updateProgress() {
-    try { await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, buildProgressText(), { parse_mode: 'HTML' }); } catch (_) {}
+    try {
+      await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, undefined, buildProgressText(), { parse_mode: 'HTML' });
+    } catch (_) {}
   }
 
   async function checkOne(phone, index) {
@@ -383,17 +395,16 @@ async function processDetection(ctx, rawText) {
       }
       results[index] = { number: result.formattedNumber || phone, result };
       successCount += 1;
-      const smsSec = (result.channels && result.channels.sms && result.channels.sms.rawSeconds) || 0;
-      const waOldSec = (result.channels && result.channels.wa_old && result.channels.wa_old.rawSeconds) || 0;
-      const voiceSec = (result.channels && result.channels.voice && result.channels.voice.rawSeconds) || 0;
-      const flashSec = (result.channels && result.channels.flash && result.channels.flash.rawSeconds) || 0;
-      const meaningfulCooldown = Math.max(smsSec, waOldSec, voiceSec, flashSec) > 0;
       if (result.isBanned) bannedCount += 1;
-      else if (result.isCloneBlocked) cloneCount += 1;
-      else if (meaningfulCooldown) cooldownCount += 1;
-      else if (result.isReady || !meaningfulCooldown) readyCount += 1;
+      else if (result.isCloneBlocked || result.isSecurityBlock) cloneCount += 1;
+      else if (result.anyCooldown) cooldownCount += 1;
+      else if (result.isReady) readyCount += 1;
       else if (result.smsAvailable === false) smsUnavailableCount += 1;
-      const summary = result.isBanned ? 'BANNED' : result.isCloneBlocked ? 'CLONE_BLOCK' : meaningfulCooldown ? 'COOLDOWN' : result.isReady ? 'READY' : (result.accountStatus || 'UNKNOWN');
+      else readyCount += 1;
+      const summary = result.isBanned ? 'BANNED' :
+        (result.isCloneBlocked || result.isSecurityBlock) ? 'CLONE_BLOCK' :
+        result.anyCooldown ? 'COOLDOWN' :
+        result.isReady ? 'READY' : (result.accountStatus || 'UNKNOWN');
       await addCheckLog(userId, result.formattedNumber || phone, summary, result.proxyTag);
     } catch (err) {
       console.error('[detect]', phone, err && err.message || err);
@@ -430,7 +441,7 @@ async function processDetection(ctx, rawText) {
       '△ ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ ' + cloneCount + '\n' +
       '⊘ ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ⦂ ' + smsUnavailableCount + '\n' +
       '✕ ᴅɪʙᴀᴛᴀsɪ ⦂ ' + bannedCount + '\n\n' +
-      'sᴗᴋsᴇs ⦂ ' + successCount + ' · ᴇʀʀᴏʀ ⦂ ' + failCount,
+      'sᴜᴋsᴇs ⦂ ' + successCount + ' · ᴇʀʀᴏʀ ⦂ ' + failCount,
       { parse_mode: 'HTML' });
   } catch (_) {}
 
@@ -447,23 +458,15 @@ async function processDetection(ctx, rawText) {
     const num = item.number || '-';
     if (item.error) { groups.failed.push(num); continue; }
     const r = item.result;
-    const smsSec = (r.channels && r.channels.sms && r.channels.sms.rawSeconds) || 0;
-    const waOldSec = (r.channels && r.channels.wa_old && r.channels.wa_old.rawSeconds) || 0;
-    const voiceSec = (r.channels && r.channels.voice && r.channels.voice.rawSeconds) || 0;
-    const flashSec = (r.channels && r.channels.flash && r.channels.flash.rawSeconds) || 0;
-    const maxSec = Math.max(smsSec, waOldSec, voiceSec, flashSec);
-    const meaningfulCooldown = maxSec > 0;
     let displayTimer = '';
-    if (meaningfulCooldown) {
+    if (r.anyCooldown) {
+      const smsSec = (r.channels && r.channels.sms && r.channels.sms.rawSeconds) || 0;
       if (smsSec > 0 && r.channels.sms) displayTimer = r.channels.sms.uiTimer || r.channels.sms.humanTime || '';
-      else if (waOldSec > 0 && r.channels.wa_old) displayTimer = r.channels.wa_old.uiTimer || '';
-      else if (voiceSec > 0 && r.channels.voice) displayTimer = r.channels.voice.uiTimer || '';
-      else if (flashSec > 0 && r.channels.flash) displayTimer = r.channels.flash.uiTimer || '';
-      else if (r.primaryTimer) displayTimer = r.primaryTimer.uiTimer || '';
+      else if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) displayTimer = r.primaryTimer.uiTimer || '';
     }
     if (r.isBanned) groups.banned.push(num);
-    else if (r.isCloneBlocked) groups.clone.push(num);
-    else if (meaningfulCooldown) groups.cooldown.push(num + (displayTimer ? ' — ' + displayTimer : ''));
+    else if (r.isCloneBlocked || r.isSecurityBlock) groups.clone.push(num);
+    else if (r.anyCooldown) groups.cooldown.push(num + (displayTimer ? ' — ' + displayTimer : ''));
     else if (r.smsAvailable === false && !r.isReady) groups.smsUnavailable.push(num);
     else groups.ready.push(num);
   }
