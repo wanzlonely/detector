@@ -50,6 +50,6 @@ Environment variables pada Vercel:
 - `META_GRAPH_API_VERSION` — opsional, default `v27.0`.
 - `META_GRAPH_TIMEOUT_MS` — opsional, default 10000 ms.
 
-Data yang ditampilkan berasal dari respons Graph API: status WABA, business verification, health status, messaging limit, nomor yang terhubung, status verifikasi Cloud API bila tersedia, quality rating, platform, dan throughput. Field yang tidak diberikan API ditampilkan sebagai tidak tersedia; tidak ditebak.
+Data yang ditampilkan berasal dari respons Graph API: status WABA, business verification, health status, messaging limit, nomor yang terhubung, status operasional Cloud API, status OTP pendaftaran nomor bisnis bila tersedia, status nama, quality rating, platform, dan throughput. Field yang tidak diberikan API ditampilkan sebagai tidak tersedia; tidak ditebak.
 
 Penting: status verifikasi nomor WABA/Cloud API bukan status cooldown OTP akun WhatsApp konsumen. API resmi tidak menyediakan timer cooldown login untuk nomor sembarang. Gunakan hasil ini hanya untuk aset bisnis yang memang dikelola oleh akun Meta milikmu.
