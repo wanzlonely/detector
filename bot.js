@@ -171,12 +171,12 @@ async function beginDetection(ctx) {
 bot.command('detect', beginDetection);
 bot.command('help', async (ctx) => {
   return ctx.reply(
-    '⌁ <b>PANDUAN META DETECT</b>\\n\\n' +
-    '/detect — validasi format nomor milikmu.\\n' +
-    '/store — lihat paket Premium.\\n' +
-    '/status — lihat status akun dan kuota.\\n' +
-    '/referral — lihat tautan dan hadiah referral.\\n' +
-    '/cancel — batalkan input yang sedang aktif.\\n\\n' +
+    '⌁ <b>PANDUAN META DETECT</b>\n\n' +
+    '/detect — validasi format nomor milikmu.\n' +
+    '/store — lihat paket Premium.\n' +
+    '/status — lihat status akun dan kuota.\n' +
+    '/referral — lihat tautan dan hadiah referral.\n' +
+    '/cancel — batalkan input yang sedang aktif.\n\n' +
     'Catatan: validasi format tidak sama dengan pemeriksaan status akun WhatsApp. Pemeriksaan status live saat ini belum tersedia.',
     { parse_mode: 'HTML' }
   );
