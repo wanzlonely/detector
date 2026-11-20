@@ -24,7 +24,7 @@ async function stopActiveDetection(ctx) {
 bot.use(async (ctx, next) => {
   const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
   const callbackData = ctx.callbackQuery && ctx.callbackQuery.data || '';
-  const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?|\/cancel)$/i.test(messageText);
+  const navigationText = /^(⌖ DETECT|✧ BELI PREMIUM|◈ STATUS|♛ LEADERBOARD|♧ REFERRAL|✉︎ HUBUNGI ADMIN|♛ OWNER CONSOLE|✚ AKTIVASI PREMIUM|▤ BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
   if (navigationText || navigationCallback) {
     try {
@@ -135,7 +135,15 @@ async function showCheckout(ctx, pkg, edit) {
 }
 
 // Semua navigasi tersedia melalui Reply Keyboard sesuai peran akun.
-bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
+bot.telegram.setMyCommands([
+  { command: 'start', description: 'Buka menu utama' },
+  { command: 'detect', description: 'Mulai validasi nomor' },
+  { command: 'store', description: 'Lihat paket Premium' },
+  { command: 'status', description: 'Lihat status akun' },
+  { command: 'referral', description: 'Lihat program referral' },
+  { command: 'help', description: 'Lihat panduan penggunaan' },
+  { command: 'cancel', description: 'Batalkan proses aktif' }
+]).catch((err) => console.error('[set commands]', err && err.message || err));
 
 bot.start(async (ctx) => {
   const payload = String(ctx.startPayload || '');
@@ -161,6 +169,21 @@ async function beginDetection(ctx) {
   );
 }
 bot.command('detect', beginDetection);
+bot.command('help', async (ctx) => {
+  return ctx.reply(
+    '⌁ <b>PANDUAN META DETECT</b>\\n\\n' +
+    '/detect — validasi format nomor milikmu.\\n' +
+    '/store — lihat paket Premium.\\n' +
+    '/status — lihat status akun dan kuota.\\n' +
+    '/referral — lihat tautan dan hadiah referral.\\n' +
+    '/cancel — batalkan input yang sedang aktif.\\n\\n' +
+    'Catatan: validasi format tidak sama dengan pemeriksaan status akun WhatsApp. Pemeriksaan status live saat ini belum tersedia.',
+    { parse_mode: 'HTML' }
+  );
+});
+bot.command('status', showStatus);
+bot.command('referral', showReferral);
+
 bot.command('store', (ctx) => showStore(ctx, false));
 
 bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => {
