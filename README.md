@@ -38,3 +38,18 @@ Endpoint `GET /api/bot` menampilkan kesehatan Telegram, konfigurasi webhook, dan
 ## Status fitur
 
 Menu akun, status, leaderboard, referral, katalog premium, aktivasi owner, broadcast, dan kontak admin tetap tersedia. Fitur deteksi eksternal dinonaktifkan selama pemulihan dan tidak menjalankan pemindaian kelayakan OTP.
+
+## WhatsApp Business Health (read-only)
+
+Perintah owner `/wahealth` atau tombol `♧ WA BUSINESS HEALTH` membaca aset WhatsApp Business milik WABA yang dikonfigurasi menggunakan Meta Graph API resmi. Fitur ini tidak memindai nomor konsumen, tidak meminta atau mengirim OTP, tidak menjalankan registrasi, dan tidak mengukur cooldown login SMS/telepon.
+
+Environment variables pada Vercel:
+
+- `META_WABA_ID` — ID WhatsApp Business Account milik bisnis.
+- `META_ACCESS_TOKEN` — token User/System User yang memiliki izin Meta yang dibutuhkan untuk membaca aset WhatsApp Business. Simpan sebagai secret; jangan masukkan ke kode atau chat.
+- `META_GRAPH_API_VERSION` — opsional, default `v27.0`.
+- `META_GRAPH_TIMEOUT_MS` — opsional, default 10000 ms.
+
+Data yang ditampilkan berasal dari respons Graph API: status WABA, business verification, health status, messaging limit, nomor yang terhubung, status verifikasi Cloud API bila tersedia, quality rating, platform, dan throughput. Field yang tidak diberikan API ditampilkan sebagai tidak tersedia; tidak ditebak.
+
+Penting: status verifikasi nomor WABA/Cloud API bukan status cooldown OTP akun WhatsApp konsumen. API resmi tidak menyediakan timer cooldown login untuk nomor sembarang. Gunakan hasil ini hanya untuk aset bisnis yang memang dikelola oleh akun Meta milikmu.
