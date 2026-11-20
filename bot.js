@@ -418,7 +418,7 @@ async function processDetection(ctx, numbers) {
   }
   if (groups.smsUnavailable.length) {
     lines.push('');
-    lines.push('⊘ <b>ᴏᴘsɪ sᴍs ᴛɪᴅᴕ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
+    lines.push('⊘ <b>ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
     lines.push(...groups.smsUnavailable.map(n => '<code>' + n + '</code>'));
   }
   if (groups.banned.length) {
