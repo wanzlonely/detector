@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { ProxyAgent: UndiciProxyAgent } = require('undici');
 
-const DEFAULT_RETRIES = Math.min(3, Math.max(1, Number(process.env.PROXY_MAX_RETRIES || 2)));
+const DEFAULT_RETRIES = Math.min(4, Math.max(2, Number(process.env.PROXY_MAX_RETRIES || 3)));
 
 /**
  * DataImpulse country targeting:
@@ -75,7 +75,10 @@ function isNetworkOrBlockError(err) {
     'network',
     'timeout',
     'fetch failed',
-    'no_ray'
+    'no_ray',
+    'abort',
+    'empty',
+    'dual probe'
   ];
   return blockSignals.some((sig) => msg.includes(sig));
 }
@@ -89,8 +92,11 @@ async function executeWithProxyRotation(taskFn, maxRetries = DEFAULT_RETRIES, co
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    // First attempts: country-targeted; last attempt before direct: rotating without country if geo fails
-    const useCountry = attempt < maxRetries ? countryIso2 : null;
+    // Prefer geo for early attempts; last attempts try rotating without country then direct
+    let useCountry = countryIso2;
+    if (attempt === maxRetries) useCountry = null;
+    else if (attempt === maxRetries - 1 && countryIso2) useCountry = null;
+
     const proxyCtx = createRotatingDataImpulseAgent(useCountry);
 
     try {
@@ -111,6 +117,11 @@ async function executeWithProxyRotation(taskFn, maxRetries = DEFAULT_RETRIES, co
       if (proxyCtx.agent && isNetworkOrBlockError(err)) {
         continue;
       }
+      // Non-network errors still worth one more proxy rotation if retries remain
+      if (attempt < maxRetries && isNetworkOrBlockError(err)) {
+        continue;
+      }
+      if (attempt < maxRetries) continue;
       throw err;
     }
   }
