@@ -220,12 +220,6 @@ function extractPhoneCandidates(text) {
 }
 
 async function startDetect(ctx) {
-  if (process.env.DETECTION_ENABLED !== 'true') {
-    return ctx.reply(
-      '⚠️ <b>Fitur deteksi sedang dinonaktifkan sementara.</b>\n\nLayanan bot lainnya tetap tersedia.',
-      { parse_mode: 'HTML' }
-    );
-  }
   const user = await getEffectiveUser(ctx);
   const isVip = isOwner(ctx) || isUserVip(user);
   const remaining = isVip ? 999 : Math.max(0, 3 - Number(user.free_used_today || 0));
@@ -310,7 +304,7 @@ async function processDetection(ctx, numbers) {
     } catch (_) {}
 
     let lastErr = null;
-    const maxAttempts = 3;
+    const maxAttempts = 1;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const stop2 = await redis.get('detect:stop:' + userId + ':' + jobId);
       if (stop2) return { cancelled: true };
@@ -347,7 +341,7 @@ async function processDetection(ctx, numbers) {
   }
 
   let nextIndex = 0;
-  const CONCURRENCY_SAFE = Math.min(6, total);
+  const CONCURRENCY_SAFE = 1;
   async function worker(workerId) {
     if (workerId > 0) await sleep(workerId * 80);
     while (nextIndex < total) {
@@ -479,12 +473,18 @@ bot.on('text', async (ctx, next) => {
     return ctx.reply('⚠️ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ ⦂ <code>+6281234567890</code>', { parse_mode: 'HTML' });
   }
 
-  const user = await getEffectiveUser(ctx);
-  const isVip = isOwner(ctx) || isUserVip(user);
-  const max = isVip ? 30 : 1;
-  const list = phones.slice(0, max);
+  if (phones.length !== 1) {
+    return ctx.reply('⚠️ <b>Kirim satu nomor saja untuk setiap pemeriksaan.</b>', { parse_mode: 'HTML' });
+  }
 
-  return processDetection(ctx, list);
+  const cooldownKey = 'detect:request_limit:' + ctx.from.id;
+  const isCoolingDown = await redis.get(cooldownKey);
+  if (isCoolingDown) {
+    return ctx.reply('⏳ <b>Tunggu 30 detik sebelum pemeriksaan berikutnya.</b>', { parse_mode: 'HTML' });
+  }
+  await redis.set(cooldownKey, '1', { ex: 30 });
+
+  return processDetection(ctx, phones);
 });
 
 if (require.main === module) {
