@@ -117,20 +117,24 @@ async function consumeQuota(telegramId, count = 1) {
   const today = getTodayWIB();
   const quotaKey = `quota:${telegramId}:${today}`;
   const used = Number((await redis.get(quotaKey)) || 0);
-  const bonusKey='referral:bonus_quota:'+telegramId;
-  const bonus=Number(await redis.get(bonusKey)||0);
-  if(bonus>=count){
-    await redis.incrby(bonusKey,-count);
-    user.total_checks=Number(user.total_checks||0)+count;
-    await redis.set(userKey,user); await redis.incrby('stats:total_checks',count);
-    await redis.zadd('leaderboard:checks',{score:Number(user.total_checks||0),member:String(telegramId)});
+  const bonusKey = 'referral:bonus_quota:' + telegramId;
+  const bonus = Number(await redis.get(bonusKey) || 0);
+  if (bonus >= count) {
+    await redis.incrby(bonusKey, -count);
+    user.total_checks = Number(user.total_checks || 0) + count;
+    await redis.set(userKey, user);
+    await redis.incrby('stats:total_checks', count);
+    await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
-  if(bonus>0 && used+(count-bonus)<=3){
-    await redis.incrby(bonusKey,-bonus); await redis.incrby(quotaKey,count-bonus); await redis.expire(quotaKey,90000);
-    user.total_checks=Number(user.total_checks||0)+count;
-    await redis.set(userKey,user); await redis.incrby('stats:total_checks',count);
-    await redis.zadd('leaderboard:checks',{score:Number(user.total_checks||0),member:String(telegramId)});
+  if (bonus > 0 && used + (count - bonus) <= 3) {
+    await redis.incrby(bonusKey, -bonus);
+    await redis.incrby(quotaKey, count - bonus);
+    await redis.expire(quotaKey, 90000);
+    user.total_checks = Number(user.total_checks || 0) + count;
+    await redis.set(userKey, user);
+    await redis.incrby('stats:total_checks', count);
+    await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
   if (used + count <= 3) {
@@ -198,7 +202,7 @@ async function getCheckLogs(telegramId, limit = 10) {
   return (items || []).map((item) => (typeof item === 'string' ? JSON.parse(item) : item));
 }
 
-const CHECK_CACHE_TTL_SECONDS = Number(process.env.CHECK_CACHE_TTL_SECONDS || 600);
+const CHECK_CACHE_TTL_SECONDS = Number(process.env.CHECK_CACHE_TTL_SECONDS || 120);
 
 function normalizePhoneForCache(rawNumber) {
   return String(rawNumber).replace(/\D/g, '');
@@ -213,8 +217,19 @@ async function getCachedCheckResult(rawNumber) {
 
 async function setCachedCheckResult(rawNumber, result) {
   if (CHECK_CACHE_TTL_SECONDS <= 0) return;
+  if (!result || result.error || result.softFallback || result.needsRecheck) return;
+  // Never persist cooldown / banned — status changes quickly on recheck
+  if (result.anyCooldown || result.accountStatus === 'IN_COOLDOWN' || result.isBanned) return;
+  if (result.accountStatus === 'UNKNOWN') return;
+
   const key = `checkcache:${normalizePhoneForCache(rawNumber)}`;
-  await redis.set(key, result, { ex: CHECK_CACHE_TTL_SECONDS });
+  const ttl = Math.min(CHECK_CACHE_TTL_SECONDS, 90);
+  await redis.set(key, result, { ex: ttl });
+}
+
+async function clearCachedCheckResult(rawNumber) {
+  const key = `checkcache:${normalizePhoneForCache(rawNumber)}`;
+  await redis.del(key);
 }
 
 async function getGlobalStats() {
@@ -242,7 +257,6 @@ async function getGlobalStats() {
   };
 }
 
-
 async function registerReferral(inviteeId, inviterId) {
   const invitee = String(inviteeId);
   const inviter = String(inviterId || '').replace(/^ref_/, '');
@@ -251,7 +265,6 @@ async function registerReferral(inviteeId, inviterId) {
   if (!inviterUser) return false;
   const already = await redis.get('referral:invited_by:' + invitee);
   if (already) return false;
-  const count = Number(await redis.scard('referrals:' + inviter) || 0);
   const saved = await redis.set('referral:invited_by:' + invitee, inviter, { nx: true });
   if (!saved) return false;
   await redis.sadd('referrals:' + inviter, invitee);
@@ -259,29 +272,34 @@ async function registerReferral(inviteeId, inviterId) {
 }
 
 async function qualifyReferral(inviteeId) {
-  const invitee=String(inviteeId);
-  const inviter=await redis.get('referral:invited_by:'+invitee);
-  if(!inviter || await redis.get('referral:rewarded:'+invitee)) return {rewarded:false};
-  const completed=Number(await redis.incr('referral:completed:'+invitee));
-  if(completed<3) return {rewarded:false,completed};
-  const claimed=await redis.set('referral:rewarded:'+invitee,'1',{nx:true});
-  if(!claimed) return {rewarded:false,completed};
-  await redis.incrby('referral:coins:'+inviter,5);
-  await redis.incr('referral:rewards:'+inviter);
-  return {rewarded:true,inviter:Number(inviter),coins:5};
+  const invitee = String(inviteeId);
+  const inviter = await redis.get('referral:invited_by:' + invitee);
+  if (!inviter || await redis.get('referral:rewarded:' + invitee)) return { rewarded: false };
+  const completed = Number(await redis.incr('referral:completed:' + invitee));
+  if (completed < 3) return { rewarded: false, completed };
+  const claimed = await redis.set('referral:rewarded:' + invitee, '1', { nx: true });
+  if (!claimed) return { rewarded: false, completed };
+  await redis.incrby('referral:coins:' + inviter, 5);
+  await redis.incr('referral:rewards:' + inviter);
+  return { rewarded: true, inviter: Number(inviter), coins: 5 };
 }
+
 async function getReferralCoinBalance(id) {
-  return Number(await redis.get('referral:coins:'+id)||0);
+  return Number(await redis.get('referral:coins:' + id) || 0);
 }
-async function redeemReferralReward(id,offer) {
-  const key='referral:coins:'+id;
-  const balance=await getReferralCoinBalance(id);
-  if(balance<offer.cost) return {ok:false,balance};
-  const after=Number(await redis.incrby(key,-offer.cost));
-  if(after<0){await redis.incrby(key,offer.cost);return {ok:false,balance:await getReferralCoinBalance(id)};}
-  if(offer.type==='quota') await redis.incrby('referral:bonus_quota:'+id,offer.amount);
-  else await activateVip(id,offer.amount,'PREMIUM','PREMIUM · '+offer.amount+' Hari');
-  return {ok:true,balance:after};
+
+async function redeemReferralReward(id, offer) {
+  const key = 'referral:coins:' + id;
+  const balance = await getReferralCoinBalance(id);
+  if (balance < offer.cost) return { ok: false, balance };
+  const after = Number(await redis.incrby(key, -offer.cost));
+  if (after < 0) {
+    await redis.incrby(key, offer.cost);
+    return { ok: false, balance: await getReferralCoinBalance(id) };
+  }
+  if (offer.type === 'quota') await redis.incrby('referral:bonus_quota:' + id, offer.amount);
+  else await activateVip(id, offer.amount, 'PREMIUM', 'PREMIUM · ' + offer.amount + ' Hari');
+  return { ok: true, balance: after };
 }
 
 async function getReferralStats(telegramId) {
@@ -314,6 +332,17 @@ async function getLeaderboard(limit = 10) {
   return rows;
 }
 
+async function incrementUserChecks(telegramId, count = 1) {
+  const key = `user:${telegramId}`;
+  const user = await redis.get(key);
+  if (!user) return false;
+  user.total_checks = Number(user.total_checks || 0) + Number(count || 0);
+  await redis.set(key, user);
+  await redis.incrby('stats:total_checks', Number(count || 0));
+  await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
+  return true;
+}
+
 module.exports = {
   redis,
   getPackagesByTier,
@@ -329,6 +358,7 @@ module.exports = {
   getGlobalStats,
   getCachedCheckResult,
   setCachedCheckResult,
+  clearCachedCheckResult,
   incrementUserChecks,
   registerReferral,
   qualifyReferral,
@@ -336,14 +366,3 @@ module.exports = {
   redeemReferralReward,
   getLeaderboard
 };
-
-async function incrementUserChecks(telegramId, count = 1) {
-  const key = `user:${telegramId}`;
-  const user = await redis.get(key);
-  if (!user) return false;
-  user.total_checks = Number(user.total_checks || 0) + Number(count || 0);
-  await redis.set(key, user);
-  await redis.incrby('stats:total_checks', Number(count || 0));
-  await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
-  return true;
-}
