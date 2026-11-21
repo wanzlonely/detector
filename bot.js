@@ -272,7 +272,7 @@ async function processDetection(ctx, numbers) {
   const results = new Array(total);
 
   let progressMsg;
-  let currentStageLabel = 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
+  let currentStageLabel = 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
   let stageProcessed = 0;
   let stageTotal = total;
 
@@ -358,10 +358,11 @@ async function processDetection(ctx, numbers) {
     let cursor = 0;
     stageProcessed = 0;
     stageTotal = indexes.length || 1;
-    const CONCURRENCY_SAFE = Math.min(6, indexes.length || 1);
+    // Lower concurrency on large batches to reduce WA rate-limit false cooldowns
+    const CONCURRENCY_SAFE = Math.min(indexes.length >= 12 ? 4 : 6, indexes.length || 1);
 
     async function worker(workerId) {
-      if (workerId > 0) await sleep(workerId * 70);
+      if (workerId > 0) await sleep(workerId * 110);
       while (cursor < indexes.length) {
         const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
         if (stop) return;
@@ -381,24 +382,29 @@ async function processDetection(ctx, numbers) {
   }
 
   const allIdx = Array.from({ length: total }, (_, i) => i);
-  const useDualWave = total >= 4;
 
-  if (useDualWave) {
-    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · ᴠᴀʟɪᴅᴀsɪ ᴛᴀʀɢᴇᴛ';
-    await runPool(allIdx, { wave: 'exist' });
+  // Mass scan MUST use full dual-probe (same path as single number).
+  // exist-only triage was fast but produced wrong bulk classifications.
+  if (total >= 8) {
+    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
+    await runPool(allIdx, { wave: 'full' });
 
     const recheckIdx = [];
     for (let i = 0; i < total; i++) {
       const r = results[i];
       if (!r || r.cancelled) continue;
-      const solidReady = r.isReady && (r.confidence || 0) >= 0.8 && !r.needsRecheck;
-      const solidBanned = r.isBanned && (r.confidence || 0) >= 0.85;
-      if (solidReady || solidBanned) continue;
-      recheckIdx.push(i);
+      const conf = Number(r.confidence) || 0;
+      const weak =
+        r.needsRecheck ||
+        r.softFallback ||
+        r.accountStatus === 'UNKNOWN' ||
+        conf < 0.72 ||
+        (r.anyCooldown && !(r.primaryTimer && r.primaryTimer.rawSeconds > 0));
+      if (weak) recheckIdx.push(i);
     }
 
     if (recheckIdx.length) {
-      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴍᴇɴᴅᴀʟᴀᴍ';
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴜʟᴀɴɢ';
       await runPool(recheckIdx, { wave: 'full' });
     } else {
       currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · sᴇʟᴇsᴀɪ';
@@ -407,7 +413,7 @@ async function processDetection(ctx, numbers) {
       await updateProgress();
     }
   } else {
-    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
+    currentStageLabel = total >= 4 ? 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
     await runPool(allIdx, { wave: 'full' });
   }
 
