@@ -1,1 +1,602 @@
-PLACEHOLDER
+require('dotenv').config();
+const { Telegraf, Markup } = require('telegraf');
+const {
+  redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
+  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, redeemReferralReward,
+  consumeQuota, addCheckLog, getCachedCheckResult, setCachedCheckResult, qualifyReferral
+} = require('./database');
+const {
+  escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
+  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary
+} = require('./themes');
+const { checkWhatsAppCooldown } = require('./waChecker');
+
+const bot = new Telegraf(process.env.BOT_TOKEN);
+const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
+
+async function stopActiveDetection(ctx) {
+  const userId = ctx.from && ctx.from.id;
+  if (!userId) return;
+  const jobId = await redis.get('detect:active:' + userId);
+  if (!jobId) return;
+  await redis.set('detect:stop:' + userId + ':' + jobId, '1', { ex: 3600 });
+  await redis.set('detect:exit:' + userId + ':' + jobId, 'navigation', { ex: 3600 });
+}
+
+bot.use(async (ctx, next) => {
+  const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
+  const callbackData = (ctx.callbackQuery && ctx.callbackQuery.data) || '';
+  const navigationText = /^(DETECT|BELI\s*PREMIUM|STATUS|LEADERBOARD|REFERRAL|HUBUNGI\s*ADMIN|OWNER\s*CONSOLE|AKTIVASI\s*PREMIUM|BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
+  const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
+  if (navigationText || navigationCallback) {
+    try {
+      await stopActiveDetection(ctx);
+      if (ctx.from) {
+        await Promise.all([
+          redis.del('detect:mode:' + ctx.from.id),
+          redis.del('contact:state:' + ctx.from.id),
+          redis.del('owner:action:' + ctx.from.id),
+          redis.del('owner:contact:target:' + ctx.from.id)
+        ]);
+      }
+    } catch (err) {
+      console.error('[navigation cleanup]', err && err.message || err);
+    }
+  }
+  return next();
+});
+
+const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
+
+/** Telegram Bot API styled callback buttons (primary/success/danger) when supported */
+function styledCallback(text, data, style) {
+  const btn = Markup.button.callback(text, data);
+  if (style) btn.style = style;
+  return btn;
+}
+
+const USER_KEYBOARD = Markup.keyboard([
+  [{ text: 'DETECT' }, { text: 'BELI PREMIUM' }],
+  [{ text: 'STATUS' }, { text: 'LEADERBOARD' }],
+  [{ text: 'REFERRAL' }, { text: 'HUBUNGI ADMIN' }]
+]).resize().oneTime().placeholder('Pilih menu…');
+
+const OWNER_KEYBOARD = Markup.keyboard([
+  [{ text: 'DETECT' }, { text: 'BELI PREMIUM' }],
+  [{ text: 'STATUS' }, { text: 'LEADERBOARD' }],
+  [{ text: 'REFERRAL' }, { text: 'HUBUNGI ADMIN' }],
+  [{ text: 'OWNER CONSOLE' }],
+  [{ text: 'AKTIVASI PREMIUM' }, { text: 'BROADCAST' }]
+]).resize().oneTime().placeholder('Pilih fungsi owner…');
+
+const OWNER_ACTION_TTL = 300;
+async function setOwnerAction(userId, action) {
+  await redis.set('owner:action:' + userId, action, { ex: OWNER_ACTION_TTL });
+}
+async function getOwnerAction(userId) {
+  return redis.get('owner:action:' + userId);
+}
+async function clearOwnerAction(userId) {
+  await redis.del('owner:action:' + userId);
+}
+
+function isOwner(ctx) {
+  return Boolean(ADMIN_ID) && Number(ctx.from && ctx.from.id) === ADMIN_ID;
+}
+
+async function handleCancel(ctx) {
+  const uid = ctx.from && ctx.from.id;
+  if (uid) {
+    await stopActiveDetection(ctx);
+    await Promise.all([
+      redis.del('detect:mode:' + uid),
+      redis.del('contact:state:' + uid),
+      redis.del('owner:action:' + uid),
+      redis.del('owner:contact:target:' + uid)
+    ]);
+  }
+  return ctx.reply('<b>Dibatalkan</b>\n\nKembali ke menu utama.', {
+    parse_mode: 'HTML',
+    ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
+  });
+}
+bot.command('cancel', handleCancel);
+bot.hears(/^\/?cancel$/i, handleCancel);
+bot.hears(/^batal$/i, handleCancel);
+
+bot.use((ctx, next) => next());
+
+async function getEffectiveUser(ctx) {
+  const user = await getOrCreateUser(ctx.from);
+  if (!isOwner(ctx)) return user;
+  return { ...user, vip_until: 4102444800, vip_tier: 'OWNER', vip_plan: 'OWNER ACCESS', bulk_limit: 30, free_used_today: 0 };
+}
+
+async function showHome(ctx) {
+  const user = await getEffectiveUser(ctx);
+  return ctx.reply(renderDashboard({
+    user,
+    isVip: isOwner(ctx) || isUserVip(user),
+    isOwner: isOwner(ctx),
+    brandName: BRAND_NAME
+  }), { parse_mode: 'HTML', ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime() });
+}
+
+function buildStoreKeyboard() {
+  const packages = getPackagesByTier('premium');
+  const rows = [];
+  for (let i = 0; i < packages.length; i += 2) {
+    rows.push(packages.slice(i, i + 2).map((pkg) =>
+      styledCallback(pkg.durationLabel + ' · ' + formatIDR(pkg.price), 'pkg:' + pkg.id, 'primary')
+    ));
+  }
+  return Markup.inlineKeyboard(rows);
+}
+async function showStore(ctx, edit) {
+  const user = await getEffectiveUser(ctx);
+  const packages = getPackagesByTier('premium');
+  const message = renderStoreCatalog({ user, packages });
+  const keyboard = buildStoreKeyboard();
+  if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+async function showPackage(ctx, pkg, edit) {
+  const user = await getEffectiveUser(ctx);
+  const message = renderPackageDetailCard({ user, pkg });
+  const keyboard = Markup.inlineKeyboard([
+    [styledCallback('Beli · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success')],
+    [styledCallback('Kembali', 'store:premium', 'danger')]
+  ]);
+  if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+async function showCheckout(ctx, pkg, edit) {
+  const user = await getEffectiveUser(ctx);
+  const message = renderPaymentMaintenanceCard({ user, pkg });
+  const keyboard = Markup.inlineKeyboard([[styledCallback('Pilih paket lain', 'store:' + pkg.tier, 'danger')]]);
+  if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+
+bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
+
+bot.start(async (ctx) => {
+  const payload = String(ctx.startPayload || '');
+  if (payload.startsWith('ref_')) {
+    const registered = await registerReferral(ctx.from.id, payload.slice(4));
+    if (registered) await ctx.reply('Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh 5 koin referral.');
+  }
+  return showHome(ctx);
+});
+bot.command('store', (ctx) => showStore(ctx, false));
+bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showStore(ctx, true); });
+bot.action(/^pkg:([a-z0-9_]+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const pkg = getPackageById(ctx.match[1]);
+  if (!pkg) return ctx.reply('<b>PAKET TIDAK DITEMUKAN</b>');
+  return showPackage(ctx, pkg, true);
+});
+bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const pkg = getPackageById(ctx.match[1]);
+  if (!pkg) return ctx.reply('<b>PAKET TIDAK DITEMUKAN</b>');
+  return showCheckout(ctx, pkg, true);
+});
+
+async function startContact(ctx) {
+  await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
+  return ctx.reply('<b>HUBUNGI ADMIN</b>\n\n<blockquote>Tulis pesan atau keluhan Anda. Admin akan membalas secepatnya.</blockquote>', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('Batalkan', 'contact:cancel', 'danger')]]) });
+}
+bot.hears(/^HUBUNGI ADMIN$/i, startContact);
+bot.action('contact:cancel', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await redis.del('contact:state:' + ctx.from.id); return ctx.reply('<b>Pengiriman pesan dibatalkan</b>', { parse_mode: 'HTML' }); });
+
+async function showStatus(ctx) {
+  const user = await getEffectiveUser(ctx);
+  const referralStats = await getReferralStats(ctx.from.id);
+  return ctx.reply(require('./themes').renderStatus({ user, isVip: isOwner(ctx) || isUserVip(user), isOwner: isOwner(ctx), referralStats }), { parse_mode: 'HTML' });
+}
+async function showLeaderboard(ctx) {
+  return ctx.reply(require('./themes').renderLeaderboard(await getLeaderboard(10)), { parse_mode: 'HTML' });
+}
+async function showReferral(ctx) {
+  const me = await bot.telegram.getMe();
+  const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
+  const stats = await getReferralStats(ctx.from.id);
+  const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
+  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('Bagikan Tautan', shareUrl)], [styledCallback('Tukar Koin', 'referral:menu', 'primary')]]) });
+}
+bot.hears(/^STATUS$/i, showStatus);
+bot.hears(/^LEADERBOARD$/i, showLeaderboard);
+bot.hears(/^REFERRAL$/i, showReferral);
+bot.hears(/^BELI PREMIUM$/i, (ctx) => showStore(ctx, false));
+
+function extractPhoneCandidates(text) {
+  if (!text) return [];
+  const raw = String(text);
+  const phones = [];
+  const seen = new Set();
+
+  const pattern = /(?:\+|00)?[\d][\d\s\-().]{6,20}\d/g;
+  let match;
+  while ((match = pattern.exec(raw)) !== null) {
+    let token = match[0].trim();
+    token = token.replace(/[^\d+]+$/g, '').replace(/^[^\d+]+/g, '');
+    const hasPlus = token.startsWith('+') || token.startsWith('00');
+    let digits = token.replace(/\D/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    if (digits.length < 8 || digits.length > 15) continue;
+    if (digits.length <= 4) continue;
+    if (/^(19|20)\d{2}$/.test(digits)) continue;
+    if (seen.has(digits)) continue;
+    seen.add(digits);
+    phones.push(hasPlus || digits.length >= 10 ? ('+' + digits) : digits);
+  }
+
+  if (!phones.length) {
+    const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      const digits = line.replace(/\D/g, '');
+      if (digits.length < 8 || digits.length > 15) continue;
+      if (seen.has(digits)) continue;
+      seen.add(digits);
+      phones.push(line.includes('+') ? ('+' + digits) : digits);
+    }
+  }
+  return phones;
+}
+
+async function startDetect(ctx) {
+  const user = await getEffectiveUser(ctx);
+  const isVip = isOwner(ctx) || isUserVip(user);
+  const remaining = isVip ? 999 : Math.max(0, 3 - Number(user.free_used_today || 0));
+  if (!isVip && remaining <= 0) {
+    return ctx.reply(
+      '<b>KUOTA HARIAN HABIS</b>\n\n<blockquote>Anda telah menggunakan 3 kuota gratis hari ini. Upgrade ke Premium untuk pemeriksaan tanpa batas.</blockquote>',
+      { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('Beli Premium', 'store:premium', 'success')]]) }
+    );
+  }
+  await redis.set('detect:mode:' + ctx.from.id, 'waiting_numbers', { ex: 300 });
+  const limitHint = isVip ? 'Maksimal 30 nomor / kiriman' : '1 nomor (free)';
+  return ctx.reply(
+    '<b>DETEKSI NOMOR WHATSAPP</b>\n' +
+    '━━━━━━━━━━━━━━━━━━━━\n\n' +
+    '<blockquote>Silakan kirim nomor yang ingin dicek ke chat ini.\n' +
+    '• Pengecekan massal pisahkan dengan baris baru atau koma.\n' +
+    '• Bot otomatis mengambil angka saja, label teks diabaikan.</blockquote>\n\n' +
+    '<b>Contoh</b>\n' +
+    '<code>+6281234567890</code>\n' +
+    '<code>081234567890</code>\n' +
+    '<code>+22956196321 (Low) · Jul 2024</code>\n\n' +
+    'Kuota  ·  <b>' + (isVip ? 'Tanpa batas' : remaining + ' / 3') + '</b>\n' +
+    'Limit  ·  <b>' + limitHint + '</b>\n\n' +
+    '<i>Ketik /cancel untuk membatalkan.</i>',
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [styledCallback('Batal', 'detect:cancel_prompt', 'danger')]
+      ])
+    }
+  );
+}
+bot.hears(/^DETECT$/i, startDetect);
+bot.command('detect', startDetect);
+bot.action('detect:cancel_prompt', async (ctx) => {
+  await ctx.answerCbQuery('Dibatalkan').catch(() => {});
+  await redis.del('detect:mode:' + ctx.from.id);
+  return ctx.reply('<b>Deteksi dibatalkan</b>', { parse_mode: 'HTML' });
+});
+
+function buildProgressBar(pct) {
+  const filled = Math.round(pct / 10);
+  return '●'.repeat(filled) + '○'.repeat(10 - filled);
+}
+
+function buildProgressText(processed, total, stageLabel) {
+  const safeTotal = total > 0 ? total : 1;
+  const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
+  const pct = Math.round((safeProcessed / safeTotal) * 100);
+  const title = stageLabel || 'MEMPROSES TARGET';
+  return (
+    '<b>' + title + '</b>\n' +
+    '━━━━━━━━━━━━━━━━━━━━\n\n' +
+    buildProgressBar(pct) + '  <b>' + pct + '%</b>\n' +
+    'Progres  ·  <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> nomor'
+  );
+}
+
+async function processDetection(ctx, numbers) {
+  const userId = ctx.from.id;
+  const jobId = Date.now().toString(36);
+  await redis.set('detect:active:' + userId, jobId, { ex: 600 });
+  await redis.del('detect:mode:' + userId);
+
+  const total = numbers.length;
+  const results = new Array(total);
+
+  let progressMsg;
+  let currentStageLabel = 'MEMPROSES TARGET';
+  let stageProcessed = 0;
+  let stageTotal = total;
+
+  try {
+    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
+  } catch (_) {}
+
+  async function updateProgress() {
+    if (!progressMsg) return;
+    try {
+      await ctx.telegram.editMessageText(
+        progressMsg.chat.id,
+        progressMsg.message_id,
+        undefined,
+        buildProgressText(stageProcessed, stageTotal, currentStageLabel),
+        { parse_mode: 'HTML' }
+      );
+    } catch (_) {}
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function checkOne(raw, waveOpts) {
+    const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
+    if (stop) return { cancelled: true };
+
+    try {
+      const result = await checkWhatsAppCooldown(raw, waveOpts || {});
+      if (result && !result.error) {
+        await addCheckLog(
+          userId,
+          result.formattedNumber || raw,
+          result.accountStatus || result.description || '-',
+          result.proxyTag || result.proxyInfo || '-'
+        );
+        return result;
+      }
+    } catch (err) {
+      const digits = String(raw || '').replace(/\D/g, '');
+      const display = digits ? ('+' + digits) : String(raw || '');
+      return {
+        formattedNumber: display,
+        isBanned: false,
+        isCloneBlocked: false,
+        isReady: false,
+        anyCooldown: true,
+        smsAvailable: null,
+        smsOptionMissing: false,
+        accountStatus: 'IN_COOLDOWN',
+        error: false,
+        softFallback: true,
+        confidence: 0.35,
+        needsRecheck: false,
+        description: (err && err.message) || 'Respons tidak stabil'
+      };
+    }
+
+    const digits = String(raw || '').replace(/\D/g, '');
+    const display = digits ? ('+' + digits) : String(raw || '');
+    return {
+      formattedNumber: display,
+      isBanned: false,
+      isCloneBlocked: false,
+      isReady: false,
+      anyCooldown: true,
+      accountStatus: 'IN_COOLDOWN',
+      error: false,
+      softFallback: true,
+      confidence: 0.35,
+      description: 'Respons tidak stabil'
+    };
+  }
+
+  async function runPool(indexes, waveOpts) {
+    let cursor = 0;
+    stageProcessed = 0;
+    stageTotal = indexes.length || 1;
+    const CONCURRENCY_SAFE = Math.min(indexes.length >= 16 ? 5 : (indexes.length >= 8 ? 6 : 8), indexes.length || 1);
+
+    async function worker(workerId) {
+      if (workerId > 0) await sleep(workerId * 60);
+      while (cursor < indexes.length) {
+        const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
+        if (stop) return;
+        const pos = cursor++;
+        const i = indexes[pos];
+        results[i] = await checkOne(numbers[i], waveOpts);
+        stageProcessed += 1;
+        if (stageProcessed === stageTotal || stageProcessed % 2 === 0 || stageProcessed === 1) {
+          await updateProgress();
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
+    stageProcessed = stageTotal;
+    await updateProgress();
+  }
+
+  const allIdx = Array.from({ length: total }, (_, i) => i);
+
+  if (total >= 4) {
+    currentStageLabel = 'TAHAP 1/2 · SCAN CEPAT';
+    await runPool(allIdx, { wave: 'exist' });
+
+    const needFull = [];
+    for (let i = 0; i < total; i++) {
+      const r = results[i];
+      if (!r || r.cancelled) continue;
+      const conf = Number(r.confidence) || 0;
+      const clearLiveCooldown = r.anyCooldown && r.primaryTimer && r.primaryTimer.rawSeconds > 0 && conf >= 0.82;
+      const clearBan = r.isBanned && conf >= 0.88;
+      const clearReady = r.isReady && r.existClear && conf >= 0.82;
+      const clearClone = r.isCloneBlocked && conf >= 0.85;
+      if (clearLiveCooldown || clearBan || clearReady || clearClone) continue;
+      needFull.push(i);
+    }
+
+    if (needFull.length) {
+      currentStageLabel = 'TAHAP 2/2 · VERIFIKASI DALAM';
+      await runPool(needFull, { wave: 'full' });
+    } else {
+      currentStageLabel = 'TAHAP 2/2 · SELESAI';
+      stageProcessed = total;
+      stageTotal = total;
+      await updateProgress();
+    }
+  } else {
+    currentStageLabel = total > 1 ? 'TAHAP 1/1 · PEMERIKSAAN' : 'MEMPROSES TARGET';
+    await runPool(allIdx, { wave: 'full' });
+  }
+
+  const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
+  await redis.del('detect:active:' + userId);
+  await redis.del('detect:stop:' + userId + ':' + jobId);
+  await redis.del('detect:exit:' + userId + ':' + jobId);
+
+  if (stopped) {
+    return ctx.reply('<b>Deteksi dibatalkan</b>', { parse_mode: 'HTML' });
+  }
+
+  function pickCooldownDuration(r) {
+    const ch = r && r.channels;
+    const candidates = [
+      ch && ch.sms,
+      r && r.primaryTimer,
+      ch && ch.voice,
+      ch && ch.flash,
+      ch && ch.email
+    ].filter((t) => t && Number(t.rawSeconds) > 0);
+    if (!candidates.length) return null;
+    return candidates[0].uiTimer || candidates[0].formatted || null;
+  }
+
+  const groups = { ready: [], cooldown: [], clone: [], banned: [], smsUnavailable: [] };
+  let ok = 0;
+  for (let idx = 0; idx < results.length; idx++) {
+    const r = results[idx];
+    if (!r || r.cancelled) continue;
+    ok += 1;
+    const original = numbers[idx];
+    const digits = String((r && r.formattedNumber) || original || '').replace(/\D/g, '');
+    const num = digits ? ('+' + digits) : String(original || '');
+    if (r.isBanned) groups.banned.push(num);
+    else if (r.isCloneBlocked) groups.clone.push(num);
+    else if (r.anyCooldown || r.softFallback) {
+      groups.cooldown.push({ number: num, duration: pickCooldownDuration(r) });
+    } else if (r.smsOptionMissing || (r.smsAvailable === false && !r.isReady && !r.waOldEligible)) {
+      groups.smsUnavailable.push(num);
+    } else {
+      groups.ready.push(num);
+    }
+  }
+
+  const lines = [];
+  lines.push('<b>PEMERIKSAAN SELESAI</b>');
+  lines.push('━━━━━━━━━━━━━━━━━━━━');
+  lines.push('');
+  lines.push(buildProgressBar(100) + ' <b>100%</b>');
+  lines.push('Progres  ·  <b>' + total + '</b> / <b>' + total + '</b> nomor');
+  lines.push('');
+  lines.push('Siap diverifikasi     ·  <b>' + groups.ready.length + '</b>');
+  lines.push('Cooldown              ·  <b>' + groups.cooldown.length + '</b>');
+  lines.push('Tidak support clone  ·  <b>' + groups.clone.length + '</b>');
+  lines.push('Opsi SMS tidak ada   ·  <b>' + groups.smsUnavailable.length + '</b>');
+  lines.push('Dibatasi             ·  <b>' + groups.banned.length + '</b>');
+  lines.push('');
+  lines.push('Sukses  ·  <b>' + ok + '</b>  ·  Error  ·  <b>0</b>');
+  lines.push('');
+  lines.push('<b>HASIL DETEKSI</b>');
+
+  if (groups.ready.length) {
+    lines.push('');
+    lines.push('<b>SIAP DIVERIFIKASI</b>');
+    lines.push(...groups.ready.map((n) => '<code>' + n + '</code>'));
+  }
+  if (groups.cooldown.length) {
+    lines.push('');
+    lines.push('<b>COOLDOWN WHATSAPP</b>');
+    lines.push(...groups.cooldown.map((item) => {
+      if (item.duration) return '<code>' + item.number + '</code> — ' + item.duration;
+      return '<code>' + item.number + '</code>';
+    }));
+  }
+  if (groups.clone.length) {
+    lines.push('');
+    lines.push('<b>TIDAK SUPPORT CLONE</b>');
+    lines.push(...groups.clone.map((n) => '<code>' + n + '</code>'));
+  }
+  if (groups.smsUnavailable.length) {
+    lines.push('');
+    lines.push('<b>OPSI SMS TIDAK DITEMUKAN</b>');
+    lines.push(...groups.smsUnavailable.map((n) => '<code>' + n + '</code>'));
+  }
+  if (groups.banned.length) {
+    lines.push('');
+    lines.push('<b>DIBATASI</b>');
+    lines.push(...groups.banned.map((n) => '<code>' + n + '</code>'));
+  }
+
+  lines.push('');
+  lines.push('Proses  ·  <b>' + total + 'd</b>');
+
+  const text = lines.join('\n');
+  try {
+    if (progressMsg) {
+      await ctx.telegram.editMessageText(progressMsg.chat.id, progressMsg.message_id, undefined, text, { parse_mode: 'HTML' });
+    } else {
+      await ctx.reply(text, { parse_mode: 'HTML' });
+    }
+  } catch (_) {
+    await ctx.reply(text, { parse_mode: 'HTML' });
+  }
+
+  try {
+    const user = await getEffectiveUser(ctx);
+    if (!(isOwner(ctx) || isUserVip(user))) {
+      await consumeQuota(userId, Math.min(total, 3));
+    } else {
+      await consumeQuota(userId, total);
+    }
+  } catch (e) {
+    console.error('[quota]', e && e.message || e);
+  }
+}
+
+bot.on('text', async (ctx, next) => {
+  const text = (ctx.message && ctx.message.text) || '';
+  if (!text || text.startsWith('/')) return next();
+  if (/^(DETECT|BELI PREMIUM|STATUS|LEADERBOARD|REFERRAL|HUBUNGI ADMIN|OWNER CONSOLE|AKTIVASI PREMIUM|BROADCAST)$/i.test(text)) return next();
+
+  const mode = await redis.get('detect:mode:' + ctx.from.id);
+  if (mode !== 'waiting_numbers') return next();
+
+  const phones = extractPhoneCandidates(text);
+  if (!phones.length) {
+    return ctx.reply('<b>NOMOR TIDAK DITEMUKAN</b>\n\n<blockquote>Kirim nomor dengan format yang benar.\nContoh: +6281234567890</blockquote>', { parse_mode: 'HTML' });
+  }
+
+  const user = await getEffectiveUser(ctx);
+  const isVip = isOwner(ctx) || isUserVip(user);
+  const max = isVip ? 30 : 1;
+  const list = phones.slice(0, max);
+
+  if (!isVip && phones.length > 1) {
+    return ctx.reply('<b>LIMIT AKUN GRATIS</b>\n\n<blockquote>Akun gratis hanya bisa cek 1 nomor. Upgrade Premium untuk bulk hingga 30 nomor.</blockquote>', {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([[styledCallback('Beli Premium', 'store:premium', 'success')]])
+    });
+  }
+
+  return processDetection(ctx, list);
+});
+
+if (require.main === module) {
+  bot.launch().then(() => console.log('[bot] launched')).catch((err) => {
+    console.error('[launch]', err && err.stack || err);
+    process.exitCode = 1;
+  });
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}
+module.exports = bot;
