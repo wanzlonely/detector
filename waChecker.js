@@ -5,6 +5,7 @@ const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 10000);
 const INTERNAL_RETRIES = Math.min(4, Math.max(2, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 3)));
 const CONSENSUS_ENABLED = String(process.env.WA_CONSENSUS || '1') !== '0';
 const LOW_CONFIDENCE_THRESHOLD = Number(process.env.WA_LOW_CONFIDENCE || 0.72);
+const EXIST_CLEAR_CONFIDENCE = Number(process.env.WA_EXIST_CLEAR || 0.82);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -80,15 +81,6 @@ async function postWithTimeout(url, body, headers, dispatcher) {
 function safeJson(text) { try { return JSON.parse(text || '{}'); } catch (_) { return {}; } }
 function num(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; }
 
-function toWaUiTimer(seconds) {
-  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (sec <= 0) return 'Ready';
-  if (sec >= 3600) return `Coba lagi dalam ${Math.ceil(sec / 3600)} jam`;
-  const m = Math.floor(sec / 60);
-  const s = String(sec % 60).padStart(2, '0');
-  return `Coba lagi dalam ${m}.${s}`;
-}
-
 function toShortTimer(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
   if (sec <= 0) return '0s';
@@ -102,6 +94,15 @@ function toShortTimer(seconds) {
   return parts.join(' ');
 }
 
+function toWaUiTimer(seconds) {
+  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+  if (sec <= 0) return 'Ready';
+  if (sec >= 3600) return 'Coba lagi dalam ' + Math.ceil(sec / 3600) + ' jam';
+  const m = Math.floor(sec / 60);
+  const s = String(sec % 60).padStart(2, '0');
+  return 'Coba lagi dalam ' + m + '.' + s;
+}
+
 function resolveCountryIso2(phoneInfo) {
   const candidates = [phoneInfo && phoneInfo.iso, phoneInfo && phoneInfo.country_iso, phoneInfo && phoneInfo.country_code_iso];
   for (const c of candidates) {
@@ -109,7 +110,16 @@ function resolveCountryIso2(phoneInfo) {
     if (/^[a-z]{2}$/.test(s)) return s;
   }
   const cc = String((phoneInfo && (phoneInfo.cc || phoneInfo.country_code)) || '').replace(/\D/g, '');
-  const DIAL_ISO = {'1':'us','7':'ru','20':'eg','27':'za','30':'gr','31':'nl','32':'be','33':'fr','34':'es','36':'hu','39':'it','40':'ro','41':'ch','43':'at','44':'gb','45':'dk','46':'se','47':'no','48':'pl','49':'de','51':'pe','52':'mx','53':'cu','54':'ar','55':'br','56':'cl','57':'co','58':'ve','60':'my','61':'au','62':'id','63':'ph','64':'nz','65':'sg','66':'th','81':'jp','82':'kr','84':'vn','86':'cn','90':'tr','91':'in','92':'pk','93':'af','94':'lk','95':'mm','98':'ir','211':'ss','212':'ma','213':'dz','216':'tn','218':'ly','220':'gm','221':'sn','222':'mr','223':'ml','224':'gn','225':'ci','226':'bf','227':'ne','228':'tg','229':'bj','230':'mu','231':'lr','232':'sl','233':'gh','234':'ng','235':'td','236':'cf','237':'cm','238':'cv','240':'gq','241':'ga','242':'cg','243':'cd','244':'ao','245':'gw','248':'sc','249':'sd','250':'rw','251':'et','252':'so','253':'dj','254':'ke','255':'tz','256':'ug','257':'bi','258':'mz','260':'zm','261':'mg','262':'re','263':'zw','264':'na','265':'mw','266':'ls','267':'bw','268':'sz','269':'km','351':'pt','352':'lu','353':'ie','354':'is','355':'al','356':'mt','357':'cy','358':'fi','359':'bg','370':'lt','371':'lv','372':'ee','373':'md','374':'am','375':'by','376':'ad','377':'mc','380':'ua','381':'rs','382':'me','383':'xk','385':'hr','386':'si','387':'ba','389':'mk','420':'cz','421':'sk','423':'li','501':'bz','502':'gt','503':'sv','504':'hn','505':'ni','506':'cr','507':'pa','509':'ht','591':'bo','592':'gy','593':'ec','595':'py','597':'sr','598':'uy','599':'cw','670':'tl','673':'bn','675':'pg','676':'to','677':'sb','678':'vu','679':'fj','685':'ws','852':'hk','853':'mo','855':'kh','856':'la','880':'bd','886':'tw','960':'mv','961':'lb','962':'jo','963':'sy','964':'iq','965':'kw','966':'sa','967':'ye','968':'om','970':'ps','971':'ae','972':'il','973':'bh','974':'qa','975':'bt','976':'mn','977':'np','992':'tj','993':'tm','994':'az','995':'ge','996':'kg','998':'uz'};
+  const DIAL_ISO = {
+    '1': 'us', '7': 'ru', '20': 'eg', '27': 'za', '30': 'gr', '31': 'nl', '32': 'be', '33': 'fr', '34': 'es',
+    '36': 'hu', '39': 'it', '40': 'ro', '41': 'ch', '43': 'at', '44': 'gb', '45': 'dk', '46': 'se', '47': 'no',
+    '48': 'pl', '49': 'de', '51': 'pe', '52': 'mx', '53': 'cu', '54': 'ar', '55': 'br', '56': 'cl', '57': 'co',
+    '58': 've', '60': 'my', '61': 'au', '62': 'id', '63': 'ph', '64': 'nz', '65': 'sg', '66': 'th', '81': 'jp',
+    '82': 'kr', '84': 'vn', '86': 'cn', '90': 'tr', '91': 'in', '92': 'pk', '93': 'af', '94': 'lk', '95': 'mm',
+    '98': 'ir', '880': 'bd', '966': 'sa', '971': 'ae', '234': 'ng', '254': 'ke', '255': 'tz', '256': 'ug',
+    '212': 'ma', '213': 'dz', '216': 'tn', '218': 'ly', '963': 'sy', '964': 'iq', '965': 'kw', '968': 'om',
+    '973': 'bh', '974': 'qa', '977': 'np', '992': 'tj', '993': 'tm', '994': 'az', '995': 'ge', '996': 'kg', '998': 'uz'
+  };
   if (cc && DIAL_ISO[cc]) return DIAL_ISO[cc];
   const fullDigits = String((phoneInfo && (phoneInfo.full || phoneInfo.phone || phoneInfo.e164)) || '').replace(/\D/g, '');
   if (fullDigits) {
@@ -131,10 +141,11 @@ function extractChannelTimers(existRaw, codeRaw) {
   const codeVoice = Math.max(num(code.voice_wait), num(code.voice_cooldown));
   const existFlash = Math.max(num(exist.flash_wait), num(exist.flash_cooldown));
   const codeFlash = Math.max(num(code.flash_wait), num(code.flash_cooldown));
+  const existEmail = Math.max(num(exist.email_wait), num(exist.email_cooldown));
+  const codeEmail = Math.max(num(code.email_wait), num(code.email_cooldown));
   const waOldWait = Math.max(num(exist.wa_old_wait), num(exist.wa_old_cooldown), num(code.wa_old_wait), num(code.wa_old_cooldown));
   const existRetry = existNoRoutes ? 0 : num(exist.retry_after);
   const codeRetry = codeNoRoutes ? 0 : num(code.retry_after);
-  const retryAfter = Math.max(existRetry, codeRetry);
 
   const isCodeSent = code.status === 'sent' || code.status === 'ok';
   const codeMethod = String(code.method || code.login_method || '').toLowerCase();
@@ -144,8 +155,7 @@ function extractChannelTimers(existRaw, codeRaw) {
     existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 300 &&
     (isCodeSent || isWaOldMethod ||
       (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 8) ||
-      (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 8 && num(code.send_sms_wait) === 0) ||
-      (codeVoice > 0 && Math.abs(codeSmsRaw - codeVoice) <= 8 && num(code.send_sms_wait) === 0));
+      (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 8 && num(code.send_sms_wait) === 0));
 
   let smsSeconds = 0;
   if (existSms > 0) smsSeconds = existSms;
@@ -157,6 +167,7 @@ function extractChannelTimers(existRaw, codeRaw) {
 
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
   let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
+  let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
   if (voiceWait >= 240 && existVoice === 0 && isWaOldMethod) voiceWait = 0;
   if (flashWait >= 240 && existFlash === 0 && isWaOldMethod) flashWait = 0;
 
@@ -166,7 +177,8 @@ function extractChannelTimers(existRaw, codeRaw) {
   const deviceName = exist.wa_old_device_name || code.wa_old_device_name || exist.device_name || code.device_name || null;
 
   return {
-    sms: smsSeconds, wa_old: waOldWait, voice: voiceWait, flash: flashWait, retry_after: retryAfter,
+    sms: smsSeconds, voice: voiceWait, flash: flashWait, email: emailWait, wa_old: waOldWait,
+    retry_after: Math.max(existRetry, codeRetry),
     wa_old_eligible: waOldEligible, device_name: deviceName, is_wa_old_echo: isWaOldEcho,
     exist_no_routes: existNoRoutes, code_no_routes: codeNoRoutes, is_code_sent: isCodeSent,
     exist_sms: existSms, code_sms: codeSmsRaw
@@ -178,7 +190,7 @@ function buildChannel(seconds) {
   return { isCooldown: sec > 0, rawSeconds: sec, uiTimer: toShortTimer(sec), humanTime: toWaUiTimer(sec), formatted: toShortTimer(sec) };
 }
 
-function applyPatternLibrary(exist, code, timers, engineState) {
+function applyPatternLibrary(exist, code, timers) {
   const reason = String(exist.reason || code.reason || '').toLowerCase();
   const status = String(exist.status || code.status || '').toLowerCase();
   const hints = [];
@@ -196,23 +208,38 @@ function applyPatternLibrary(exist, code, timers, engineState) {
 function detectBanSignals(exist, code, parsed, patternHints) {
   if (patternHints.includes('HARD_BAN')) return true;
   if (parsed && parsed.isBanned === true) return true;
-  const statusBanned = exist.status === 'banned' || code.status === 'banned' || exist.reason === 'blocked' || code.reason === 'blocked' || exist.reason === 'banned' || code.reason === 'banned';
-  return Boolean(statusBanned || exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal);
+  return Boolean(
+    exist.status === 'banned' || code.status === 'banned' ||
+    exist.reason === 'blocked' || code.reason === 'blocked' ||
+    exist.reason === 'banned' || code.reason === 'banned' ||
+    exist.violation_type || code.violation_type ||
+    exist.in_app_ban_appeal || code.in_app_ban_appeal
+  );
 }
 
 function detectCloneSignals(exist, code, parsed) {
-  if (parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) return { isCloneBlocked: true, isSecurityBlock: Boolean(parsed.isSecurityBlock) };
+  if (parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) {
+    return { isCloneBlocked: true, isSecurityBlock: Boolean(parsed.isSecurityBlock) };
+  }
   const blockScreen = String(exist.custom_block_screen || code.custom_block_screen || exist.block_screen || code.block_screen || '').toLowerCase();
   const reason = String(exist.reason || code.reason || '').toLowerCase();
   const status = String(exist.status || code.status || '').toLowerCase();
   const textBlob = JSON.stringify({ exist, code }).toLowerCase();
-  const unofficial = blockScreen.includes('unofficial') || blockScreen.includes('clone') || reason.includes('unofficial') || (textBlob.includes('whatsapp business') && textBlob.includes('official app'));
-  const security = blockScreen.includes('security') || reason.includes('security') || status.includes('security') || textBlob.includes('demi keamanan') || textBlob.includes('login not available right now') || textBlob.includes('tidak dapat masuk saat ini') || Boolean(parsed && parsed.isSecurityBlock);
+  const unofficial = blockScreen.includes('unofficial') || blockScreen.includes('clone') || reason.includes('unofficial');
+  const security =
+    blockScreen.includes('security') || reason.includes('security') || status.includes('security') ||
+    textBlob.includes('demi keamanan') || textBlob.includes('login not available right now') ||
+    textBlob.includes('tidak dapat masuk saat ini') || Boolean(parsed && parsed.isSecurityBlock);
   return { isCloneBlocked: Boolean(unofficial), isSecurityBlock: Boolean(security) };
 }
 
 function resolveSmsAvailability(exist, code, timers, patternHints) {
-  const toBool = (v) => { if (typeof v === 'boolean') return v; if (v === 1 || v === '1') return true; if (v === 0 || v === '0') return false; return null; };
+  const toBool = (v) => {
+    if (typeof v === 'boolean') return v;
+    if (v === 1 || v === '1') return true;
+    if (v === 0 || v === '0') return false;
+    return null;
+  };
   const eB = toBool(exist.send_sms_eligible);
   const cB = toBool(code.send_sms_eligible);
   if (eB === true || cB === true) return true;
@@ -224,30 +251,6 @@ function resolveSmsAvailability(exist, code, timers, patternHints) {
   return null;
 }
 
-async function runDualProbe(payloads, headers, countryIso2) {
-  // Sequential EXIST → CODE so live SMS wait after user OTP is visible
-  const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    let existText = null;
-    let codeText = null;
-    try {
-      existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
-    } catch (_) {}
-    await sleep(150);
-    try {
-      codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
-    } catch (_) {}
-    if (!existText && !codeText) throw new Error('Dual probe gagal: jaringan');
-    return { existText, codeText, partial: !existText || !codeText };
-  }, undefined, countryIso2);
-  return {
-    existText: data.existText || null,
-    codeText: data.codeText || null,
-    partial: Boolean(data.partial),
-    proxyMode,
-    sessionTag
-  };
-}
-
 async function runExistOnlyProbe(payloads, headers, countryIso2) {
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
     const existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
@@ -256,40 +259,78 @@ async function runExistOnlyProbe(payloads, headers, countryIso2) {
   return { existText: data.existText || null, codeText: null, partial: true, proxyMode, sessionTag, existOnly: true };
 }
 
+async function runDualProbe(payloads, headers, countryIso2) {
+  const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
+    let existText = null;
+    let codeText = null;
+    try {
+      existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
+    } catch (_) {}
+    await sleep(120);
+    try {
+      codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
+    } catch (_) {}
+    if (!existText && !codeText) throw new Error('Dual probe gagal: jaringan');
+    return { existText, codeText, partial: !existText || !codeText };
+  }, undefined, countryIso2);
+  return { existText: data.existText || null, codeText: data.codeText || null, partial: Boolean(data.partial), proxyMode, sessionTag };
+}
+
 function classifyFromResponses(payloads, existText, codeText, proxyMode, sessionTag, countryIso2, meta) {
   const existResponse = safeJson(existText);
   const codeResponse = safeJson(codeText);
   const parsed = WADetector.parseDualResponse(payloads.phoneInfo, existText || '{}', codeText || '{}');
   const timers = extractChannelTimers(existResponse, codeResponse);
   const engineState = String((parsed && parsed.state) || '').toUpperCase();
-  const patternHints = applyPatternLibrary(existResponse, codeResponse, timers, engineState);
+  const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
   const smsAvailable = resolveSmsAvailability(existResponse, codeResponse, timers, patternHints);
-  const channels = { sms: buildChannel(timers.sms), wa_old: buildChannel(timers.wa_old), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash) };
+
+  const channels = {
+    sms: buildChannel(timers.sms),
+    voice: buildChannel(timers.voice),
+    flash: buildChannel(timers.flash),
+    email: buildChannel(timers.email),
+    wa_old: buildChannel(timers.wa_old)
+  };
+
   const engineReady = Boolean(parsed && parsed.isReady);
   const engineCooldown = Boolean(parsed && parsed.isCooldown);
   const engineClone = Boolean(parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock));
   const engineSecurity = Boolean(parsed && parsed.isSecurityBlock);
 
-  const smsCooldownActive = channels.sms.rawSeconds > 0;
-  const otherOtpCooldown = !smsCooldownActive && (channels.voice.rawSeconds > 20 || channels.flash.rawSeconds > 20);
-  const timerCooldown = smsCooldownActive || otherOtpCooldown;
+  const liveSmsWait = timers.exist_sms > 0 ? timers.exist_sms : timers.sms;
+  const hasLiveSms = liveSmsWait > 0;
+  const hasLiveVoice = timers.voice > 15;
+  const hasLiveWait = hasLiveSms || hasLiveVoice || timers.flash > 15 || timers.email > 15;
+
+  const reasons = [];
 
   let isBanned = detectBanSignals(existResponse, codeResponse, parsed, patternHints);
-  if (isBanned && (timerCooldown || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
+  if (isBanned && (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
     if (!patternHints.includes('HARD_BAN')) {
-      const hard = existResponse.status === 'banned' || codeResponse.status === 'banned' || existResponse.reason === 'banned' || codeResponse.reason === 'banned' || existResponse.reason === 'blocked' || codeResponse.reason === 'blocked';
+      const hard =
+        existResponse.status === 'banned' || codeResponse.status === 'banned' ||
+        existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
+        existResponse.reason === 'blocked' || codeResponse.reason === 'blocked';
       if (!hard) isBanned = false;
     }
   }
   if (engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN') isBanned = false;
+  if (isBanned) reasons.push('ban_signal');
 
   const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
   const isCloneBlocked = (cloneSig.isCloneBlocked || engineClone) && !isBanned;
   const isSecurityBlock = (cloneSig.isSecurityBlock || engineSecurity) && !isBanned && !isCloneBlocked;
+  if (isCloneBlocked) reasons.push('clone_or_unofficial');
+  if (isSecurityBlock) reasons.push('security_block');
+
+  if (hasLiveSms) reasons.push('exist_sms_wait:' + liveSmsWait);
+  else if (hasLiveVoice) reasons.push('voice_wait:' + timers.voice);
+  else if (hasLiveWait) reasons.push('other_channel_wait');
 
   const meaningfulCooldown =
     !isBanned && !isCloneBlocked && !isSecurityBlock &&
-    (engineCooldown || timerCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT') ||
+    (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT') ||
       engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN');
 
   const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
@@ -300,35 +341,37 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     (smsAvailable !== false && !timers.exist_no_routes) ||
     (existSmsOpen && smsAvailable !== false);
 
-  const liveSmsWait = Number(timers.exist_sms) > 0 ? Number(timers.exist_sms) : (Number(timers.sms) || 0);
-  const liveVoiceWait = Number(timers.voice) || 0;
-  const hasLiveWait = liveSmsWait > 0 || liveVoiceWait > 15;
-
   let isReady =
     !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && !hasLiveWait &&
     (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY' || engineState === 'REGISTERED_ON_DEVICE');
 
   if (!isBanned && !isCloneBlocked && !isSecurityBlock && existSmsOpen && !hasLiveWait && (engineReady || smsAvailable !== false)) {
     isReady = true;
+    reasons.push('exist_sms_open');
   }
-  if (engineReady && !isBanned && !isCloneBlocked && !isSecurityBlock && !hasLiveWait) isReady = true;
+  if (engineReady && !isBanned && !isCloneBlocked && !isSecurityBlock && !hasLiveWait) {
+    isReady = true;
+    reasons.push('engine_ready');
+  }
   if (hasLiveWait) isReady = false;
 
   const effectiveCooldown = isReady ? false : (meaningfulCooldown || hasLiveWait);
 
   const smsOptionMissing =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && !isReady &&
+    !isBanned && !isCloneBlocked && !isSecurityBlock && !effectiveCooldown && !isReady &&
     (smsAvailable === false || engineState === 'NO_ROUTES' || patternHints.includes('NO_ROUTES')) &&
     !timers.wa_old_eligible && !patternHints.includes('HIGH_REREG');
+  if (smsOptionMissing) reasons.push('sms_option_missing');
+  if (isReady) reasons.push('ready');
+  if (effectiveCooldown) reasons.push('cooldown');
 
   let description = (parsed && parsed.description) || '';
   if (isBanned) description = 'Nomor dibatasi / diblokir oleh WhatsApp.';
-  else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone/unofficial).';
+  else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone).';
   else if (isSecurityBlock) description = 'Demi keamanan: login sementara tidak tersedia.';
   else if (effectiveCooldown) {
-    description = 'Cooldown aktif · ' + (
-      channels.sms.rawSeconds > 0 ? channels.sms.humanTime : (channels.voice.humanTime || channels.flash.humanTime || 'aktif')
-    );
+    const ch = hasLiveSms ? channels.sms : (channels.voice.rawSeconds > 0 ? channels.voice : channels.flash);
+    description = 'Cooldown aktif · ' + (ch.humanTime || 'aktif');
   } else if (isReady) {
     description = timers.wa_old_eligible && timers.device_name
       ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
@@ -347,31 +390,39 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   if (isBanned && patternHints.includes('HARD_BAN')) confidence = 0.96;
   else if (isBanned) confidence = 0.9;
   else if (isCloneBlocked || isSecurityBlock) confidence = 0.88;
-  else if (effectiveCooldown && channels.sms.rawSeconds > 0) confidence = 0.92;
+  else if (effectiveCooldown && hasLiveSms) confidence = 0.93;
   else if (effectiveCooldown) confidence = 0.8;
   else if (isReady && (timers.wa_old_eligible || timers.is_code_sent || engineReady)) confidence = 0.9;
+  else if (isReady && existSmsOpen) confidence = 0.86;
   else if (isReady) confidence = 0.78;
   else if (smsOptionMissing) confidence = 0.7;
-  if (meta && meta.partial) confidence -= 0.12;
-  if (meta && meta.existOnly) confidence -= 0.18;
+  if (meta && meta.partial && !hasLiveSms) confidence -= 0.1;
+  if (meta && meta.existOnly && !hasLiveSms && !isBanned) confidence -= 0.06;
   if (patternHints.includes('WA_OLD_ECHO') && isReady) confidence = Math.max(confidence, 0.88);
   confidence = Math.max(0.2, Math.min(0.99, confidence));
 
-  const positiveTimers = [channels.sms.rawSeconds, channels.voice.rawSeconds, channels.flash.rawSeconds]
-    .filter((s) => Number(s) > 0).sort((a, b) => a - b);
-  const primarySeconds = positiveTimers.length ? positiveTimers[0] : 0;
+  const ordered = [channels.sms, channels.voice, channels.flash, channels.email].filter((t) => t && t.rawSeconds > 0);
+  const primary = ordered[0] || buildChannel(0);
+
+  const existClear =
+    Boolean(meta && meta.existOnly) &&
+    confidence >= EXIST_CLEAR_CONFIDENCE &&
+    accountStatus !== 'UNKNOWN' &&
+    (isBanned || isCloneBlocked || hasLiveSms || (isReady && existSmsOpen));
 
   return {
     formattedNumber: normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone),
     region: (parsed && parsed.country) || payloads.phoneInfo?.country_name || '-',
     accountStatus, isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
     anyCooldown: effectiveCooldown, description, deviceName: timers.device_name || null, waOldEligible: timers.wa_old_eligible,
-    channels, primaryTimer: { rawSeconds: primarySeconds, uiTimer: toShortTimer(primarySeconds), humanTime: toWaUiTimer(primarySeconds) },
+    channels,
+    primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
     proxyInfo: proxyMode + ' · ' + sessionTag, proxyTag: sessionTag, proxyCountry: countryIso2,
     rawStatus: (parsed && parsed.rawStatus) || existResponse.status || codeResponse.status || null,
     rawReason: (parsed && parsed.rawReason) || existResponse.reason || codeResponse.reason || null,
     isWaOldEcho: timers.is_wa_old_echo, partialResponse: !existText || !codeText, engineState, patternHints,
-    confidence, needsRecheck: confidence < LOW_CONFIDENCE_THRESHOLD || accountStatus === 'UNKNOWN', error: false
+    decisionReasons: reasons.slice(0, 6), confidence, existClear,
+    needsRecheck: confidence < LOW_CONFIDENCE_THRESHOLD || accountStatus === 'UNKNOWN', error: false
   };
 }
 
@@ -388,7 +439,7 @@ function mergeConsensus(results) {
     else if (r.isReady) score.ready += w;
     else score.cooldown += w * 0.5;
   }
-  let best = 'cooldown', bestVal = -1;
+  let best = 'cooldown'; let bestVal = -1;
   for (const [k, v] of Object.entries(score)) { if (v > bestVal) { bestVal = v; best = k; } }
   const match = results.filter((r) => {
     if (best === 'banned') return r.isBanned;
@@ -403,27 +454,20 @@ function mergeConsensus(results) {
   return { ...base, confidence: Math.min(0.99, Math.max(avgConf, base.confidence || 0)), consensusVotes: score, consensusRounds: results.length, needsRecheck: false };
 }
 
-async function probeOnce(payloads, headers, countryIso2, mode) {
-  const probe = mode === 'exist'
-    ? await runExistOnlyProbe(payloads, headers, countryIso2)
-    : await runDualProbe(payloads, headers, countryIso2);
-  return classifyFromResponses(payloads, probe.existText, probe.codeText, probe.proxyMode, probe.sessionTag, countryIso2, { partial: probe.partial, existOnly: Boolean(probe.existOnly) });
-}
-
 function softFallback(rawNumber, payloads, countryIso2, lastError) {
   return {
     formattedNumber: normalizeDisplayNumber(rawNumber, payloads.phoneInfo, null),
     region: payloads.phoneInfo?.country_name || '-',
     accountStatus: 'IN_COOLDOWN', isBanned: false, isCloneBlocked: false, isSecurityBlock: false, isReady: false,
     smsAvailable: null, smsOptionMissing: false, anyCooldown: true,
-    description: 'Cooldown aktif (respons tidak stabil).',
+    description: 'Respons tidak stabil — coba ulang sebentar.',
     deviceName: null, waOldEligible: false,
-    channels: { sms: buildChannel(0), wa_old: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0) },
+    channels: { sms: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0), email: buildChannel(0), wa_old: buildChannel(0) },
     primaryTimer: { rawSeconds: 0, uiTimer: '0s', humanTime: 'Ready' },
     proxyInfo: 'FALLBACK', proxyTag: 'FALLBACK', proxyCountry: countryIso2,
     rawStatus: null, rawReason: lastError ? String(lastError.message || lastError).slice(0, 120) : null,
-    isWaOldEcho: false, partialResponse: true, softFallback: true, confidence: 0.4, needsRecheck: false,
-    patternHints: ['SOFT_FALLBACK'], error: false
+    isWaOldEcho: false, partialResponse: true, softFallback: true, confidence: 0.35, needsRecheck: false,
+    decisionReasons: ['soft_fallback'], patternHints: ['SOFT_FALLBACK'], error: false
   };
 }
 
@@ -432,38 +476,60 @@ async function checkWhatsAppCooldown(rawNumber, options) {
   const payloads = await WADetector.buildDualPayloads(String(rawNumber));
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
   payloads.rawNumber = String(rawNumber);
+
   const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
   const headers = buildHeaders(payloads.userAgent, countryIso2);
 
   if (opts.wave === 'exist') {
-    try { return await probeOnce(payloads, headers, countryIso2, 'exist'); }
-    catch (err) { return softFallback(rawNumber, payloads, countryIso2, err); }
+    try {
+      const probe = await runExistOnlyProbe(payloads, headers, countryIso2);
+      return classifyFromResponses(payloads, probe.existText, null, probe.proxyMode, probe.sessionTag, countryIso2, { partial: true, existOnly: true });
+    } catch (err) {
+      return softFallback(rawNumber, payloads, countryIso2, err);
+    }
+  }
+
+  if (!(opts.wave === 'full' || opts.wave === 'dual')) {
+    try {
+      const existProbe = await runExistOnlyProbe(payloads, headers, countryIso2);
+      const existResult = classifyFromResponses(payloads, existProbe.existText, null, existProbe.proxyMode, existProbe.sessionTag, countryIso2, { partial: true, existOnly: true });
+      if (existResult.existClear && !existResult.needsRecheck) {
+        return { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
+      }
+    } catch (_) {}
   }
 
   const rounds = [];
   let lastError = null;
   for (let attempt = 1; attempt <= INTERNAL_RETRIES; attempt++) {
     try {
-      const result = await probeOnce(payloads, headers, countryIso2, 'dual');
+      const dual = await runDualProbe(payloads, headers, countryIso2);
+      const result = classifyFromResponses(payloads, dual.existText, dual.codeText, dual.proxyMode, dual.sessionTag, countryIso2, { partial: dual.partial, existOnly: false });
       rounds.push(result);
       if (!result.needsRecheck && result.accountStatus !== 'UNKNOWN') {
         if (!CONSENSUS_ENABLED || result.confidence >= LOW_CONFIDENCE_THRESHOLD) {
-          return { ...result, consensusRounds: rounds.length };
+          return { ...result, probeMode: 'dual', consensusRounds: rounds.length };
         }
       }
       if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) {
-        await sleep(300 + Math.floor(Math.random() * 400));
+        await sleep(280 + Math.floor(Math.random() * 350));
         continue;
       }
-      if (rounds.length >= 2) return mergeConsensus(rounds);
-      return { ...result, consensusRounds: rounds.length };
+      if (rounds.length >= 2) return { ...mergeConsensus(rounds), probeMode: 'consensus' };
+      return { ...result, probeMode: 'dual', consensusRounds: rounds.length };
     } catch (err) {
       lastError = err;
-      if (attempt < INTERNAL_RETRIES) { await sleep(350 + Math.floor(Math.random() * 550)); continue; }
+      if (attempt < INTERNAL_RETRIES) {
+        await sleep(320 + Math.floor(Math.random() * 500));
+        continue;
+      }
     }
   }
-  if (rounds.length >= 2) return mergeConsensus(rounds);
-  if (rounds.length === 1 && rounds[0].accountStatus !== 'UNKNOWN') return { ...rounds[0], consensusRounds: 1 };
+
+  if (rounds.length >= 2) return { ...mergeConsensus(rounds), probeMode: 'consensus' };
+  if (rounds.length === 1 && rounds[0].accountStatus !== 'UNKNOWN') {
+    return { ...rounds[0], consensusRounds: 1, probeMode: 'dual' };
+  }
   return softFallback(rawNumber, payloads, countryIso2, lastError);
 }
 
