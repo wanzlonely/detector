@@ -230,11 +230,11 @@ async function startDetect(ctx) {
     );
   }
   await redis.set('detect:mode:' + ctx.from.id, 'waiting_numbers', { ex: 300 });
-  const limitHint = '1 ɴᴏᴍᴏʀ ᴘᴇʀ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
+  const limitHint = isVip ? 'ᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ / ᴋɪʀɪᴍᴀɴ' : '1 ɴᴏᴍᴏʀ (ғʀᴇᴇ)';
   return ctx.reply(
     '⌖ <b>ᴅᴇᴛᴇᴋsɪ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</b>\n\n' +
     'ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴘᴇʀɪᴋsᴀ.\n' +
-    'ᴜɴᴛᴜᴋ ʜᴀsɪʟ ʏᴀɴɢ ᴊᴇʟᴀs, ᴋɪʀɪᴍ sᴀᴛᴜ ɴᴏᴍᴏʀ ᴅᴀʟᴀᴍ sᴀᴛᴜ ᴘᴇsᴀɴ.\n\n' +
+    'ʙɪsᴀ sᴀᴛᴜ ɴᴏᴍᴏʀ ᴀᴛᴀᴜ ʙᴇʀʙᴀʀɪs.\n\n' +
     'ᴄᴏɴᴛᴏʜ ⦂\n<code>+6281234567890</code>\n<code>081234567890</code>\n\n' +
     '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3') + '</b>\n' +
     '▸ ʟɪᴍɪᴛ ⦂ <b>' + limitHint + '</b>\n\n' +
@@ -304,19 +304,23 @@ async function processDetection(ctx, numbers) {
     } catch (_) {}
 
     let lastErr = null;
-    const maxAttempts = 1;
+    const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const stop2 = await redis.get('detect:stop:' + userId + ':' + jobId);
       if (stop2) return { cancelled: true };
       try {
         const result = await checkWhatsAppCooldown(raw);
-        if (result && (result.error || result.accountStatus === 'UNKNOWN')) return result;
-        if (result) {
+        if (result && !result.error && result.accountStatus && result.accountStatus !== 'UNKNOWN') {
           await setCachedCheckResult(raw, result);
           await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
           return result;
         }
-        lastErr = new Error('Layanan tidak mengembalikan hasil pemeriksaan.');
+        if (result && !result.error) {
+          await setCachedCheckResult(raw, result);
+          await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
+          return result;
+        }
+        lastErr = new Error((result && result.description) || 'Layanan tidak mengembalikan hasil pemeriksaan.');
       } catch (err) {
         lastErr = err;
       }
@@ -332,18 +336,18 @@ async function processDetection(ctx, numbers) {
       isBanned: false,
       isCloneBlocked: false,
       isReady: false,
-      anyCooldown: false,
+      anyCooldown: true,
       smsAvailable: null,
       smsOptionMissing: false,
-      accountStatus: 'UNKNOWN',
-      error: true,
+      accountStatus: 'IN_COOLDOWN',
+      error: false,
       softFallback: true,
-      description: (lastErr && lastErr.message) || 'Status belum dapat dipastikan.'
+      description: (lastErr && lastErr.message) || 'Respons tidak stabil'
     };
   }
 
   let nextIndex = 0;
-  const CONCURRENCY_SAFE = 1;
+  const CONCURRENCY_SAFE = Math.min(6, total);
   async function worker(workerId) {
     if (workerId > 0) await sleep(workerId * 80);
     while (nextIndex < total) {
@@ -367,30 +371,19 @@ async function processDetection(ctx, numbers) {
     return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
   }
 
-  const groups = { ready: [], cooldown: [], clone: [], banned: [], smsUnavailable: [], unknown: [] };
+  const groups = { ready: [], cooldown: [], clone: [], banned: [], smsUnavailable: [] };
   let ok = 0;
   for (let idx = 0; idx < results.length; idx++) {
     const r = results[idx];
     if (!r || r.cancelled) continue;
+    ok += 1;
     const original = numbers[idx];
     const digits = String((r && r.formattedNumber) || original || '').replace(/\D/g, '');
     const num = digits ? ('+' + digits) : String(original || '');
-    if (r.error || r.softFallback || r.accountStatus === 'UNKNOWN') {
-      groups.unknown.push(num);
-      continue;
-    }
-    ok += 1;
     if (r.isBanned) groups.banned.push(num);
     else if (r.isCloneBlocked) groups.clone.push(num);
     else if (r.anyCooldown || r.softFallback) {
-      const timerCandidates = [r.primaryTimer, r.channels && r.channels.sms, r.channels && r.channels.voice, r.channels && r.channels.flash]
-        .filter((timer) => timer && Number(timer.rawSeconds) > 0)
-        .sort((a, b) => Number(b.rawSeconds) - Number(a.rawSeconds));
-      const timer = timerCandidates[0];
-      groups.cooldown.push({
-        number: num,
-        duration: timer ? (timer.uiTimer || timer.formatted || 'durasi tersedia') : 'durasi belum diketahui'
-      });
+      groups.cooldown.push(num);
     } else if (r.smsOptionMissing || (r.smsAvailable === false && !r.isReady && !r.waOldEligible)) {
       groups.smsUnavailable.push(num);
     } else {
@@ -410,7 +403,7 @@ async function processDetection(ctx, numbers) {
   lines.push('⊘ ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ⦂ <b>' + groups.smsUnavailable.length + '</b>');
   lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.banned.length + '</b>');
   lines.push('');
-  lines.push('ᴛᴇʀᴋᴏɴғɪʀᴍᴀsɪ ⦂ <b>' + ok + '</b> · ʙᴇʟᴜᴍ ᴛᴇʀᴋᴏɴғɪʀᴍᴀsɪ ⦂ <b>' + groups.unknown.length + '</b>');
+  lines.push('sᴜᴋsᴇs ⦂ <b>' + ok + '</b> · ᴇʀʀᴏʀ ⦂ <b>0</b>');
   lines.push('');
   lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
 
@@ -422,7 +415,7 @@ async function processDetection(ctx, numbers) {
   if (groups.cooldown.length) {
     lines.push('');
     lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
-    lines.push(...groups.cooldown.map(item => '· <code>' + item.number + '</code> ⦂ ' + item.duration));
+    lines.push(...groups.cooldown.map(n => '<code>' + n + '</code>'));
   }
   if (groups.clone.length) {
     lines.push('');
@@ -438,12 +431,6 @@ async function processDetection(ctx, numbers) {
     lines.push('');
     lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
     lines.push(...groups.banned.map(n => '<code>' + n + '</code>'));
-  }
-  if (groups.unknown.length) {
-    lines.push('');
-    lines.push('⚠ <b>ʜᴀsɪʟ ʙᴇʟᴜᴍ ᴛᴇʀᴋᴏɴғɪʀᴍᴀsɪ</b>');
-    lines.push(...groups.unknown.map(n => '<code>' + n + '</code>'));
-    lines.push('ᴊᴀʀɪɴɢᴀɴ ᴀᴛᴀᴜ ʀᴇsᴘᴏɴ ʟᴀʏᴀɴᴀɴ ᴛɪᴅᴀᴋ ᴄᴜᴋᴜᴘ ᴜɴᴛᴜᴋ ᴍᴇɴᴇɴᴛᴜᴋᴀɴ sᴛᴀᴛᴜs.');
   }
 
   lines.push('');
@@ -485,18 +472,19 @@ bot.on('text', async (ctx, next) => {
     return ctx.reply('⚠️ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ ⦂ <code>+6281234567890</code>', { parse_mode: 'HTML' });
   }
 
-  if (phones.length !== 1) {
-    return ctx.reply('⚠ <b>ғᴏʀᴍᴀᴛ ᴘᴇsᴀɴ ᴛɪᴅᴀᴋ sᴇsᴜᴀɪ</b>\n\nᴘᴇsᴀɴ ɪɴɪ ᴍᴇᴍᴜᴀᴛ ʟᴇʙɪʜ ᴅᴀʀɪ sᴀᴛᴜ ɴᴏᴍᴏʀ. ᴘɪsᴀʜᴋᴀɴ ᴅᴀɴ ᴘᴇʀɪᴋsᴀ sᴇᴄᴀʀᴀ ᴛᴇʀᴘɪsᴀʜ.', { parse_mode: 'HTML' });
+  const user = await getEffectiveUser(ctx);
+  const isVip = isOwner(ctx) || isUserVip(user);
+  const max = isVip ? 30 : 1;
+  const list = phones.slice(0, max);
+
+  if (!isVip && phones.length > 1) {
+    return ctx.reply('⚠️ <b>ʟɪᴍɪᴛ ғʀᴇᴇ</b>\n\nᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ 1 ɴᴏᴍᴏʀ. ᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ bulk 30 ɴᴏᴍᴏʀ.', {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([[Markup.button.callback('✧ BELI PREMIUM', 'store:premium')]])
+    });
   }
 
-  const cooldownKey = 'detect:request_limit:' + ctx.from.id;
-  const isCoolingDown = await redis.get(cooldownKey);
-  if (isCoolingDown) {
-    return ctx.reply('⏳ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴀsɪʜ ᴅɪʙᴀᴛᴀsɪ</b>\n\nᴛᴜɴɢɢᴜ 30 ᴅᴇᴛɪᴋ sᴇʙᴇʟᴜᴍ ᴍᴇᴍᴜʟᴀɪ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ʙᴀʀᴜ.', { parse_mode: 'HTML' });
-  }
-  await redis.set(cooldownKey, '1', { ex: 30 });
-
-  return processDetection(ctx, phones);
+  return processDetection(ctx, list);
 });
 
 if (require.main === module) {
