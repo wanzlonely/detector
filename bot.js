@@ -303,7 +303,15 @@ async function processDetection(ctx, numbers) {
 
     try {
       const cached = await getCachedCheckResult(raw);
-      if (cached && !cached.error && cached.accountStatus && cached.accountStatus !== 'UNKNOWN' && !cached.needsRecheck) {
+      // Never reuse cooldown / soft / weak results — status must refresh on every check
+      const cacheUsable = cached && !cached.error && cached.accountStatus &&
+        cached.accountStatus !== 'UNKNOWN' &&
+        !cached.needsRecheck &&
+        !cached.softFallback &&
+        !cached.anyCooldown &&
+        cached.accountStatus !== 'IN_COOLDOWN' &&
+        !cached.isBanned;
+      if (cacheUsable && (cached.isReady || cached.isCloneBlocked || cached.smsOptionMissing)) {
         await addCheckLog(userId, cached.formattedNumber || raw, cached.accountStatus || cached.description || '-', cached.proxyTag || cached.proxyInfo || '-');
         return cached;
       }
@@ -312,7 +320,12 @@ async function processDetection(ctx, numbers) {
     try {
       const result = await checkWhatsAppCooldown(raw, waveOpts || {});
       if (result && !result.error) {
-        if (!result.needsRecheck && result.accountStatus !== 'UNKNOWN') {
+        const canCache = !result.needsRecheck &&
+          result.accountStatus !== 'UNKNOWN' &&
+          !result.softFallback &&
+          !result.anyCooldown &&
+          result.accountStatus !== 'IN_COOLDOWN';
+        if (canCache) {
           await setCachedCheckResult(raw, result);
         }
         await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
@@ -358,7 +371,6 @@ async function processDetection(ctx, numbers) {
     let cursor = 0;
     stageProcessed = 0;
     stageTotal = indexes.length || 1;
-    // Lower concurrency on large batches to reduce WA rate-limit false cooldowns
     const CONCURRENCY_SAFE = Math.min(indexes.length >= 12 ? 4 : 6, indexes.length || 1);
 
     async function worker(workerId) {
@@ -383,8 +395,6 @@ async function processDetection(ctx, numbers) {
 
   const allIdx = Array.from({ length: total }, (_, i) => i);
 
-  // Mass scan MUST use full dual-probe (same path as single number).
-  // exist-only triage was fast but produced wrong bulk classifications.
   if (total >= 8) {
     currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
     await runPool(allIdx, { wave: 'full' });
