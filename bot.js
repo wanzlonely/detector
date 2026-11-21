@@ -47,6 +47,14 @@ bot.use(async (ctx, next) => {
 });
 
 const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
+
+/** Telegram Bot API styled callback buttons (primary/success/danger) when supported */
+function styledCallback(text, data, style) {
+  const btn = Markup.button.callback(text, data);
+  if (style) btn.style = style;
+  return btn;
+}
+
 const USER_KEYBOARD = Markup.keyboard([
   [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
   [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
@@ -119,7 +127,7 @@ function buildStoreKeyboard() {
   const rows = [];
   for (let i = 0; i < packages.length; i += 2) {
     rows.push(packages.slice(i, i + 2).map((pkg) =>
-      Markup.button.callback(pkg.durationLabel + ' · ' + formatIDR(pkg.price), 'pkg:' + pkg.id)
+      styledCallback(pkg.durationLabel + ' · ' + formatIDR(pkg.price), 'pkg:' + pkg.id, 'primary')
     ));
   }
   return Markup.inlineKeyboard(rows);
@@ -136,8 +144,8 @@ async function showPackage(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPackageDetailCard({ user, pkg });
   const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id)],
-    [Markup.button.callback('↶ KEMBALI KE PAKET', 'store:premium')]
+    [styledCallback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success')],
+    [styledCallback('↶ KEMBALI', 'store:premium', 'danger')]
   ]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
@@ -145,7 +153,7 @@ async function showPackage(ctx, pkg, edit) {
 async function showCheckout(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPaymentMaintenanceCard({ user, pkg });
-  const keyboard = Markup.inlineKeyboard([[Markup.button.callback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier)]]);
+  const keyboard = Markup.inlineKeyboard([[styledCallback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier, 'danger')]]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
 }
@@ -177,7 +185,7 @@ bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
 
 async function startContact(ctx) {
   await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
-  return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\nᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ.\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('× BATALKAN', 'contact:cancel')]]) });
+  return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\nᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ.\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('× BATALKAN', 'contact:cancel', 'danger')]]) });
 }
 bot.hears('✉︎ HUBUNGI ADMIN', startContact);
 bot.action('contact:cancel', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await redis.del('contact:state:' + ctx.from.id); return ctx.reply('✕ <b>ᴘᴇɴɢɪʀɪᴍᴀɴ ᴘᴇsᴀɴ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' }); });
@@ -195,7 +203,7 @@ async function showReferral(ctx) {
   const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
   const stats = await getReferralStats(ctx.from.id);
   const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
-  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl)], [Markup.button.callback('◈ TUKAR KOIN', 'referral:menu')]]) });
+  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl)], [styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]]) });
 }
 bot.hears('◈ STATUS', showStatus);
 bot.hears('♛ LEADERBOARD', showLeaderboard);
@@ -204,17 +212,35 @@ bot.hears('✧ BELI PREMIUM', (ctx) => showStore(ctx, false));
 
 function extractPhoneCandidates(text) {
   if (!text) return [];
-  const lines = String(text).split(/[\n,;]+/).map(l => l.trim()).filter(Boolean);
+  const raw = String(text);
   const phones = [];
   const seen = new Set();
-  for (const line of lines) {
-    let cleaned = line.replace(/[^\d+\-\s().]/g, '').trim();
-    if (!cleaned) continue;
-    const digits = cleaned.replace(/\D/g, '');
+
+  const pattern = /(?:\+|00)?[\d][\d\s\-().]{6,20}\d/g;
+  let match;
+  while ((match = pattern.exec(raw)) !== null) {
+    let token = match[0].trim();
+    token = token.replace(/[^\d+]+$/g, '').replace(/^[^\d+]+/g, '');
+    const hasPlus = token.startsWith('+') || token.startsWith('00');
+    let digits = token.replace(/\D/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
     if (digits.length < 8 || digits.length > 15) continue;
+    if (digits.length <= 4) continue;
+    if (/^(19|20)\d{2}$/.test(digits)) continue;
     if (seen.has(digits)) continue;
     seen.add(digits);
-    phones.push(cleaned);
+    phones.push(hasPlus || digits.length >= 10 ? ('+' + digits) : digits);
+  }
+
+  if (!phones.length) {
+    const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      const digits = line.replace(/\D/g, '');
+      if (digits.length < 8 || digits.length > 15) continue;
+      if (seen.has(digits)) continue;
+      seen.add(digits);
+      phones.push(line.includes('+') ? ('+' + digits) : digits);
+    }
   }
   return phones;
 }
@@ -226,39 +252,59 @@ async function startDetect(ctx) {
   if (!isVip && remaining <= 0) {
     return ctx.reply(
       '⚠️ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\n\nᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴍᴇɴɢɢᴜɴᴀᴋᴀɴ 3 ᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs ʜᴀʀɪ ɪɴɪ.\nᴜᴘɢʀᴀᴅᴇ ᴋᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛᴀɴᴘᴀ ʙᴀᴛᴀs.',
-      { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('✧ BELI PREMIUM', 'store:premium')]]) }
+      { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]]) }
     );
   }
   await redis.set('detect:mode:' + ctx.from.id, 'waiting_numbers', { ex: 300 });
   const limitHint = isVip ? 'ᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ / ᴋɪʀɪᴍᴀɴ' : '1 ɴᴏᴍᴏʀ (ғʀᴇᴇ)';
   return ctx.reply(
-    '⌖ <b>ᴅᴇᴛᴇᴋsɪ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</b>\n\n' +
-    'ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴘᴇʀɪᴋsᴀ.\n' +
-    'ʙɪsᴀ sᴀᴛᴜ ɴᴏᴍᴏʀ ᴀᴛᴀᴜ ʙᴇʀʙᴀʀɪs.\n\n' +
-    'ᴄᴏɴᴛᴏʜ ⦂\n<code>+6281234567890</code>\n<code>081234567890</code>\n\n' +
-    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3') + '</b>\n' +
-    '▸ ʟɪᴍɪᴛ ⦂ <b>' + limitHint + '</b>\n\n' +
-    'ᴋᴇᴛɪᴋ /cancel ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.',
-    { parse_mode: 'HTML' }
+    '✨ <b>ᴅᴇᴛᴇᴋsɪ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</b>\n' +
+    '━━━━━━━━━━━━━━━━━━━━\n\n' +
+    '📥 ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴘᴇʀɪᴋsᴀ.\n' +
+    'ʙɪsᴀ sᴀᴛᴜ ʙᴀʀɪs, ʙᴜʟᴋ, ᴀᴛᴀᴜ ᴛᴇᴍᴘᴇʟ ᴅᴀʀɪ ᴄᴀᴛᴀᴛᴀɴ.\n' +
+    'ʙᴏᴛ ᴏᴛᴏᴍᴀᴛɪs ᴍᴇɴɢᴀᴍʙɪʟ ᴀɴɢᴋᴀ sᴀᴊᴀ.\n\n' +
+    '📌 <b>ᴄᴏɴᴛᴏʜ</b>\n' +
+    '<code>+6281234567890</code>\n' +
+    '<code>081234567890</code>\n' +
+    '<code>+22956196321 (Low) · Jul 2024</code>\n\n' +
+    '💎 ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3') + '</b>\n' +
+    '📦 ʟɪᴍɪᴛ ⦂ <b>' + limitHint + '</b>\n\n' +
+    '⏹ ᴋᴇᴛɪᴋ /cancel ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.',
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [styledCallback('⏹ Batal', 'detect:cancel_prompt', 'danger')]
+      ])
+    }
   );
 }
 bot.hears('⌖ DETECT', startDetect);
 bot.command('detect', startDetect);
+bot.action('detect:cancel_prompt', async (ctx) => {
+  await ctx.answerCbQuery('Dibatalkan').catch(() => {});
+  await redis.del('detect:mode:' + ctx.from.id);
+  return ctx.reply('⏹ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+});
 
 function buildProgressBar(pct) {
   const filled = Math.round(pct / 10);
   return '●'.repeat(filled) + '○'.repeat(10 - filled);
 }
 
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+let spinnerTick = 0;
+
 function buildProgressText(processed, total, stageLabel) {
   const safeTotal = total > 0 ? total : 1;
   const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
   const pct = Math.round((safeProcessed / safeTotal) * 100);
   const title = stageLabel || 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+  const spin = SPINNER[spinnerTick++ % SPINNER.length];
   return (
-    '⟳ <b>' + title + '</b>\n\n' +
-    buildProgressBar(pct) + '  ' + pct + '%\n' +
-    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ'
+    spin + ' <b>' + title + '</b>\n' +
+    '━━━━━━━━━━━━━━━━━━━━\n\n' +
+    buildProgressBar(pct) + '  <b>' + pct + '%</b>\n' +
+    '📊 ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ'
   );
 }
 
@@ -352,10 +398,10 @@ async function processDetection(ctx, numbers) {
     let cursor = 0;
     stageProcessed = 0;
     stageTotal = indexes.length || 1;
-    const CONCURRENCY_SAFE = Math.min(indexes.length >= 12 ? 4 : 6, indexes.length || 1);
+    const CONCURRENCY_SAFE = Math.min(indexes.length >= 16 ? 5 : (indexes.length >= 8 ? 6 : 8), indexes.length || 1);
 
     async function worker(workerId) {
-      if (workerId > 0) await sleep(workerId * 100);
+      if (workerId > 0) await sleep(workerId * 60);
       while (cursor < indexes.length) {
         const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
         if (stop) return;
@@ -450,10 +496,11 @@ async function processDetection(ctx, numbers) {
   }
 
   const lines = [];
-  lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
+  lines.push('✅ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
+  lines.push('━━━━━━━━━━━━━━━━━━━━');
   lines.push('');
-  lines.push(buildProgressBar(100) + ' 100%');
-  lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
+  lines.push(buildProgressBar(100) + ' <b>100%</b>');
+  lines.push('📊 ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
   lines.push('');
   lines.push('✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ ⦂ <b>' + groups.ready.length + '</b>');
   lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
@@ -541,7 +588,7 @@ bot.on('text', async (ctx, next) => {
   if (!isVip && phones.length > 1) {
     return ctx.reply('⚠️ <b>ʟɪᴍɪᴛ ғʀᴇᴇ</b>\n\nᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ 1 ɴᴏᴍᴏʀ. ᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ bulk 30 ɴᴏᴍᴏʀ.', {
       parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([[Markup.button.callback('✧ BELI PREMIUM', 'store:premium')]])
+      ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
     });
   }
 
