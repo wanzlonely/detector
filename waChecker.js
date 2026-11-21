@@ -134,7 +134,6 @@ function extractChannelTimers(existRaw, codeRaw) {
   const code = codeRaw || {};
   const existNoRoutes = exist.reason === 'no_routes' || exist.reason === 'no_route';
   const codeNoRoutes = code.reason === 'no_routes' || code.reason === 'no_route';
-
   const existSms = existNoRoutes ? 0 : Math.max(num(exist.sms_wait), num(exist.send_sms_wait), num(exist.sms_cooldown));
   const codeSmsRaw = codeNoRoutes ? 0 : Math.max(num(code.sms_wait), num(code.send_sms_wait), num(code.sms_cooldown));
   const existVoice = Math.max(num(exist.voice_wait), num(exist.voice_cooldown));
@@ -146,17 +145,14 @@ function extractChannelTimers(existRaw, codeRaw) {
   const waOldWait = Math.max(num(exist.wa_old_wait), num(exist.wa_old_cooldown), num(code.wa_old_wait), num(code.wa_old_cooldown));
   const existRetry = existNoRoutes ? 0 : num(exist.retry_after);
   const codeRetry = codeNoRoutes ? 0 : num(code.retry_after);
-
   const isCodeSent = code.status === 'sent' || code.status === 'ok';
   const codeMethod = String(code.method || code.login_method || '').toLowerCase();
   const isWaOldMethod = codeMethod.includes('wa_old');
-
   const isWaOldEcho =
     existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 300 &&
     (isCodeSent || isWaOldMethod ||
       (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 8) ||
       (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 8 && num(code.send_sms_wait) === 0));
-
   let smsSeconds = 0;
   if (existSms > 0) smsSeconds = existSms;
   else if (!isWaOldEcho && codeSmsRaw > 0) {
@@ -164,18 +160,15 @@ function extractChannelTimers(existRaw, codeRaw) {
     else smsSeconds = codeSmsRaw;
   }
   if (smsSeconds === 0 && !isWaOldEcho && existRetry > 30) smsSeconds = existRetry;
-
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
   let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
   let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
   if (voiceWait >= 240 && existVoice === 0 && isWaOldMethod) voiceWait = 0;
   if (flashWait >= 240 && existFlash === 0 && isWaOldMethod) flashWait = 0;
-
   const waOldEligible =
     Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1 ||
     Boolean(exist.wa_old_device_name || code.wa_old_device_name);
   const deviceName = exist.wa_old_device_name || code.wa_old_device_name || exist.device_name || code.device_name || null;
-
   return {
     sms: smsSeconds, voice: voiceWait, flash: flashWait, email: emailWait, wa_old: waOldWait,
     retry_after: Math.max(existRetry, codeRetry),
@@ -266,7 +259,7 @@ async function runDualProbe(payloads, headers, countryIso2) {
     try {
       existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
     } catch (_) {}
-    await sleep(120);
+    await sleep(80);
     try {
       codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
     } catch (_) {}
@@ -284,27 +277,19 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const engineState = String((parsed && parsed.state) || '').toUpperCase();
   const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
   const smsAvailable = resolveSmsAvailability(existResponse, codeResponse, timers, patternHints);
-
   const channels = {
-    sms: buildChannel(timers.sms),
-    voice: buildChannel(timers.voice),
-    flash: buildChannel(timers.flash),
-    email: buildChannel(timers.email),
-    wa_old: buildChannel(timers.wa_old)
+    sms: buildChannel(timers.sms), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash),
+    email: buildChannel(timers.email), wa_old: buildChannel(timers.wa_old)
   };
-
   const engineReady = Boolean(parsed && parsed.isReady);
   const engineCooldown = Boolean(parsed && parsed.isCooldown);
   const engineClone = Boolean(parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock));
   const engineSecurity = Boolean(parsed && parsed.isSecurityBlock);
-
   const liveSmsWait = timers.exist_sms > 0 ? timers.exist_sms : timers.sms;
   const hasLiveSms = liveSmsWait > 0;
   const hasLiveVoice = timers.voice > 15;
   const hasLiveWait = hasLiveSms || hasLiveVoice || timers.flash > 15 || timers.email > 15;
-
   const reasons = [];
-
   let isBanned = detectBanSignals(existResponse, codeResponse, parsed, patternHints);
   if (isBanned && (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
     if (!patternHints.includes('HARD_BAN')) {
@@ -317,22 +302,18 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   }
   if (engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN') isBanned = false;
   if (isBanned) reasons.push('ban_signal');
-
   const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
   const isCloneBlocked = (cloneSig.isCloneBlocked || engineClone) && !isBanned;
   const isSecurityBlock = (cloneSig.isSecurityBlock || engineSecurity) && !isBanned && !isCloneBlocked;
   if (isCloneBlocked) reasons.push('clone_or_unofficial');
   if (isSecurityBlock) reasons.push('security_block');
-
   if (hasLiveSms) reasons.push('exist_sms_wait:' + liveSmsWait);
   else if (hasLiveVoice) reasons.push('voice_wait:' + timers.voice);
   else if (hasLiveWait) reasons.push('other_channel_wait');
-
   const meaningfulCooldown =
     !isBanned && !isCloneBlocked && !isSecurityBlock &&
     (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT') ||
       engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN');
-
   const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
   const hasOpenPath =
     engineReady || smsAvailable === true || timers.wa_old_eligible || timers.is_code_sent ||
@@ -340,23 +321,17 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     patternHints.includes('METHOD_NOT_ALLOWED_SOFT') ||
     (smsAvailable !== false && !timers.exist_no_routes) ||
     (existSmsOpen && smsAvailable !== false);
-
   let isReady =
     !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && !hasLiveWait &&
     (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY' || engineState === 'REGISTERED_ON_DEVICE');
-
   if (!isBanned && !isCloneBlocked && !isSecurityBlock && existSmsOpen && !hasLiveWait && (engineReady || smsAvailable !== false)) {
-    isReady = true;
-    reasons.push('exist_sms_open');
+    isReady = true; reasons.push('exist_sms_open');
   }
   if (engineReady && !isBanned && !isCloneBlocked && !isSecurityBlock && !hasLiveWait) {
-    isReady = true;
-    reasons.push('engine_ready');
+    isReady = true; reasons.push('engine_ready');
   }
   if (hasLiveWait) isReady = false;
-
   const effectiveCooldown = isReady ? false : (meaningfulCooldown || hasLiveWait);
-
   const smsOptionMissing =
     !isBanned && !isCloneBlocked && !isSecurityBlock && !effectiveCooldown && !isReady &&
     (smsAvailable === false || engineState === 'NO_ROUTES' || patternHints.includes('NO_ROUTES')) &&
@@ -364,7 +339,6 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   if (smsOptionMissing) reasons.push('sms_option_missing');
   if (isReady) reasons.push('ready');
   if (effectiveCooldown) reasons.push('cooldown');
-
   let description = (parsed && parsed.description) || '';
   if (isBanned) description = 'Nomor dibatasi / diblokir oleh WhatsApp.';
   else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone).';
@@ -377,7 +351,6 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
       ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
       : 'Nomor siap menerima verifikasi.';
   } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
-
   let accountStatus = 'UNKNOWN';
   if (isBanned) accountStatus = 'BANNED';
   else if (isCloneBlocked) accountStatus = 'CLONE_OR_UNOFFICIAL_APP_BLOCK';
@@ -385,7 +358,6 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
   else if (isReady) accountStatus = timers.wa_old_eligible ? 'REGISTERED_ON_DEVICE' : 'AVAILABLE_READY';
   else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
-
   let confidence = 0.55;
   if (isBanned && patternHints.includes('HARD_BAN')) confidence = 0.96;
   else if (isBanned) confidence = 0.9;
@@ -400,23 +372,17 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   if (meta && meta.existOnly && !hasLiveSms && !isBanned) confidence -= 0.06;
   if (patternHints.includes('WA_OLD_ECHO') && isReady) confidence = Math.max(confidence, 0.88);
   confidence = Math.max(0.2, Math.min(0.99, confidence));
-
   const ordered = [channels.sms, channels.voice, channels.flash, channels.email].filter((t) => t && t.rawSeconds > 0);
   const primary = ordered[0] || buildChannel(0);
-
   const existClear =
-    Boolean(meta && meta.existOnly) &&
-    confidence >= EXIST_CLEAR_CONFIDENCE &&
-    accountStatus !== 'UNKNOWN' &&
+    Boolean(meta && meta.existOnly) && confidence >= EXIST_CLEAR_CONFIDENCE && accountStatus !== 'UNKNOWN' &&
     (isBanned || isCloneBlocked || hasLiveSms || (isReady && existSmsOpen));
-
   return {
     formattedNumber: normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone),
     region: (parsed && parsed.country) || payloads.phoneInfo?.country_name || '-',
     accountStatus, isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
     anyCooldown: effectiveCooldown, description, deviceName: timers.device_name || null, waOldEligible: timers.wa_old_eligible,
-    channels,
-    primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
+    channels, primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
     proxyInfo: proxyMode + ' · ' + sessionTag, proxyTag: sessionTag, proxyCountry: countryIso2,
     rawStatus: (parsed && parsed.rawStatus) || existResponse.status || codeResponse.status || null,
     rawReason: (parsed && parsed.rawReason) || existResponse.reason || codeResponse.reason || null,
@@ -476,10 +442,8 @@ async function checkWhatsAppCooldown(rawNumber, options) {
   const payloads = await WADetector.buildDualPayloads(String(rawNumber));
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
   payloads.rawNumber = String(rawNumber);
-
   const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
   const headers = buildHeaders(payloads.userAgent, countryIso2);
-
   if (opts.wave === 'exist') {
     try {
       const probe = await runExistOnlyProbe(payloads, headers, countryIso2);
@@ -488,7 +452,6 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       return softFallback(rawNumber, payloads, countryIso2, err);
     }
   }
-
   if (!(opts.wave === 'full' || opts.wave === 'dual')) {
     try {
       const existProbe = await runExistOnlyProbe(payloads, headers, countryIso2);
@@ -498,7 +461,6 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       }
     } catch (_) {}
   }
-
   const rounds = [];
   let lastError = null;
   for (let attempt = 1; attempt <= INTERNAL_RETRIES; attempt++) {
@@ -525,7 +487,6 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       }
     }
   }
-
   if (rounds.length >= 2) return { ...mergeConsensus(rounds), probeMode: 'consensus' };
   if (rounds.length === 1 && rounds[0].accountStatus !== 'UNKNOWN') {
     return { ...rounds[0], consensusRounds: 1, probeMode: 'dual' };
