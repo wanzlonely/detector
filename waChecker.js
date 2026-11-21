@@ -240,7 +240,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const isCloneBlocked = (cloneSig.isCloneBlocked || engineClone) && !isBanned;
   const isSecurityBlock = (cloneSig.isSecurityBlock || engineSecurity) && !isBanned && !isCloneBlocked;
   const meaningfulCooldown = !isBanned && !isCloneBlocked && !isSecurityBlock && (engineCooldown || timerCooldown || engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN');
-  const hasOpenPath = engineReady || smsAvailable === true || timers.wa_old_eligible || timers.is_code_sent || (smsAvailable !== false && !timers.exist_no_routes);
+  const hasOpenPath = engineReady || smsAvailable === true || timers.wa_old_eligible || timers.is_code_sent;
   let isReady = !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY' || engineState === 'REGISTERED_ON_DEVICE');
   if (engineReady && !isBanned && !isCloneBlocked && !isSecurityBlock) isReady = true;
   const smsOptionMissing = !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && !isReady && (smsAvailable === false || engineState === 'NO_ROUTES') && !timers.wa_old_eligible;
@@ -302,13 +302,13 @@ async function checkWhatsAppCooldown(rawNumber) {
   return {
     formattedNumber: normalizeDisplayNumber(rawNumber, payloads.phoneInfo, null),
     region: payloads.phoneInfo?.country_name || '-',
-    accountStatus: 'IN_COOLDOWN', isBanned: false, isCloneBlocked: false, isSecurityBlock: false, isReady: false,
-    smsAvailable: null, smsOptionMissing: false, anyCooldown: true,
-    description: 'Cooldown aktif (respons tidak stabil, coba ulang nanti).',
+    accountStatus: 'UNKNOWN', isBanned: false, isCloneBlocked: false, isSecurityBlock: false, isReady: false,
+    smsAvailable: null, smsOptionMissing: false, anyCooldown: false, error: true,
+    description: 'Status belum dapat dipastikan karena respons layanan tidak lengkap atau gagal diterima.',
     deviceName: null, waOldEligible: false,
     channels: { sms: buildChannel(0), wa_old: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0) },
     primaryTimer: { rawSeconds: 0, uiTimer: '0s', humanTime: 'Ready' },
-    proxyInfo: 'FALLBACK', proxyTag: 'FALLBACK', proxyCountry: countryIso2,
+    proxyInfo: 'DIRECT', proxyTag: 'DIRECT', proxyCountry: countryIso2,
     rawStatus: null, rawReason: lastError ? String(lastError.message || lastError).slice(0, 120) : null,
     isWaOldEcho: false, partialResponse: true, softFallback: true
   };
