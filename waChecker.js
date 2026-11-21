@@ -125,7 +125,6 @@ function extractChannelTimers(existRaw, codeRaw) {
   const existNoRoutes = exist.reason === 'no_routes' || exist.reason === 'no_route';
   const codeNoRoutes = code.reason === 'no_routes' || code.reason === 'no_route';
 
-  // Prefer EXIST timers — /v2/code often mutates state and invents inflated waits
   const existSms = existNoRoutes ? 0 : Math.max(num(exist.sms_wait), num(exist.send_sms_wait), num(exist.sms_cooldown));
   const codeSmsRaw = codeNoRoutes ? 0 : Math.max(num(code.sms_wait), num(code.send_sms_wait), num(code.sms_cooldown));
   const existVoice = Math.max(num(exist.voice_wait), num(exist.voice_cooldown));
@@ -149,19 +148,12 @@ function extractChannelTimers(existRaw, codeRaw) {
       (codeVoice > 0 && Math.abs(codeSmsRaw - codeVoice) <= 8 && num(code.send_sms_wait) === 0));
 
   let smsSeconds = 0;
-  if (existSms > 0) {
-    smsSeconds = existSms;
-  } else if (!isWaOldEcho && codeSmsRaw > 0) {
-    // Inflated code-only waits (common 300) without exist confirmation → ignore
-    if (codeSmsRaw >= 240 && existSms === 0 && !num(code.send_sms_wait)) {
-      smsSeconds = 0;
-    } else {
-      smsSeconds = codeSmsRaw;
-    }
+  if (existSms > 0) smsSeconds = existSms;
+  else if (!isWaOldEcho && codeSmsRaw > 0) {
+    if (codeSmsRaw >= 240 && existSms === 0 && !num(code.send_sms_wait)) smsSeconds = 0;
+    else smsSeconds = codeSmsRaw;
   }
-  if (smsSeconds === 0 && !isWaOldEcho && existRetry > 30) {
-    smsSeconds = existRetry;
-  }
+  if (smsSeconds === 0 && !isWaOldEcho && existRetry > 30) smsSeconds = existRetry;
 
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
   let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
@@ -174,19 +166,10 @@ function extractChannelTimers(existRaw, codeRaw) {
   const deviceName = exist.wa_old_device_name || code.wa_old_device_name || exist.device_name || code.device_name || null;
 
   return {
-    sms: smsSeconds,
-    wa_old: waOldWait,
-    voice: voiceWait,
-    flash: flashWait,
-    retry_after: retryAfter,
-    wa_old_eligible: waOldEligible,
-    device_name: deviceName,
-    is_wa_old_echo: isWaOldEcho,
-    exist_no_routes: existNoRoutes,
-    code_no_routes: codeNoRoutes,
-    is_code_sent: isCodeSent,
-    exist_sms: existSms,
-    code_sms: codeSmsRaw
+    sms: smsSeconds, wa_old: waOldWait, voice: voiceWait, flash: flashWait, retry_after: retryAfter,
+    wa_old_eligible: waOldEligible, device_name: deviceName, is_wa_old_echo: isWaOldEcho,
+    exist_no_routes: existNoRoutes, code_no_routes: codeNoRoutes, is_code_sent: isCodeSent,
+    exist_sms: existSms, code_sms: codeSmsRaw
   };
 }
 
@@ -214,8 +197,7 @@ function detectBanSignals(exist, code, parsed, patternHints) {
   if (patternHints.includes('HARD_BAN')) return true;
   if (parsed && parsed.isBanned === true) return true;
   const statusBanned = exist.status === 'banned' || code.status === 'banned' || exist.reason === 'blocked' || code.reason === 'blocked' || exist.reason === 'banned' || code.reason === 'banned';
-  const hardViolation = Boolean(exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal);
-  return Boolean(statusBanned || hardViolation);
+  return Boolean(statusBanned || exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal);
 }
 
 function detectCloneSignals(exist, code, parsed) {
@@ -234,9 +216,7 @@ function resolveSmsAvailability(exist, code, timers, patternHints) {
   const eB = toBool(exist.send_sms_eligible);
   const cB = toBool(code.send_sms_eligible);
   if (eB === true || cB === true) return true;
-  if (timers.wa_old_eligible) return true;
-  if (timers.sms > 0) return true;
-  if (timers.is_code_sent) return true;
+  if (timers.wa_old_eligible || timers.sms > 0 || timers.is_code_sent) return true;
   if (patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG')) return true;
   if (patternHints.includes('NO_ROUTES') && eB === false) return false;
   if (eB === false && cB === false && timers.exist_no_routes) return false;
@@ -245,21 +225,27 @@ function resolveSmsAvailability(exist, code, timers, patternHints) {
 }
 
 async function runDualProbe(payloads, headers, countryIso2) {
+  // Sequential EXIST → CODE so live SMS wait after user OTP is visible
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    const [existSettled, codeSettled] = await Promise.allSettled([
-      postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher),
-      postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher)
-    ]);
-    const existText = existSettled.status === 'fulfilled' ? existSettled.value : null;
-    const codeText = codeSettled.status === 'fulfilled' ? codeSettled.value : null;
-    if (!existText && !codeText) {
-      const e1 = existSettled.reason && existSettled.reason.message;
-      const e2 = codeSettled.reason && codeSettled.reason.message;
-      throw new Error('Dual probe gagal: ' + (e1 || e2 || 'jaringan'));
-    }
+    let existText = null;
+    let codeText = null;
+    try {
+      existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
+    } catch (_) {}
+    await sleep(150);
+    try {
+      codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
+    } catch (_) {}
+    if (!existText && !codeText) throw new Error('Dual probe gagal: jaringan');
     return { existText, codeText, partial: !existText || !codeText };
   }, undefined, countryIso2);
-  return { existText: data.existText || null, codeText: data.codeText || null, partial: Boolean(data.partial), proxyMode, sessionTag };
+  return {
+    existText: data.existText || null,
+    codeText: data.codeText || null,
+    partial: Boolean(data.partial),
+    proxyMode,
+    sessionTag
+  };
 }
 
 async function runExistOnlyProbe(payloads, headers, countryIso2) {
@@ -284,8 +270,8 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const engineClone = Boolean(parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock));
   const engineSecurity = Boolean(parsed && parsed.isSecurityBlock);
 
-  const smsCooldownActive = channels.sms.rawSeconds > 15;
-  const otherOtpCooldown = !smsCooldownActive && (channels.voice.rawSeconds > 30 || channels.flash.rawSeconds > 30);
+  const smsCooldownActive = channels.sms.rawSeconds > 0;
+  const otherOtpCooldown = !smsCooldownActive && (channels.voice.rawSeconds > 20 || channels.flash.rawSeconds > 20);
   const timerCooldown = smsCooldownActive || otherOtpCooldown;
 
   let isBanned = detectBanSignals(existResponse, codeResponse, parsed, patternHints);
@@ -314,15 +300,21 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     (smsAvailable !== false && !timers.exist_no_routes) ||
     (existSmsOpen && smsAvailable !== false);
 
+  const liveSmsWait = Number(timers.exist_sms) > 0 ? Number(timers.exist_sms) : (Number(timers.sms) || 0);
+  const liveVoiceWait = Number(timers.voice) || 0;
+  const hasLiveWait = liveSmsWait > 0 || liveVoiceWait > 15;
+
   let isReady =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown &&
+    !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && !hasLiveWait &&
     (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY' || engineState === 'REGISTERED_ON_DEVICE');
-  if (!isBanned && !isCloneBlocked && !isSecurityBlock && existSmsOpen && !smsCooldownActive && (engineReady || smsAvailable !== false)) {
+
+  if (!isBanned && !isCloneBlocked && !isSecurityBlock && existSmsOpen && !hasLiveWait && (engineReady || smsAvailable !== false)) {
     isReady = true;
   }
-  if (engineReady && !isBanned && !isCloneBlocked && !isSecurityBlock) isReady = true;
+  if (engineReady && !isBanned && !isCloneBlocked && !isSecurityBlock && !hasLiveWait) isReady = true;
+  if (hasLiveWait) isReady = false;
 
-  const effectiveCooldown = isReady ? false : meaningfulCooldown;
+  const effectiveCooldown = isReady ? false : (meaningfulCooldown || hasLiveWait);
 
   const smsOptionMissing =
     !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && !isReady &&
@@ -341,9 +333,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     description = timers.wa_old_eligible && timers.device_name
       ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
       : 'Nomor siap menerima verifikasi.';
-  } else if (smsOptionMissing) {
-    description = 'Opsi SMS tidak tersedia untuk nomor ini.';
-  }
+  } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
 
   let accountStatus = 'UNKNOWN';
   if (isBanned) accountStatus = 'BANNED';
@@ -368,8 +358,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   confidence = Math.max(0.2, Math.min(0.99, confidence));
 
   const positiveTimers = [channels.sms.rawSeconds, channels.voice.rawSeconds, channels.flash.rawSeconds]
-    .filter((s) => Number(s) > 0)
-    .sort((a, b) => a - b);
+    .filter((s) => Number(s) > 0).sort((a, b) => a - b);
   const primarySeconds = positiveTimers.length ? positiveTimers[0] : 0;
 
   return {
