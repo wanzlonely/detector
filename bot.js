@@ -301,33 +301,10 @@ async function processDetection(ctx, numbers) {
     const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
     if (stop) return { cancelled: true };
 
+    // REALTIME: never use Redis cache — always live probe WhatsApp now
     try {
-      const cached = await getCachedCheckResult(raw);
-      // Never reuse cooldown / soft / weak results — status must refresh on every check
-      const cacheUsable = cached && !cached.error && cached.accountStatus &&
-        cached.accountStatus !== 'UNKNOWN' &&
-        !cached.needsRecheck &&
-        !cached.softFallback &&
-        !cached.anyCooldown &&
-        cached.accountStatus !== 'IN_COOLDOWN' &&
-        !cached.isBanned;
-      if (cacheUsable && (cached.isReady || cached.isCloneBlocked || cached.smsOptionMissing)) {
-        await addCheckLog(userId, cached.formattedNumber || raw, cached.accountStatus || cached.description || '-', cached.proxyTag || cached.proxyInfo || '-');
-        return cached;
-      }
-    } catch (_) {}
-
-    try {
-      const result = await checkWhatsAppCooldown(raw, waveOpts || {});
+      const result = await checkWhatsAppCooldown(raw, waveOpts || { wave: 'full' });
       if (result && !result.error) {
-        const canCache = !result.needsRecheck &&
-          result.accountStatus !== 'UNKNOWN' &&
-          !result.softFallback &&
-          !result.anyCooldown &&
-          result.accountStatus !== 'IN_COOLDOWN';
-        if (canCache) {
-          await setCachedCheckResult(raw, result);
-        }
         await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
         return result;
       }
