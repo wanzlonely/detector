@@ -291,42 +291,45 @@ async function processDetection(ctx, numbers) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async function checkOne(index, raw) {
+  async function checkOne(raw, waveOpts) {
     const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
     if (stop) return { cancelled: true };
 
     try {
       const cached = await getCachedCheckResult(raw);
-      if (cached && !cached.error && cached.accountStatus && cached.accountStatus !== 'UNKNOWN') {
+      if (cached && !cached.error && cached.accountStatus && cached.accountStatus !== 'UNKNOWN' && !cached.needsRecheck) {
         await addCheckLog(userId, cached.formattedNumber || raw, cached.accountStatus || cached.description || '-', cached.proxyTag || cached.proxyInfo || '-');
         return cached;
       }
     } catch (_) {}
 
-    let lastErr = null;
-    const maxAttempts = 3;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const stop2 = await redis.get('detect:stop:' + userId + ':' + jobId);
-      if (stop2) return { cancelled: true };
-      try {
-        const result = await checkWhatsAppCooldown(raw);
-        if (result && !result.error && result.accountStatus && result.accountStatus !== 'UNKNOWN') {
+    try {
+      const result = await checkWhatsAppCooldown(raw, waveOpts || {});
+      if (result && !result.error) {
+        if (!result.needsRecheck && result.accountStatus !== 'UNKNOWN') {
           await setCachedCheckResult(raw, result);
-          await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
-          return result;
         }
-        if (result && !result.error) {
-          await setCachedCheckResult(raw, result);
-          await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
-          return result;
-        }
-        lastErr = new Error((result && result.description) || 'Layanan tidak mengembalikan hasil pemeriksaan.');
-      } catch (err) {
-        lastErr = err;
+        await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
+        return result;
       }
-      if (attempt < maxAttempts) {
-        await sleep(350 + Math.floor(Math.random() * 450));
-      }
+    } catch (err) {
+      const digits = String(raw || '').replace(/\D/g, '');
+      const display = digits ? ('+' + digits) : String(raw || '');
+      return {
+        formattedNumber: display,
+        isBanned: false,
+        isCloneBlocked: false,
+        isReady: false,
+        anyCooldown: true,
+        smsAvailable: null,
+        smsOptionMissing: false,
+        accountStatus: 'IN_COOLDOWN',
+        error: false,
+        softFallback: true,
+        confidence: 0.35,
+        needsRecheck: false,
+        description: (err && err.message) || 'Respons tidak stabil'
+      };
     }
 
     const digits = String(raw || '').replace(/\D/g, '');
@@ -337,30 +340,51 @@ async function processDetection(ctx, numbers) {
       isCloneBlocked: false,
       isReady: false,
       anyCooldown: true,
-      smsAvailable: null,
-      smsOptionMissing: false,
       accountStatus: 'IN_COOLDOWN',
       error: false,
       softFallback: true,
-      description: (lastErr && lastErr.message) || 'Respons tidak stabil'
+      confidence: 0.35,
+      description: 'Respons tidak stabil'
     };
   }
 
-  let nextIndex = 0;
-  const CONCURRENCY_SAFE = Math.min(6, total);
-  async function worker(workerId) {
-    if (workerId > 0) await sleep(workerId * 80);
-    while (nextIndex < total) {
-      const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
-      if (stop) return;
-      const i = nextIndex++;
-      results[i] = await checkOne(i, numbers[i]);
-      processed += 1;
-      if (processed === total || processed % 2 === 0) await updateProgress();
+  async function runPool(indexes, waveOpts) {
+    let cursor = 0;
+    const CONCURRENCY_SAFE = Math.min(6, indexes.length || 1);
+    async function worker(workerId) {
+      if (workerId > 0) await sleep(workerId * 70);
+      while (cursor < indexes.length) {
+        const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
+        if (stop) return;
+        const pos = cursor++;
+        const i = indexes[pos];
+        results[i] = await checkOne(numbers[i], waveOpts);
+        processed += 1;
+        if (processed === total || processed % 2 === 0) await updateProgress();
+      }
     }
+    await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
   }
 
-  await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
+  const allIdx = Array.from({ length: total }, (_, i) => i);
+  if (total >= 4) {
+    await runPool(allIdx, { wave: 'exist' });
+    const recheckIdx = [];
+    for (let i = 0; i < total; i++) {
+      const r = results[i];
+      if (!r || r.cancelled) continue;
+      const solidReady = r.isReady && (r.confidence || 0) >= 0.8 && !r.needsRecheck;
+      const solidBanned = r.isBanned && (r.confidence || 0) >= 0.85;
+      if (solidReady || solidBanned) continue;
+      recheckIdx.push(i);
+    }
+    if (recheckIdx.length) {
+      processed = total - recheckIdx.length;
+      await runPool(recheckIdx, { wave: 'full' });
+    }
+  } else {
+    await runPool(allIdx, { wave: 'full' });
+  }
 
   const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
   await redis.del('detect:active:' + userId);
