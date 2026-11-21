@@ -1,8 +1,7 @@
 const WADetector = require('./waEngine');
-const { executeWithProxyRotation } = require('./proxyManager');
 
 const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 10000);
-const INTERNAL_RETRIES = Math.min(4, Math.max(2, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 3)));
+const INTERNAL_RETRIES = 1;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -194,22 +193,25 @@ function resolveSmsAvailability(exist, code, timers) {
   return null;
 }
 
-async function runDualProbe(payloads, headers, countryIso2) {
-  const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    const [existSettled, codeSettled] = await Promise.allSettled([
-      postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher),
-      postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher)
-    ]);
-    const existText = existSettled.status === 'fulfilled' ? existSettled.value : null;
-    const codeText = codeSettled.status === 'fulfilled' ? codeSettled.value : null;
-    if (!existText && !codeText) {
-      const e1 = existSettled.reason && existSettled.reason.message;
-      const e2 = codeSettled.reason && codeSettled.reason.message;
-      throw new Error('Dual probe gagal: ' + (e1 || e2 || 'jaringan'));
-    }
-    return { existText, codeText, partial: !existText || !codeText };
-  }, undefined, countryIso2);
-  return { existText: data.existText || null, codeText: data.codeText || null, partial: Boolean(data.partial), proxyMode, sessionTag };
+async function runDualProbe(payloads, headers) {
+  const [existSettled, codeSettled] = await Promise.allSettled([
+    postWithTimeout(payloads.exist.url, payloads.exist.body, headers, undefined),
+    postWithTimeout(payloads.code.url, payloads.code.body, headers, undefined)
+  ]);
+  const existText = existSettled.status === 'fulfilled' ? existSettled.value : null;
+  const codeText = codeSettled.status === 'fulfilled' ? codeSettled.value : null;
+  if (!existText && !codeText) {
+    const e1 = existSettled.reason && existSettled.reason.message;
+    const e2 = codeSettled.reason && codeSettled.reason.message;
+    throw new Error('Pemeriksaan langsung gagal: ' + (e1 || e2 || 'jaringan'));
+  }
+  return {
+    existText,
+    codeText,
+    partial: !existText || !codeText,
+    proxyMode: 'DIRECT',
+    sessionTag: 'DIRECT'
+  };
 }
 
 function classifyFromResponses(payloads, existText, codeText, proxyMode, sessionTag, countryIso2) {
