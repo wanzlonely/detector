@@ -301,11 +301,15 @@ async function processDetection(ctx, numbers) {
     const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
     if (stop) return { cancelled: true };
 
-    // REALTIME: never use Redis cache — always live probe WhatsApp now
     try {
-      const result = await checkWhatsAppCooldown(raw, waveOpts || { wave: 'full' });
+      const result = await checkWhatsAppCooldown(raw, waveOpts || {});
       if (result && !result.error) {
-        await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
+        await addCheckLog(
+          userId,
+          result.formattedNumber || raw,
+          result.accountStatus || result.description || '-',
+          result.proxyTag || result.proxyInfo || '-'
+        );
         return result;
       }
     } catch (err) {
@@ -351,7 +355,7 @@ async function processDetection(ctx, numbers) {
     const CONCURRENCY_SAFE = Math.min(indexes.length >= 12 ? 4 : 6, indexes.length || 1);
 
     async function worker(workerId) {
-      if (workerId > 0) await sleep(workerId * 110);
+      if (workerId > 0) await sleep(workerId * 100);
       while (cursor < indexes.length) {
         const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
         if (stop) return;
@@ -372,27 +376,26 @@ async function processDetection(ctx, numbers) {
 
   const allIdx = Array.from({ length: total }, (_, i) => i);
 
-  if (total >= 8) {
-    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
-    await runPool(allIdx, { wave: 'full' });
+  if (total >= 4) {
+    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · sᴄᴀɴ ᴄᴇᴘᴀᴛ';
+    await runPool(allIdx, { wave: 'exist' });
 
-    const recheckIdx = [];
+    const needFull = [];
     for (let i = 0; i < total; i++) {
       const r = results[i];
       if (!r || r.cancelled) continue;
       const conf = Number(r.confidence) || 0;
-      const weak =
-        r.needsRecheck ||
-        r.softFallback ||
-        r.accountStatus === 'UNKNOWN' ||
-        conf < 0.72 ||
-        (r.anyCooldown && !(r.primaryTimer && r.primaryTimer.rawSeconds > 0));
-      if (weak) recheckIdx.push(i);
+      const clearLiveCooldown = r.anyCooldown && r.primaryTimer && r.primaryTimer.rawSeconds > 0 && conf >= 0.82;
+      const clearBan = r.isBanned && conf >= 0.88;
+      const clearReady = r.isReady && r.existClear && conf >= 0.82;
+      const clearClone = r.isCloneBlocked && conf >= 0.85;
+      if (clearLiveCooldown || clearBan || clearReady || clearClone) continue;
+      needFull.push(i);
     }
 
-    if (recheckIdx.length) {
-      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴜʟᴀɴɢ';
-      await runPool(recheckIdx, { wave: 'full' });
+    if (needFull.length) {
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴅᴀʟᴀᴍ';
+      await runPool(needFull, { wave: 'full' });
     } else {
       currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · sᴇʟᴇsᴀɪ';
       stageProcessed = total;
@@ -400,7 +403,7 @@ async function processDetection(ctx, numbers) {
       await updateProgress();
     }
   } else {
-    currentStageLabel = total >= 4 ? 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+    currentStageLabel = total > 1 ? 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
     await runPool(allIdx, { wave: 'full' });
   }
 
@@ -414,13 +417,14 @@ async function processDetection(ctx, numbers) {
   }
 
   function pickCooldownDuration(r) {
+    const ch = r && r.channels;
     const candidates = [
+      ch && ch.sms,
       r && r.primaryTimer,
-      r && r.channels && r.channels.sms,
-      r && r.channels && r.channels.voice,
-      r && r.channels && r.channels.flash
-    ].filter((t) => t && Number(t.rawSeconds) > 0)
-      .sort((a, b) => Number(b.rawSeconds) - Number(a.rawSeconds));
+      ch && ch.voice,
+      ch && ch.flash,
+      ch && ch.email
+    ].filter((t) => t && Number(t.rawSeconds) > 0);
     if (!candidates.length) return null;
     return candidates[0].uiTimer || candidates[0].formatted || null;
   }
@@ -437,8 +441,7 @@ async function processDetection(ctx, numbers) {
     if (r.isBanned) groups.banned.push(num);
     else if (r.isCloneBlocked) groups.clone.push(num);
     else if (r.anyCooldown || r.softFallback) {
-      const dur = pickCooldownDuration(r);
-      groups.cooldown.push({ number: num, duration: dur });
+      groups.cooldown.push({ number: num, duration: pickCooldownDuration(r) });
     } else if (r.smsOptionMissing || (r.smsAvailable === false && !r.isReady && !r.waOldEligible)) {
       groups.smsUnavailable.push(num);
     } else {
@@ -465,12 +468,12 @@ async function processDetection(ctx, numbers) {
   if (groups.ready.length) {
     lines.push('');
     lines.push('✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪғɪᴋᴀsɪ</b>');
-    lines.push(...groups.ready.map(n => '<code>' + n + '</code>'));
+    lines.push(...groups.ready.map((n) => '<code>' + n + '</code>'));
   }
   if (groups.cooldown.length) {
     lines.push('');
     lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
-    lines.push(...groups.cooldown.map(item => {
+    lines.push(...groups.cooldown.map((item) => {
       if (item.duration) return '<code>' + item.number + '</code> — ' + item.duration;
       return '<code>' + item.number + '</code>';
     }));
@@ -478,17 +481,17 @@ async function processDetection(ctx, numbers) {
   if (groups.clone.length) {
     lines.push('');
     lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
-    lines.push(...groups.clone.map(n => '<code>' + n + '</code>'));
+    lines.push(...groups.clone.map((n) => '<code>' + n + '</code>'));
   }
   if (groups.smsUnavailable.length) {
     lines.push('');
     lines.push('⊘ <b>ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
-    lines.push(...groups.smsUnavailable.map(n => '<code>' + n + '</code>'));
+    lines.push(...groups.smsUnavailable.map((n) => '<code>' + n + '</code>'));
   }
   if (groups.banned.length) {
     lines.push('');
     lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
-    lines.push(...groups.banned.map(n => '<code>' + n + '</code>'));
+    lines.push(...groups.banned.map((n) => '<code>' + n + '</code>'));
   }
 
   lines.push('');
