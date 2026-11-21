@@ -250,12 +250,15 @@ function buildProgressBar(pct) {
   return '●'.repeat(filled) + '○'.repeat(10 - filled);
 }
 
-function buildProgressText(processed, total) {
-  const pct = total ? Math.round((processed / total) * 100) : 0;
+function buildProgressText(processed, total, stageLabel) {
+  const safeTotal = total > 0 ? total : 1;
+  const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
+  const pct = Math.round((safeProcessed / safeTotal) * 100);
+  const title = stageLabel || 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
   return (
-    '⟳ <b>ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ</b>\n\n' +
+    '⟳ <b>' + title + '</b>\n\n' +
     buildProgressBar(pct) + '  ' + pct + '%\n' +
-    'ᴘʀᴏɢʀᴇs ⦂ <b>' + processed + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ'
+    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ'
   );
 }
 
@@ -266,12 +269,15 @@ async function processDetection(ctx, numbers) {
   await redis.del('detect:mode:' + userId);
 
   const total = numbers.length;
-  let processed = 0;
   const results = new Array(total);
 
   let progressMsg;
+  let currentStageLabel = 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
+  let stageProcessed = 0;
+  let stageTotal = total;
+
   try {
-    progressMsg = await ctx.reply(buildProgressText(0, total), { parse_mode: 'HTML' });
+    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
   } catch (_) {}
 
   async function updateProgress() {
@@ -281,7 +287,7 @@ async function processDetection(ctx, numbers) {
         progressMsg.chat.id,
         progressMsg.message_id,
         undefined,
-        buildProgressText(processed, total),
+        buildProgressText(stageProcessed, stageTotal, currentStageLabel),
         { parse_mode: 'HTML' }
       );
     } catch (_) {}
@@ -350,7 +356,10 @@ async function processDetection(ctx, numbers) {
 
   async function runPool(indexes, waveOpts) {
     let cursor = 0;
+    stageProcessed = 0;
+    stageTotal = indexes.length || 1;
     const CONCURRENCY_SAFE = Math.min(6, indexes.length || 1);
+
     async function worker(workerId) {
       if (workerId > 0) await sleep(workerId * 70);
       while (cursor < indexes.length) {
@@ -359,16 +368,25 @@ async function processDetection(ctx, numbers) {
         const pos = cursor++;
         const i = indexes[pos];
         results[i] = await checkOne(numbers[i], waveOpts);
-        processed += 1;
-        if (processed === total || processed % 2 === 0) await updateProgress();
+        stageProcessed += 1;
+        if (stageProcessed === stageTotal || stageProcessed % 2 === 0 || stageProcessed === 1) {
+          await updateProgress();
+        }
       }
     }
+
     await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
+    stageProcessed = stageTotal;
+    await updateProgress();
   }
 
   const allIdx = Array.from({ length: total }, (_, i) => i);
-  if (total >= 4) {
+  const useDualWave = total >= 4;
+
+  if (useDualWave) {
+    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · ᴠᴀʟɪᴅᴀsɪ ᴛᴀʀɢᴇᴛ';
     await runPool(allIdx, { wave: 'exist' });
+
     const recheckIdx = [];
     for (let i = 0; i < total; i++) {
       const r = results[i];
@@ -378,11 +396,18 @@ async function processDetection(ctx, numbers) {
       if (solidReady || solidBanned) continue;
       recheckIdx.push(i);
     }
+
     if (recheckIdx.length) {
-      processed = total - recheckIdx.length;
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴍᴇɴᴅᴀʟᴀᴍ';
       await runPool(recheckIdx, { wave: 'full' });
+    } else {
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · sᴇʟᴇsᴀɪ';
+      stageProcessed = total;
+      stageTotal = total;
+      await updateProgress();
     }
   } else {
+    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
     await runPool(allIdx, { wave: 'full' });
   }
 
@@ -393,6 +418,18 @@ async function processDetection(ctx, numbers) {
 
   if (stopped) {
     return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+  }
+
+  function pickCooldownDuration(r) {
+    const candidates = [
+      r && r.primaryTimer,
+      r && r.channels && r.channels.sms,
+      r && r.channels && r.channels.voice,
+      r && r.channels && r.channels.flash
+    ].filter((t) => t && Number(t.rawSeconds) > 0)
+      .sort((a, b) => Number(b.rawSeconds) - Number(a.rawSeconds));
+    if (!candidates.length) return null;
+    return candidates[0].uiTimer || candidates[0].formatted || null;
   }
 
   const groups = { ready: [], cooldown: [], clone: [], banned: [], smsUnavailable: [] };
@@ -407,7 +444,8 @@ async function processDetection(ctx, numbers) {
     if (r.isBanned) groups.banned.push(num);
     else if (r.isCloneBlocked) groups.clone.push(num);
     else if (r.anyCooldown || r.softFallback) {
-      groups.cooldown.push(num);
+      const dur = pickCooldownDuration(r);
+      groups.cooldown.push({ number: num, duration: dur });
     } else if (r.smsOptionMissing || (r.smsAvailable === false && !r.isReady && !r.waOldEligible)) {
       groups.smsUnavailable.push(num);
     } else {
@@ -439,7 +477,10 @@ async function processDetection(ctx, numbers) {
   if (groups.cooldown.length) {
     lines.push('');
     lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
-    lines.push(...groups.cooldown.map(n => '<code>' + n + '</code>'));
+    lines.push(...groups.cooldown.map(item => {
+      if (item.duration) return '<code>' + item.number + '</code> — ' + item.duration;
+      return '<code>' + item.number + '</code>';
+    }));
   }
   if (groups.clone.length) {
     lines.push('');
