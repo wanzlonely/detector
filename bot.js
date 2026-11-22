@@ -65,7 +65,7 @@ const OWNER_KEYBOARD = Markup.keyboard([
   [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
   [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }],
   [{ text: '♛ OWNER CONSOLE' }],
-  [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
+  [{ text: '✚ AKTIVASI PRE PREMIUM' }, { text: '▤ BROADCAST' }]
 ]).resize().oneTime().placeholder('Pilih fungsi owner…');
 
 const OWNER_ACTION_TTL = 300;
@@ -462,9 +462,9 @@ async function processDetection(ctx, numbers) {
       groups.clone.push('· ' + num + ' ⦂ ᴀᴘʟɪᴋᴀsɪ ʀᴇsᴍɪ');
     } else if (r.isReady && !r.anyCooldown) {
       if (r.deviceName || r.waOldEligible || r.accountStatus === 'REGISTERED_ON_DEVICE') {
-        groups.ready.push('· ' + num + ' ⦂ ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ');
+        groups.ready.push({ line: '· ' + num + ' ⦂ ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ', rank: 0 });
       } else {
-        groups.ready.push('· ' + num + ' ⦂ sɪᴀᴘ');
+        groups.ready.push({ line: '· ' + num + ' ⦂ sɪᴀᴘ', rank: 1 });
       }
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
@@ -481,7 +481,8 @@ async function processDetection(ctx, numbers) {
     }
   }
 
-  // Cooldown: urut timer terkecil dulu
+  // Siap: perangkat terdaftar dulu, lalu siap. Cooldown: timer terkecil dulu
+  groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0));
   groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
 
   const lines = [];
@@ -499,7 +500,7 @@ async function processDetection(ctx, numbers) {
     lines.push('');
     lines.push('✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
     lines.push('');
-    groups.ready.forEach((n) => lines.push(n));
+    groups.ready.forEach((n) => lines.push(n.line || n));
   }
   if (groups.cooldown.length) {
     lines.push('');
