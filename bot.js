@@ -413,10 +413,9 @@ function buildProgressText(processed, total, stageLabel, currentNumber) {
   if (isDone) {
     currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ <b>sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ</b>';
   } else {
-    const spin = PROGRESS_SPINNERS[progressSpinIdx % PROGRESS_SPINNERS.length];
-    progressSpinIdx += 1;
+    const spin = PROGRESS_SPINNERS[Math.floor(safeProcessed) % PROGRESS_SPINNERS.length];
     const num = currentNumber || '-';
-    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ ' + spin + ' <code>' + num + '</code> ' + spin;
+    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ ' + spin + ' <code>' + num + '</code>';
   }
   return (
     title + '\n\n' +
@@ -440,13 +439,40 @@ async function processDetection(ctx, numbers, detectOpts) {
   let stageProcessed = 0;
   let stageTotal = total;
   let currentNumber = '-';
+  const inFlight = new Set();
+  let lastProgressEdit = 0;
+  let progressTimer = null;
   try {
     progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel, currentNumber), { parse_mode: 'HTML' });
   } catch (_) {}
-  async function updateProgress() {
+  function pickCurrentNumber() {
+    if (inFlight.size === 0) return currentNumber || '-';
+    // Ambil nomor pertama yang masih diproses (stabil, tidak loncat acak)
+    return inFlight.values().next().value || currentNumber || '-';
+  }
+  async function updateProgress(force) {
     if (!progressMsg) return;
+    const now = Date.now();
+    // Throttle edit agar tidak kelap-kelip (min 450ms)
+    if (!force && now - lastProgressEdit < 450) {
+      if (!progressTimer) {
+        progressTimer = setTimeout(() => {
+          progressTimer = null;
+          updateProgress(true).catch(() => {});
+        }, 450 - (now - lastProgressEdit));
+      }
+      return;
+    }
+    lastProgressEdit = now;
+    currentNumber = pickCurrentNumber();
     try {
-      await ctx.telegram.editMessageText(progressMsg.chat.id, progressMsg.message_id, undefined, buildProgressText(stageProcessed, stageTotal, currentStageLabel, currentNumber), { parse_mode: 'HTML' });
+      await ctx.telegram.editMessageText(
+        progressMsg.chat.id,
+        progressMsg.message_id,
+        undefined,
+        buildProgressText(stageProcessed, stageTotal, currentStageLabel, currentNumber),
+        { parse_mode: 'HTML' }
+      );
     } catch (_) {}
   }
   function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -485,9 +511,16 @@ async function processDetection(ctx, numbers, detectOpts) {
             await sleep(250 * attempt + Math.floor(Math.random() * 200));
             continue;
           }
-          if (result.softFallback && (result.isReady || result.anyCooldown || result.isBanned)) {
+          if (result.softFallback && (result.isReady || result.anyCooldown) && !result.isBanned) {
             result.softFallback = false;
             result.needsRecheck = false;
+          }
+          // Ban dari soft/network jangan dipercaya — paksa recheck path
+          if (result.isBanned && (result.softFallback || result.needsRecheck || (result.confidence || 0) < 0.8)) {
+            result.isBanned = false;
+            result.accountStatus = 'UNKNOWN';
+            result.needsRecheck = true;
+            result.softFallback = true;
           }
           if (!result.error && !result.softFallback) {
             await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-').catch(() => {});
@@ -521,11 +554,11 @@ async function processDetection(ctx, numbers, detectOpts) {
     stageProcessed = 0;
     stageTotal = indexes.length || 1;
     let conc;
-    // Target: ~30 nomor < 30 detik → concurrency lebih tinggi, tetap aman
-    if (indexes.length >= 20) conc = 10;
-    else if (indexes.length >= 12) conc = 8;
-    else if (indexes.length >= 6) conc = 8;
-    else conc = Math.min(10, indexes.length || 1);
+    // Balance kecepatan vs akurasi + stabilitas progress
+    if (indexes.length >= 20) conc = 6;
+    else if (indexes.length >= 12) conc = 5;
+    else if (indexes.length >= 6) conc = 4;
+    else conc = Math.min(3, indexes.length || 1);
     const CONCURRENCY_SAFE = Math.max(1, conc);
     async function worker(workerId) {
       if (workerId > 0) await sleep(workerId * 40);
@@ -537,11 +570,18 @@ async function processDetection(ctx, numbers, detectOpts) {
         const i = indexes[pos];
         const rawNum = numbers[i];
         const digs = String(rawNum || '').replace(/\D/g, '');
-        currentNumber = digs ? ('+' + digs) : String(rawNum || '-');
-        await updateProgress();
-        results[i] = await checkOne(numbers[i], waveOpts);
+        const displayNum = digs ? ('+' + digs) : String(rawNum || '-');
+        inFlight.add(displayNum);
+        currentNumber = pickCurrentNumber();
+        await updateProgress(false);
+        try {
+          results[i] = await checkOne(numbers[i], waveOpts);
+        } finally {
+          inFlight.delete(displayNum);
+        }
         stageProcessed += 1;
-        await updateProgress();
+        currentNumber = pickCurrentNumber();
+        await updateProgress(stageProcessed === stageTotal);
       }
     }
     await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
@@ -814,7 +854,60 @@ bot.on('text', async (ctx, next) => {
     }
     if (ownerAction === 'broadcast') {
       await clearOwnerAction(ctx.from.id);
-      return ctx.reply('▤ ʙʀᴏᴀᴅᴄᴀsᴛ ᴅɪᴛᴇʀɪᴍᴀ. (ғɪᴛᴜʀ sᴇᴘᴇɴᴜʜɴʏᴀ ᴍᴇᴍᴇʀʟᴜᴋᴀɴ ᴅᴀғᴛᴀʀ ᴜsᴇʀ ɪᴅ ᴅɪ ʀᴇᴅɪs)', { parse_mode: 'HTML' });
+      const broadcastText = text.trim();
+      if (!broadcastText) {
+        return ctx.reply('✕ ᴘᴇsᴀɴ ʙʀᴏᴀᴅᴄᴀsᴛ ᴋᴏsᴏɴɢ.', { parse_mode: 'HTML' });
+      }
+      let userIds = [];
+      try {
+        userIds = await redis.smembers('users:all') || [];
+      } catch (err) {
+        console.error('[broadcast list]', err && err.message || err);
+        return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇᴍʙᴀᴄᴀ ᴅᴀғᴛᴀʀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+      }
+      if (!userIds.length) {
+        return ctx.reply('✕ ʙᴇʟᴜᴍ ᴀᴅᴀ ᴜsᴇʀ ᴛᴇʀᴅᴀғᴛᴀʀ ᴅɪ sɪsᴛᴇᴍ.', { parse_mode: 'HTML' });
+      }
+      const statusMsg = await ctx.reply(
+        '▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ ᴅɪᴍᴜʟᴀɪ</b>\n\n' +
+        '▸ ᴛᴏᴛᴀʟ ᴛᴀʀɢᴇᴛ ⦂ <b>' + userIds.length + '</b> ᴜsᴇʀ\n' +
+        '▸ sᴛᴀᴛᴜs ⦂ ᴍᴇɴɢɪʀɪᴍ…',
+        { parse_mode: 'HTML' }
+      );
+      let ok = 0;
+      let fail = 0;
+      const payload =
+        '▤ <b>ᴘᴇɴɢᴜᴍᴜᴍᴀɴ</b>\n\n' +
+        escapeHtml(broadcastText) + '\n\n' +
+        '<i>— MetaDetect</i>';
+      for (let bi = 0; bi < userIds.length; bi++) {
+        const uid = Number(userIds[bi]);
+        if (!uid) { fail += 1; continue; }
+        try {
+          await ctx.telegram.sendMessage(uid, payload, { parse_mode: 'HTML' });
+          ok += 1;
+        } catch (_) {
+          fail += 1;
+        }
+        // Rate-limit Telegram ~25 msg/s aman
+        if (bi % 20 === 19) await new Promise((r) => setTimeout(r, 1200));
+        else await new Promise((r) => setTimeout(r, 50));
+      }
+      const doneText =
+        '▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b>\n\n' +
+        '▸ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + ok + '</b>\n' +
+        '▸ ɢᴀɢᴀʟ ⦂ <b>' + fail + '</b>\n' +
+        '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + userIds.length + '</b>';
+      try {
+        if (statusMsg) {
+          await ctx.telegram.editMessageText(statusMsg.chat.id, statusMsg.message_id, undefined, doneText, { parse_mode: 'HTML' });
+        } else {
+          await ctx.reply(doneText, { parse_mode: 'HTML' });
+        }
+      } catch (_) {
+        await ctx.reply(doneText, { parse_mode: 'HTML' });
+      }
+      return;
     }
   }
 
