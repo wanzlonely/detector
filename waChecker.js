@@ -207,42 +207,43 @@ function pickDeviceName(exist, code) {
   const sources = [exist, code];
   const keys = [
     'wa_old_device_name', 'wa_old_device', 'device_name', 'old_device_name',
-    'wa_device_name', 'registered_device_name', 'device', 'phone_model',
-    'model', 'device_model', 'wa_old_model', 'last_device_name'
+    'wa_device_name', 'registered_device_name', 'phone_model',
+    'device_model', 'wa_old_model', 'last_device_name', 'device_os_name',
+    'os_name', 'device_board', 'marketing_name'
   ];
   for (const src of sources) {
     if (!src || typeof src !== 'object') continue;
     for (const k of keys) {
       const v = src[k];
       if (v == null) continue;
-      if (typeof v === 'string' && v.trim()) return cleanDeviceName(v);
+      if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
       if (typeof v === 'object') {
-        const nested = v.name || v.device_name || v.model || v.model_name || v.device || null;
+        const nested = v.name || v.device_name || v.model || v.model_name || v.marketing_name || v.device || null;
         if (nested && String(nested).trim()) return cleanDeviceName(nested);
       }
     }
-    // nested security / account objects
-    for (const nestKey of ['account_security', 'security', 'device_info', 'wa_old']) {
+    for (const nestKey of ['account_security', 'security', 'device_info', 'wa_old', 'device', 'meta']) {
       const nest = src[nestKey];
       if (!nest || typeof nest !== 'object') continue;
       for (const k of keys) {
         const v = nest[k];
-        if (typeof v === 'string' && v.trim()) return cleanDeviceName(v);
+        if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
       }
     }
   }
-  // last resort: scan raw JSON string for known patterns near device keywords
   try {
     const blob = JSON.stringify({ exist, code });
     const patterns = [
-      /"wa_old_device_name"\s*:\s*"([^"]{2,60})"/i,
-      /"device_name"\s*:\s*"([^"]{2,60})"/i,
-      /"old_device_name"\s*:\s*"([^"]{2,60})"/i,
-      /"wa_device_name"\s*:\s*"([^"]{2,60})"/i
+      /"wa_old_device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"old_device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"wa_device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"marketing_name"\s*:\s*"([^"]{2,80})"/i,
+      /"model_name"\s*:\s*"([^"]{2,80})"/i
     ];
     for (const re of patterns) {
       const m = blob.match(re);
-      if (m && m[1] && m[1].trim()) return cleanDeviceName(m[1]);
+      if (m && m[1] && m[1].trim() && m[1].toLowerCase() !== 'null') return cleanDeviceName(m[1]);
     }
   } catch (_) {}
   return null;
