@@ -26,7 +26,7 @@ async function stopActiveDetection(ctx) {
 bot.use(async (ctx, next) => {
   const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
   const callbackData = (ctx.callbackQuery && ctx.callbackQuery.data) || '';
-  const navigationText = /^(DETECT|BELI\s*PREMIUM|STATUS|LEADERBOARD|REFERRAL|HUBUNGI\s*ADMIN|OWNER\s*CONSOLE|AKTIVASI\s*PREMIUM|BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
+  const navigationText = /^(⌖\s*DETECT|✧\s*BELI\s*PREMIUM|◈\s*STATUS|♛\s*LEADERBOARD|♧\s*REFERRAL|✉︎?\s*HUBUNGI\s*ADMIN|♛\s*OWNER\s*CONSOLE|✚\s*AKTIVASI\s*PREMIUM|▤\s*BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
   if (navigationText || navigationCallback) {
     try {
@@ -56,17 +56,17 @@ function styledCallback(text, data, style) {
 }
 
 const USER_KEYBOARD = Markup.keyboard([
-  [{ text: 'DETECT' }, { text: 'BELI PREMIUM' }],
-  [{ text: 'STATUS' }, { text: 'LEADERBOARD' }],
-  [{ text: 'REFERRAL' }, { text: 'HUBUNGI ADMIN' }]
+  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
+  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
+  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }]
 ]).resize().oneTime().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
-  [{ text: 'DETECT' }, { text: 'BELI PREMIUM' }],
-  [{ text: 'STATUS' }, { text: 'LEADERBOARD' }],
-  [{ text: 'REFERRAL' }, { text: 'HUBUNGI ADMIN' }],
-  [{ text: 'OWNER CONSOLE' }],
-  [{ text: 'AKTIVASI PREMIUM' }, { text: 'BROADCAST' }]
+  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
+  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
+  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }],
+  [{ text: '♛ OWNER CONSOLE' }],
+  [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
 ]).resize().oneTime().placeholder('Pilih fungsi owner…');
 
 const OWNER_ACTION_TTL = 300;
@@ -144,8 +144,8 @@ async function showPackage(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPackageDetailCard({ user, pkg });
   const keyboard = Markup.inlineKeyboard([
-    [styledCallback('Beli · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success')],
-    [styledCallback('Kembali', 'store:premium', 'danger')]
+    [styledCallback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success')],
+    [styledCallback('↶ KEMBALI', 'store:premium', 'danger')]
   ]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
@@ -153,7 +153,7 @@ async function showPackage(ctx, pkg, edit) {
 async function showCheckout(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPaymentMaintenanceCard({ user, pkg });
-  const keyboard = Markup.inlineKeyboard([[styledCallback('Pilih paket lain', 'store:' + pkg.tier, 'danger')]]);
+  const keyboard = Markup.inlineKeyboard([[styledCallback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier, 'danger')]]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
 }
@@ -164,7 +164,7 @@ bot.start(async (ctx) => {
   const payload = String(ctx.startPayload || '');
   if (payload.startsWith('ref_')) {
     const registered = await registerReferral(ctx.from.id, payload.slice(4));
-    if (registered) await ctx.reply('Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh 5 koin referral.');
+    if (registered) await ctx.reply('♧ ᴋᴀᴍᴜ ʙᴇʀɢᴀʙᴜɴɢ ᴍᴇʟᴀʟᴜɪ ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴ. sᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴘᴇʀᴛᴀᴍᴀ ᴀɢᴀʀ ᴘᴇɴɢᴜɴᴅᴀɴɢ ᴍᴇᴍᴘᴇʀᴏʟᴇʜ 5 ᴋᴏɪɴ ʀᴇғᴇʀʀᴀʟ.');
   }
   return showHome(ctx);
 });
@@ -173,13 +173,13 @@ bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => { await ctx.answ
 bot.action(/^pkg:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
-  if (!pkg) return ctx.reply('<b>PAKET TIDAK DITEMUKAN</b>');
+  if (!pkg) return ctx.reply('✦ <b>ᴘᴀᴋᴇᴛ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
   return showPackage(ctx, pkg, true);
 });
 bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
-  if (!pkg) return ctx.reply('<b>PAKET TIDAK DITEMUKAN</b>');
+  if (!pkg) return ctx.reply('✦ <b>ᴘᴀᴋᴇᴛ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
   return showCheckout(ctx, pkg, true);
 });
 
@@ -187,7 +187,7 @@ async function startContact(ctx) {
   await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
   return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\n<blockquote>ᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ.\nᴀᴅᴍɪɴ ᴀᴋᴀɴ ᴍᴇᴍʙᴀʟᴀs sᴇᴄᴇᴘᴀᴛɴʏᴀ.</blockquote>', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('Batalkan', 'contact:cancel', 'danger')]]) });
 }
-bot.hears(/^HUBUNGI ADMIN$/i, startContact);
+bot.hears('✉︎ HUBUNGI ADMIN', startContact);
 bot.action('contact:cancel', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await redis.del('contact:state:' + ctx.from.id); return ctx.reply('✕ <b>ᴘᴇɴɢɪʀɪᴍᴀɴ ᴘᴇsᴀɴ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' }); });
 
 async function showStatus(ctx) {
@@ -203,12 +203,12 @@ async function showReferral(ctx) {
   const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
   const stats = await getReferralStats(ctx.from.id);
   const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
-  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('Bagikan Tautan', shareUrl)], [styledCallback('Tukar Koin', 'referral:menu', 'primary')]]) });
+  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl)], [styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]]) });
 }
-bot.hears(/^STATUS$/i, showStatus);
-bot.hears(/^LEADERBOARD$/i, showLeaderboard);
-bot.hears(/^REFERRAL$/i, showReferral);
-bot.hears(/^BELI PREMIUM$/i, (ctx) => showStore(ctx, false));
+bot.hears('◈ STATUS', showStatus);
+bot.hears('♛ LEADERBOARD', showLeaderboard);
+bot.hears('♧ REFERRAL', showReferral);
+bot.hears('✧ BELI PREMIUM', (ctx) => showStore(ctx, false));
 
 function extractPhoneCandidates(text) {
   if (!text) return [];
@@ -252,7 +252,7 @@ async function startDetect(ctx) {
   if (!isVip && remaining <= 0) {
     return ctx.reply(
       '✦ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\n\n<blockquote>ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴍᴇɴɢɢᴜɴᴀᴋᴀɴ 3 ᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs ʜᴀʀɪ ɪɴɪ.\nᴜᴘɢʀᴀᴅᴇ ᴋᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛᴀɴᴘᴀ ʙᴀᴛᴀs.</blockquote>',
-      { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('Beli Premium', 'store:premium', 'success')]]) }
+      { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]]) }
     );
   }
   await redis.set('detect:mode:' + ctx.from.id, 'waiting_numbers', { ex: 300 });
@@ -277,7 +277,7 @@ async function startDetect(ctx) {
     }
   );
 }
-bot.hears(/^DETECT$/i, startDetect);
+bot.hears('⌖ DETECT', startDetect);
 bot.command('detect', startDetect);
 bot.action('detect:cancel_prompt', async (ctx) => {
   await ctx.answerCbQuery('Dibatalkan').catch(() => {});
@@ -563,7 +563,7 @@ async function processDetection(ctx, numbers) {
 bot.on('text', async (ctx, next) => {
   const text = (ctx.message && ctx.message.text) || '';
   if (!text || text.startsWith('/')) return next();
-  if (/^(DETECT|BELI PREMIUM|STATUS|LEADERBOARD|REFERRAL|HUBUNGI ADMIN|OWNER CONSOLE|AKTIVASI PREMIUM|BROADCAST)$/i.test(text)) return next();
+  if (/^(⌖\s*DETECT|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
 
   const mode = await redis.get('detect:mode:' + ctx.from.id);
   if (mode !== 'waiting_numbers') return next();
@@ -581,7 +581,7 @@ bot.on('text', async (ctx, next) => {
   if (!isVip && phones.length > 1) {
     return ctx.reply('✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ 1 ɴᴏᴍᴏʀ.\nᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>', {
       parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([[styledCallback('Beli Premium', 'store:premium', 'success')]])
+      ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
     });
   }
 
