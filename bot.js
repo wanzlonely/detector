@@ -3,7 +3,8 @@ const { Telegraf, Markup } = require('telegraf');
 const {
   redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
   getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, redeemReferralReward,
-  consumeQuota, addCheckLog, getCachedCheckResult, setCachedCheckResult, qualifyReferral
+  consumeQuota, addCheckLog, getCachedCheckResult, setCachedCheckResult, qualifyReferral,
+  incrementUserChecks
 } = require('./database');
 const {
   escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
@@ -460,15 +461,18 @@ async function processDetection(ctx, numbers) {
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
       groups.restricted.push('· ' + num + ' ⦂ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴅᴀꜰᴛᴀʀᴋᴀɴ');
     } else if (r.isCloneBlocked || r.isSecurityBlock) {
+      // Tidak support clone: tampilkan status sekunder (perangkat / SMS siap / cooldown)
       const sec = r.secondaryPath || (
         (r.deviceName || r.waOldEligible) ? 'device' :
         ((Number(r.secondarySeconds) || (r.primaryTimer && r.primaryTimer.rawSeconds) || 0) > 0 ? 'cooldown' :
-        (r.isReady ? 'ready' : null))
+        (r.isReady || (r.channels && r.channels.sms && !r.channels.sms.isCooldown) ? 'ready' : null))
       );
       let label = 'sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs';
       let sortSecs = 0;
       if (sec === 'device') {
-        label = 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+        label = r.deviceName
+          ? ('ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ · ' + String(r.deviceName).slice(0, 24))
+          : 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
         sortSecs = -1;
       } else if (sec === 'cooldown') {
         let secs = Number(r.secondarySeconds) || 0;
@@ -482,6 +486,7 @@ async function processDetection(ctx, numbers) {
       }
       groups.clone.push({ line: '· ' + num + ' ⦂ ' + label, secs: sortSecs });
     } else if (r.isReady && !r.anyCooldown) {
+      // Hanya nomor yang SMS-nya benar-benar open
       if (r.deviceName || r.waOldEligible || r.accountStatus === 'REGISTERED_ON_DEVICE') {
         groups.ready.push({ line: '· ' + num + ' ⦂ ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ', rank: 0 });
       } else {
@@ -493,7 +498,10 @@ async function processDetection(ctx, numbers) {
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
-      groups.cooldown.push({ line: '· ' + num + ' ⦂ ' + dur, secs: secs });
+      const deviceNote = (r.deviceName || r.waOldEligible)
+        ? (' · ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ')
+        : '';
+      groups.cooldown.push({ line: '· ' + num + ' ⦂ ' + dur + deviceNote, secs: secs });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
       groups.other.push('· ' + num + note);
@@ -554,8 +562,15 @@ async function processDetection(ctx, numbers) {
   }
   try {
     const user = await getEffectiveUser(ctx);
-    if (!isOwner(ctx) && !isUserVip(user)) await consumeQuota(ctx.from.id, Math.min(total, 1));
-  } catch (e) { console.error('[quota]', e && e.message || e); }
+    const checkedCount = results.filter((r) => r && !r.cancelled).length || total;
+    if (!isOwner(ctx) && !isUserVip(user)) {
+      // Free: enforce daily quota (increments total_checks + leaderboard inside)
+      await consumeQuota(ctx.from.id, Math.min(checkedCount, 1));
+    } else {
+      // VIP / Owner: always record checks so leaderboard stays live
+      await incrementUserChecks(ctx.from.id, checkedCount);
+    }
+  } catch (e) { console.error('[quota/leaderboard]', e && e.message || e); }
   return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
 
