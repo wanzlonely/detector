@@ -363,6 +363,11 @@ function toSmallCapsDevice(name) {
   };
   return String(name).toLowerCase().replace(/[a-z]/g, (ch) => map[ch] || ch);
 }
+function deviceLabel(r) {
+  // Ada jalur perangkat terdaftar (wa_old) atau nama device dari API
+  if (r && (r.deviceName || r.waOldEligible)) return 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+  return 'ᴛᴀɴᴘᴀ ᴘᴇʀᴀɴɢᴋᴀᴛ';
+}
 
 function buildProgressText(processed, total, stageLabel) {
   const safeTotal = total > 0 ? total : 1;
@@ -418,29 +423,43 @@ async function processDetection(ctx, numbers) {
     try {
       const opts = Object.assign({ skipSticky: true }, waveOpts || {});
       let result = await checkWhatsAppCooldown(raw, opts);
+      // Retry once only if soft/low-confidence and not already full wave
       if (result && !result.cancelled && (result.softFallback || result.needsRecheck || (Number(result.confidence) || 0) < 0.55)) {
         if ((waveOpts && waveOpts.wave) !== 'full') {
+          await sleep(400);
           try {
             const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
-            if (retry && !retry.error && (Number(retry.confidence) || 0) >= (Number(result.confidence) || 0)) result = retry;
+            if (retry && !retry.error) {
+              const better =
+                (!retry.softFallback && result.softFallback) ||
+                (Number(retry.confidence) || 0) > (Number(result.confidence) || 0) ||
+                retry.isReady || retry.anyCooldown || retry.isBanned || retry.isCloneBlocked;
+              if (better) result = retry;
+            }
           } catch (_) {}
         }
       }
-      if (result && !result.error) {
-        preserveNumber(raw, result);
-        await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
-        return result;
-      }
       if (result) {
         preserveNumber(raw, result);
+        // Soft result yang punya sinyal jelas tetap dipakai
+        if (result.softFallback && (result.isReady || result.anyCooldown || result.isBanned || result.isCloneBlocked || result.isSecurityBlock)) {
+          result.softFallback = false;
+          result.needsRecheck = false;
+        }
+        if (!result.error) {
+          await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-').catch(() => {});
+        }
         return result;
       }
     } catch (err) {
+      await sleep(500);
       try {
         const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
-        if (retry && !retry.error) {
+        if (retry) {
           preserveNumber(raw, retry);
-          await addCheckLog(userId, retry.formattedNumber || safeNumber, retry.accountStatus || '-', retry.proxyTag || '-');
+          if (!retry.error) {
+            await addCheckLog(userId, retry.formattedNumber || safeNumber, retry.accountStatus || '-', retry.proxyTag || '-').catch(() => {});
+          }
           return retry;
         }
       } catch (_) {}
@@ -528,21 +547,21 @@ async function processDetection(ctx, numbers) {
       let secs = Number(r.secondarySeconds) || 0;
       if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
       if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-      const dev = toSmallCapsDevice(r.deviceName && String(r.deviceName).trim());
+      const dev = deviceLabel(r);
       let label;
       if (secs > 0) label = formatCooldownSmallCaps(secs) + ' · ' + dev;
       else label = dev;
       groups.clone.push({ line: num + ' ⦂ ' + label, secs: secs || 0 });
     } else if (r.isReady && !r.anyCooldown) {
-      const dev = toSmallCapsDevice(r.deviceName && String(r.deviceName).trim());
-      groups.ready.push({ line: num + ' ⦂ ' + dev, rank: r.deviceName ? 0 : 1 });
+      const dev = deviceLabel(r);
+      groups.ready.push({ line: num + ' ⦂ ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
       if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
-      const dev = toSmallCapsDevice(r.deviceName && String(r.deviceName).trim());
+      const dev = deviceLabel(r);
       groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' · ' + dev, secs: secs });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
