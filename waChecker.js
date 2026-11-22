@@ -1,3 +1,21 @@
+/**
+ * 15-POINT ACCURACY STACK
+ * 1  Exist-first triage (wave=exist)
+ * 2  Dual-wave full for ambiguous
+ * 3  wa_old echo filter ≤180s
+ * 4  Soft-fallback never dibatasi
+ * 5  Adaptive concurrency (bot)
+ * 6  SMS-primary timer ground truth
+ * 7  Confidence thresholds + existClear
+ * 8  Multi-round consensus
+ * 9  Hard-ban only for dibatasi
+ * 10 Device path = siap diverifikasi
+ * 11 Multi-signal confidence lock
+ * 12 Sticky short-TTL cache (anti flip-flop)
+ * 13 Proxy geo-match confidence boost
+ * 14 Ban-borderline second dual opinion
+ * 15 Cross-round timer consistency pick
+ */
 const WADetector = require('./waEngine');
 const { executeWithProxyRotation, getHealth } = require('./proxyManager');
 
@@ -6,6 +24,31 @@ const INTERNAL_RETRIES = Math.min(4, Math.max(2, Number(process.env.WA_CHECK_INT
 const CONSENSUS_ENABLED = String(process.env.WA_CONSENSUS || '1') !== '0';
 const LOW_CONFIDENCE_THRESHOLD = Number(process.env.WA_LOW_CONFIDENCE || 0.72);
 const EXIST_CLEAR_CONFIDENCE = Number(process.env.WA_EXIST_CLEAR || 0.82);
+const STICKY_TTL_MS = Number(process.env.WA_STICKY_TTL_MS || 45000);
+const STICKY_CACHE = new Map();
+
+function stickyGet(raw) {
+  const key = String(raw || '').replace(/\D/g, '');
+  if (!key) return null;
+  const hit = STICKY_CACHE.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > STICKY_TTL_MS) {
+    STICKY_CACHE.delete(key);
+    return null;
+  }
+  return hit.result;
+}
+
+function stickySet(raw, result) {
+  const key = String(raw || '').replace(/\D/g, '');
+  if (!key || !result || result.softFallback || result.error) return;
+  if ((Number(result.confidence) || 0) < 0.7) return;
+  if (STICKY_CACHE.size > 500) {
+    const first = STICKY_CACHE.keys().next().value;
+    STICKY_CACHE.delete(first);
+  }
+  STICKY_CACHE.set(key, { ts: Date.now(), result: { ...result, stickyHit: true } });
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -387,6 +430,14 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
   else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
 
+  let signalCount = 0;
+  if (hasDevicePath) signalCount += 1;
+  if (hasLiveSms) signalCount += 1;
+  if (timers.is_code_sent) signalCount += 1;
+  if (existSmsOpen && !hasLiveSms) signalCount += 1;
+  if (engineReady) signalCount += 1;
+  if (patternHints.includes('HARD_BAN')) signalCount += 2;
+
   let confidence = 0.55;
   if (isBanned && patternHints.includes('HARD_BAN')) confidence = 0.96;
   else if (isBanned) confidence = 0.9;
@@ -398,6 +449,17 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (isReady && existSmsOpen) confidence = 0.86;
   else if (isReady) confidence = 0.8;
   else if (smsOptionMissing) confidence = 0.75;
+
+  if (signalCount >= 3) confidence = Math.min(0.98, confidence + 0.04);
+  else if (signalCount >= 2) confidence = Math.min(0.96, confidence + 0.02);
+
+  const proxyIso = String(countryIso2 || '').toLowerCase();
+  const tag = String(sessionTag || proxyMode || '').toLowerCase();
+  if (proxyIso && (tag.includes(proxyIso) || tag.includes('geo'))) {
+    confidence = Math.min(0.99, confidence + 0.03);
+    reasons.push('proxy_geo_match');
+  }
+
   if (meta && meta.partial) confidence = Math.max(0.4, confidence - 0.08);
   if (meta && meta.existOnly) confidence = Math.min(confidence, 0.88);
 
@@ -441,7 +503,14 @@ function mergeConsensus(results) {
     if (best === 'sms') return r.smsOptionMissing;
     if (best === 'ready') return r.isReady;
     return false;
-  }).sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0] || results[0];
+  }).sort((a, b) => {
+    const ta = (a.primaryTimer && a.primaryTimer.rawSeconds) || 0;
+    const tb = (b.primaryTimer && b.primaryTimer.rawSeconds) || 0;
+    const stableA = ta > 0 ? 1 : 0;
+    const stableB = tb > 0 ? 1 : 0;
+    if (stableB !== stableA) return stableB - stableA;
+    return (b.confidence || 0) - (a.confidence || 0);
+  })[0] || results[0];
   return { ...base, confidence: Math.min(0.99, (base.confidence || 0) + 0.05), consensusVotes: bestVal, consensusRounds: results.length, needsRecheck: false };
 }
 
@@ -477,6 +546,12 @@ function softFallback(rawNumber, payloads, countryIso2, lastError) {
 
 async function checkWhatsAppCooldown(rawNumber, options) {
   const opts = options || {};
+  if (!opts.skipSticky && opts.wave !== 'exist') {
+    const cached = stickyGet(rawNumber);
+    if (cached) {
+      return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
+    }
+  }
   const payloads = await WADetector.buildDualPayloads(String(rawNumber));
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
   payloads.rawNumber = String(rawNumber);
@@ -495,7 +570,9 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       const existProbe = await runExistOnlyProbe(payloads, headers, countryIso2);
       const existResult = classifyFromResponses(payloads, existProbe.existText, null, existProbe.proxyMode, existProbe.sessionTag, countryIso2, { partial: true, existOnly: true });
       if (existResult.existClear && !existResult.needsRecheck) {
-        return { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
+        const outClear = { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
+        stickySet(rawNumber, outClear);
+        return outClear;
       }
     } catch (_) {}
   }
@@ -508,14 +585,24 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       rounds.push(result);
       if (!result.needsRecheck && result.accountStatus !== 'UNKNOWN') {
         if (!CONSENSUS_ENABLED || result.confidence >= LOW_CONFIDENCE_THRESHOLD) {
-          return { ...result, probeMode: 'dual', consensusRounds: rounds.length };
+          if (result.isBanned && !(result.patternHints && result.patternHints.includes('HARD_BAN')) && attempt < INTERNAL_RETRIES) {
+            await sleep(100);
+            continue;
+          }
+          const out = { ...result, probeMode: 'dual', consensusRounds: rounds.length };
+          stickySet(rawNumber, out);
+          return out;
         }
       }
       if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) {
         await sleep(120 + Math.floor(Math.random() * 180));
         continue;
       }
-      if (rounds.length >= 2) return { ...mergeConsensus(rounds), probeMode: 'consensus' };
+      if (rounds.length >= 2) {
+        const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
+        stickySet(rawNumber, mc);
+        return mc;
+      }
       return { ...result, probeMode: 'dual', consensusRounds: rounds.length };
     } catch (err) {
       lastError = err;
@@ -525,7 +612,11 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       }
     }
   }
-  if (rounds.length >= 2) return { ...mergeConsensus(rounds), probeMode: 'consensus' };
+  if (rounds.length >= 2) {
+    const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
+    stickySet(rawNumber, mc);
+    return mc;
+  }
   if (rounds.length === 1 && rounds[0].accountStatus !== 'UNKNOWN') {
     return { ...rounds[0], consensusRounds: 1, probeMode: 'dual' };
   }
