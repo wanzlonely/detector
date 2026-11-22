@@ -392,16 +392,32 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const timers = extractChannelTimers(existResponse, codeResponse);
   const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
 
-  // ========== BAN ==========
-  const hardBan = Boolean(
-    existResponse.status === 'banned' || codeResponse.status === 'banned' ||
-    existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
-    existResponse.reason === 'blocked' || codeResponse.reason === 'blocked' ||
-    existResponse.violation_type || codeResponse.violation_type ||
+  // ========== BAN (ketat — hindari false positive temporary/block soft) ==========
+  const reasonBlob = (
+    String(existResponse.reason || '') + ' ' + String(codeResponse.reason || '') + ' ' +
+    String(existResponse.status || '') + ' ' + String(codeResponse.status || '')
+  ).toLowerCase();
+  const hasAppeal = Boolean(
     existResponse.in_app_ban_appeal || codeResponse.in_app_ban_appeal ||
     existResponse.appeal_token || codeResponse.appeal_token
   );
+  const hasViolation = Boolean(existResponse.violation_type || codeResponse.violation_type);
+  const explicitBan =
+    existResponse.status === 'banned' || codeResponse.status === 'banned' ||
+    existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
+    /\bbanned\b/.test(reasonBlob);
+  // "blocked" saja sering temporary — hanya ban jika ada violation/appeal
+  const blockedHard =
+    (existResponse.reason === 'blocked' || codeResponse.reason === 'blocked') &&
+    (hasViolation || hasAppeal);
+  const hardBan = Boolean(explicitBan || blockedHard || (hasViolation && hasAppeal));
   let isBanned = hardBan;
+
+  // Temporary / rate-limit → jangan masuk DIBATASI
+  const isTempLock = reasonBlob.includes('temporarily_unavailable') ||
+    reasonBlob.includes('too_many') || reasonBlob.includes('too_recent') ||
+    reasonBlob.includes('rate_limit') || patternHints.includes('TEMP_LOCK') ||
+    patternHints.includes('RATE_LIMIT');
 
   // ========== CLONE / SECURITY (tidak mempengaruhi siap/cd grouping) ==========
   const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
@@ -439,9 +455,14 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
 
   if (!isBanned) {
     if (smsSeconds > 0) {
-      // SMS CD nyata dari exist
+      // SMS CD nyata dari exist — sumber kebenaran
       isCooldown = true;
       isReady = false;
+    } else if (isTempLock && engineCd > 0) {
+      // Temporary lock / rate limit → cooldown, bukan ban
+      isCooldown = true;
+      isReady = false;
+      if (smsSeconds <= 0) smsSeconds = engineCd;
     } else if (existAnswered && !existNoRoutes) {
       // exist bilang SMS open (wait=0) → SIAP diverifikasi
       isReady = true;
@@ -451,7 +472,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
       const st = String((parsed && parsed.state) || '').toUpperCase();
       if (parsed && parsed.isReady) {
         isReady = true;
-      } else if (parsed && parsed.isCooldown && engineCd >= 360) {
+      } else if (parsed && parsed.isCooldown && engineCd >= 120) {
         isCooldown = true;
         smsSeconds = engineCd;
       } else if (st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
