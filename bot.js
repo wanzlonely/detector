@@ -343,15 +343,25 @@ function buildProgressBar(pct) {
 
 function formatCooldownSmallCaps(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (sec <= 0) return '0ᴅᴇᴛɪᴋ';
+  if (sec <= 0) return '0ᴅ';
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
   const parts = [];
-  if (h > 0) parts.push(h + 'ᴊᴀᴍ');
-  if (m > 0) parts.push(m + 'ᴍᴇɴɪᴛ');
-  if (s > 0 || parts.length === 0) parts.push(s + 'ᴅᴇᴛɪᴋ');
+  if (h > 0) parts.push(h + 'ᴊ');
+  if (m > 0) parts.push(m + 'ᴍ');
+  if (s > 0 || parts.length === 0) parts.push(s + 'ᴅ');
   return parts.join(' ');
+}
+
+function toSmallCapsDevice(name) {
+  if (!name) return 'ᴜɴᴋɴᴏᴡɴ';
+  const map = {
+    a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ', j: 'ᴊ',
+    k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'ǫ', r: 'ʀ', s: 's', t: 'ᴛ',
+    u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', x: 'x', y: 'ʏ', z: 'ᴢ'
+  };
+  return String(name).toLowerCase().replace(/[a-z]/g, (ch) => map[ch] || ch);
 }
 
 function buildProgressText(processed, total, stageLabel) {
@@ -518,13 +528,13 @@ async function processDetection(ctx, numbers) {
       let secs = Number(r.secondarySeconds) || 0;
       if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
       if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      const dev = toSmallCapsDevice(r.deviceName && String(r.deviceName).trim());
       let label;
       if (secs > 0) label = formatCooldownSmallCaps(secs) + ' · ' + dev;
       else label = dev;
       groups.clone.push({ line: num + ' ⦂ ' + label, secs: secs || 0 });
     } else if (r.isReady && !r.anyCooldown) {
-      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      const dev = toSmallCapsDevice(r.deviceName && String(r.deviceName).trim());
       groups.ready.push({ line: num + ' ⦂ ' + dev, rank: r.deviceName ? 0 : 1 });
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
@@ -532,7 +542,7 @@ async function processDetection(ctx, numbers) {
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
-      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      const dev = toSmallCapsDevice(r.deviceName && String(r.deviceName).trim());
       groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' · ' + dev, secs: secs });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
