@@ -56,14 +56,19 @@ function styledCallback(text, data, style) {
 }
 
 const USER_KEYBOARD = Markup.keyboard([
-  ['⌖ DETECT', '✧ BELI PREMIUM', '◈ STATUS'],
-  ['♛ LEADERBOARD', '♧ REFERRAL', '✉︎ HUBUNGI ADMIN']
+  ['⌖ DETECT'],
+  ['✧ BELI PREMIUM', '◈ STATUS'],
+  ['♛ LEADERBOARD', '♧ REFERRAL'],
+  ['✉︎ HUBUNGI ADMIN']
 ]).resize().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
-  ['⌖ DETECT', '✧ BELI PREMIUM', '◈ STATUS'],
-  ['♛ LEADERBOARD', '♧ REFERRAL', '✉︎ HUBUNGI ADMIN'],
-  ['♛ OWNER CONSOLE', '✚ AKTIVASI PREMIUM', '▤ BROADCAST']
+  ['⌖ DETECT'],
+  ['✧ BELI PREMIUM', '◈ STATUS'],
+  ['♛ LEADERBOARD', '♧ REFERRAL'],
+  ['✉︎ HUBUNGI ADMIN'],
+  ['♛ OWNER CONSOLE'],
+  ['✚ AKTIVASI PREMIUM', '▤ BROADCAST']
 ]).resize().placeholder('Pilih fungsi owner…');
 
 const OWNER_ACTION_TTL = 300;
@@ -393,6 +398,9 @@ function deviceLabel(r) {
   return '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ';
 }
 
+const PROGRESS_SPINNERS = ['◐', '◓', '◑', '◒'];
+let progressSpinIdx = 0;
+
 function buildProgressText(processed, total, stageLabel, currentNumber) {
   const safeTotal = total > 0 ? total : 1;
   const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
@@ -401,12 +409,18 @@ function buildProgressText(processed, total, stageLabel, currentNumber) {
   const title = isDone
     ? '✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ'
     : '◔  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ʙᴇʀᴊᴀʟᴀɴ';
-  const currentLine = isDone
-    ? 'sᴀᴀᴛ ɪɴɪ ⦂ sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ'
-    : ('sᴀᴀᴛ ɪɴɪ ⦂ ' + (currentNumber || '-'));
+  let currentLine;
+  if (isDone) {
+    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ <b>sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ</b>';
+  } else {
+    const spin = PROGRESS_SPINNERS[progressSpinIdx % PROGRESS_SPINNERS.length];
+    progressSpinIdx += 1;
+    const num = currentNumber || '-';
+    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ ' + spin + ' <code>' + num + '</code> ' + spin;
+  }
   return (
     title + '\n\n' +
-    buildProgressBar(pct) + '  ' + pct + '%\n' +
+    buildProgressBar(pct) + '  <b>' + pct + '%</b>\n' +
     'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ\n' +
     currentLine + '\n' +
     '──────────────────────'
@@ -527,7 +541,7 @@ async function processDetection(ctx, numbers, detectOpts) {
         await updateProgress();
         results[i] = await checkOne(numbers[i], waveOpts);
         stageProcessed += 1;
-        if (stageProcessed === 1 || stageProcessed === stageTotal || stageProcessed % 2 === 0) await updateProgress();
+        await updateProgress();
       }
     }
     await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
@@ -686,9 +700,83 @@ bot.action(/^contact:reply:(\d+)$/, async (ctx) => {
   await redis.set('owner:contact:target:' + ctx.from.id, targetId, { ex: 600 });
   return ctx.reply('✉︎ <b>ʙᴀʟᴀs ᴘᴇsᴀɴ</b>\n\nᴋɪʀɪᴍ ʙᴀʟᴀsᴀɴ ᴜɴᴛᴜᴋ ᴜsᴇʀ <code>' + targetId + '</code>.', { parse_mode: 'HTML' });
 });
+const REFERRAL_OFFERS = {
+  'quota_3': { type: 'quota', amount: 3, cost: 10, label: '3 ᴋᴜᴏᴛᴀ ᴄᴇᴋ' },
+  'vip_1': { type: 'vip', amount: 1, cost: 25, label: '1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ' },
+  'vip_3': { type: 'vip', amount: 3, cost: 50, label: '3 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ' },
+  'vip_7': { type: 'vip', amount: 7, cost: 100, label: '7 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ' }
+};
+
+async function showReferralExchange(ctx, edit) {
+  const stats = await getReferralStats(ctx.from.id);
+  const message = require('./themes').renderReferralExchange(stats);
+  const keyboard = Markup.inlineKeyboard([
+    [styledCallback('✧ 3 ᴋᴜᴏᴛᴀ · 10 ᴋᴏɪɴ', 'referral:redeem:quota_3', 'primary')],
+    [styledCallback('✧ 1 ʜᴀʀɪ · 25 ᴋᴏɪɴ', 'referral:redeem:vip_1', 'success')],
+    [styledCallback('✧ 3 ʜᴀʀɪ · 50 ᴋᴏɪɴ', 'referral:redeem:vip_3', 'success')],
+    [styledCallback('✧ 7 ʜᴀʀɪ · 100 ᴋᴏɪɴ', 'referral:redeem:vip_7', 'success')],
+    [styledCallback('↶ KEMBALI', 'referral:back', 'danger')]
+  ]);
+  if (edit && ctx.editMessageText) {
+    return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard }).catch(() =>
+      ctx.reply(message, { parse_mode: 'HTML', ...keyboard })
+    );
+  }
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+
 bot.action('referral:menu', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
-  return ctx.reply(require('./themes').renderReferralExchange(), { parse_mode: 'HTML' });
+  return showReferralExchange(ctx, false);
+});
+
+bot.action('referral:back', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const me = await bot.telegram.getMe();
+  const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
+  const stats = await getReferralStats(ctx.from.id);
+  const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
+  return ctx.editMessageText(require('./themes').renderReferral({ link, stats }), {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl), styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]])
+  }).catch(async () => {
+    return ctx.reply(require('./themes').renderReferral({ link, stats }), {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl), styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]])
+    });
+  });
+});
+
+bot.action(/^referral:redeem:(quota_3|vip_1|vip_3|vip_7)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const offerKey = ctx.match[1];
+  const offer = REFERRAL_OFFERS[offerKey];
+  if (!offer) return ctx.reply('✕ ᴘᴀᴋᴇᴛ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ', { parse_mode: 'HTML' });
+  try {
+    const result = await redeemReferralReward(ctx.from.id, offer);
+    if (!result.ok) {
+      return ctx.reply(
+        '✕ <b>ᴋᴏɪɴ ᴛɪᴅᴀᴋ ᴄᴜᴋᴜᴘ</b>\n\n' +
+        '▸ sᴀʟᴅᴏ ⦂ <b>' + result.balance + '</b> ᴋᴏɪɴ\n' +
+        '▸ ᴅɪʙᴜᴛᴜʜᴋᴀɴ ⦂ <b>' + offer.cost + '</b> ᴋᴏɪɴ\n\n' +
+        '<blockquote>ᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ ʟᴇʙɪʜ ʙᴀɴʏᴀᴋ ᴜɴᴛᴜᴋ ᴍᴇɴᴅᴀᴘᴀᴛᴋᴀɴ ᴋᴏɪɴ.</blockquote>',
+        { parse_mode: 'HTML' }
+      );
+    }
+    const successMsg = offer.type === 'quota'
+      ? ('✓ <b>ᴘᴇɴᴜᴋᴀʀᴀɴ ʙᴇʀʜᴀsɪʟ</b>\n\n' +
+         '▸ ᴘᴀᴋᴇᴛ ⦂ <b>' + offer.label + '</b>\n' +
+         '▸ sɪsᴀ ᴋᴏɪɴ ⦂ <b>' + result.balance + '</b>\n\n' +
+         '<blockquote>ᴋᴜᴏᴛᴀ ᴛᴀᴍʙᴀʜᴀɴ sᴜᴅᴀʜ ᴀᴋᴛɪғ ᴅᴀɴ ʙɪsᴀ ʟᴀɴɢsᴜɴɢ ᴅɪᴘᴀᴋᴀɪ.</blockquote>')
+      : ('✓ <b>ᴘᴇɴᴜᴋᴀʀᴀɴ ʙᴇʀʜᴀsɪʟ</b>\n\n' +
+         '▸ ᴘᴀᴋᴇᴛ ⦂ <b>' + offer.label + '</b>\n' +
+         '▸ sɪsᴀ ᴋᴏɪɴ ⦂ <b>' + result.balance + '</b>\n\n' +
+         '<blockquote>ᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ sᴜᴅᴀʜ ᴀᴋᴛɪғ. sᴇʟᴀᴍᴀᴛ ᴍᴇɴᴄᴏʙᴀ!</blockquote>');
+    return ctx.reply(successMsg, { parse_mode: 'HTML' });
+  } catch (err) {
+    console.error('[referral redeem]', err && err.message || err);
+    return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴᴜᴋᴀʀ. ᴄᴏʙᴀ ʟᴀɢɪ.', { parse_mode: 'HTML' });
+  }
 });
 
 bot.on('text', async (ctx, next) => {
