@@ -243,33 +243,40 @@ function extractPhoneCandidates(text) {
   const raw = String(text);
   const phones = [];
   const seen = new Set();
-  const pattern = /(?:\+|00)?[\d][\d\s\-().]{6,20}\d/g;
-  let match;
-  while ((match = pattern.exec(raw)) !== null) {
-    let token = match[0].trim();
-    token = token.replace(/[^\d+]+$/g, '').replace(/^[^\d+]+/g, '');
-    const hasPlus = token.startsWith('+') || token.startsWith('00');
-    let digits = token.replace(/\D/g, '');
+
+  function pushDigits(digits) {
+    if (!digits) return;
+    digits = String(digits).replace(/\D/g, '');
     if (digits.startsWith('00')) digits = digits.slice(2);
-    if (digits.length < 8 || digits.length > 15) continue;
-    if (digits.length <= 4) continue;
-    if (/^(19|20)\d{2}$/.test(digits)) continue;
-    if (seen.has(digits)) continue;
+    // 08xxxxxxxxxx (ID local) -> 62xxxxxxxxxx
+    if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) {
+      digits = '62' + digits.slice(1);
+    }
+    if (digits.length < 8 || digits.length > 15) return;
+    if (/^(19|20)\d{2}$/.test(digits)) return;
+    if (seen.has(digits)) return;
     seen.add(digits);
-    if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) digits = '62' + digits.slice(1);
     phones.push('+' + digits);
   }
+
+  // 1) Prioritas: satu nomor per baris / koma / titik-koma (tidak campur antar baris)
+  const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    // Ambil deretan digit (+ opsional) di dalam baris
+    const m = line.match(/(?:\+|00)?\d[\d\s\-().]{6,18}\d/);
+    if (m) pushDigits(m[0]);
+    else pushDigits(line);
+  }
+
+  // 2) Fallback: scan seluruh teks jika belum ketemu
   if (!phones.length) {
-    const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
-    for (const line of lines) {
-      let digits = line.replace(/\D/g, '');
-      if (digits.length < 8 || digits.length > 15) continue;
-      if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) digits = '62' + digits.slice(1);
-      if (seen.has(digits)) continue;
-      seen.add(digits);
-      phones.push('+' + digits);
+    const pattern = /(?:\+|00)?\d(?:[\d\-().]{6,18})\d/g;
+    let match;
+    while ((match = pattern.exec(raw)) !== null) {
+      pushDigits(match[0]);
     }
   }
+
   return phones;
 }
 
@@ -493,9 +500,18 @@ async function processDetection(ctx, numbers) {
   if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 
   const groups = { ready: [], cooldown: [], clone: [], restricted: [], other: [] };
-  for (const r of results) {
+  for (let gi = 0; gi < results.length; gi++) {
+    const r = results[gi];
     if (!r || r.cancelled) continue;
-    const num = r.formattedNumber || '-';
+    // Always prefer original input number for display
+    const origDigits = String(numbers[gi] || '').replace(/\D/g, '');
+    const origNum = origDigits ? ('+' + origDigits) : null;
+    let num = origNum || r.formattedNumber || '-';
+    const shownDigits = String(num).replace(/\D/g, '');
+    if (origDigits && shownDigits && shownDigits !== origDigits) {
+      num = origNum;
+    }
+    r.formattedNumber = num;
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
       groups.restricted.push(num);
     } else if (r.isCloneBlocked || r.isSecurityBlock) {
