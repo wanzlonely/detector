@@ -518,27 +518,21 @@ async function processDetection(ctx, numbers) {
       let secs = Number(r.secondarySeconds) || 0;
       if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
       if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-      let dev = (r.deviceName && String(r.deviceName).trim()) || '';
-      if (!dev && r.waOldEligible) dev = 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
-      if (!dev) dev = 'ᴜɴᴋɴᴏᴡɴ';
+      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
       let label;
       if (secs > 0) label = formatCooldownSmallCaps(secs) + ' · ' + dev;
       else label = dev;
       groups.clone.push({ line: num + ' ⦂ ' + label, secs: secs || 0 });
     } else if (r.isReady && !r.anyCooldown) {
-      let dev = (r.deviceName && String(r.deviceName).trim()) || '';
-      if (!dev && r.waOldEligible) dev = 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
-      if (!dev) dev = 'ᴜɴᴋɴᴏᴡɴ';
-      groups.ready.push({ line: num + ' ⦂ ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
+      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      groups.ready.push({ line: num + ' ⦂ ' + dev, rank: r.deviceName ? 0 : 1 });
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
       if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
-      let dev = (r.deviceName && String(r.deviceName).trim()) || '';
-      if (!dev && r.waOldEligible) dev = 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
-      if (!dev) dev = 'ᴜɴᴋɴᴏᴡɴ';
+      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
       groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' · ' + dev, secs: secs });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
@@ -619,9 +613,120 @@ async function processDetection(ctx, numbers) {
   });
 }
 
+bot.hears('♛ OWNER CONSOLE', async (ctx) => {
+  if (!isOwner(ctx)) return ctx.reply('✕ ᴀᴋsᴇs ᴅɪᴛᴏʟᴀᴋ', { parse_mode: 'HTML' });
+  return ctx.reply('♛ <b>ᴏᴡɴᴇʀ ᴄᴏɴsᴏʟᴇ</b>\n\nᴘɪʟɪʜ ᴀᴋsɪ ᴅɪ ʙᴀᴡᴀʜ.', {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([
+      [styledCallback('✚ AKTIVASI PREMIUM', 'owner:activate', 'success')],
+      [styledCallback('▤ BROADCAST', 'owner:broadcast', 'primary')]
+    ])
+  });
+});
+bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'activate_vip');
+  return ctx.reply('✚ <b>ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ</b>\n\nᴋɪʀɪᴍ ғᴏʀᴍᴀᴛ:\n<code>user_id hari</code>\nᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+});
+bot.hears('▤ BROADCAST', async (ctx) => {
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'broadcast');
+  return ctx.reply('▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴇʙᴀʀ ᴋᴇ sᴇᴍᴜᴀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+});
+bot.action('owner:activate', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'activate_vip');
+  return ctx.reply('✚ <b>ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ</b>\n\nᴋɪʀɪᴍ ғᴏʀᴍᴀᴛ:\n<code>user_id hari</code>\nᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+});
+bot.action('owner:broadcast', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'broadcast');
+  return ctx.reply('▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴇʙᴀʀ ᴋᴇ sᴇᴍᴜᴀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+});
+bot.action(/^contact:reply:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  const targetId = ctx.match[1];
+  await redis.set('owner:contact:target:' + ctx.from.id, targetId, { ex: 600 });
+  return ctx.reply('✉︎ <b>ʙᴀʟᴀs ᴘᴇsᴀɴ</b>\n\nᴋɪʀɪᴍ ʙᴀʟᴀsᴀɴ ᴜɴᴛᴜᴋ ᴜsᴇʀ <code>' + targetId + '</code>.', { parse_mode: 'HTML' });
+});
+bot.action('referral:menu', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return ctx.reply(require('./themes').renderReferralExchange(), { parse_mode: 'HTML' });
+});
+
 bot.on('text', async (ctx, next) => {
   const text = (ctx.message && ctx.message.text) || '';
   if (/^(⌖\s*DETECT|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
+
+  // Owner reply to user contact
+  if (isOwner(ctx)) {
+    const replyTarget = await redis.get('owner:contact:target:' + ctx.from.id);
+    if (replyTarget) {
+      await redis.del('owner:contact:target:' + ctx.from.id);
+      try {
+        await ctx.telegram.sendMessage(Number(replyTarget), '✉︎ <b>ʙᴀʟᴀsᴀɴ ᴀᴅᴍɪɴ</b>\n\n' + escapeHtml(text), { parse_mode: 'HTML' });
+        return ctx.reply('✓ ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ᴋᴇ ᴜsᴇʀ <code>' + replyTarget + '</code>.', { parse_mode: 'HTML' });
+      } catch (err) {
+        return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ: ' + String(err.message || err).slice(0, 120));
+      }
+    }
+    const ownerAction = await getOwnerAction(ctx.from.id);
+    if (ownerAction === 'activate_vip') {
+      await clearOwnerAction(ctx.from.id);
+      const parts = text.trim().split(/\s+/);
+      const targetId = Number(parts[0]);
+      const days = Number(parts[1] || 30);
+      if (!targetId || !days) {
+        return ctx.reply('✕ ғᴏʀᴍᴀᴛ sᴀʟᴀʜ. ᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+      }
+      try {
+        await activateVip(targetId, days, 'OWNER');
+        try { await ctx.telegram.sendMessage(targetId, '✧ <b>ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ</b>\n\nᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ ᴋᴀᴍᴜ ᴛᴇʟᴀʜ ᴅɪᴀᴋᴛɪғᴋᴀɴ sᴇʟᴀᴍᴀ <b>' + days + '</b> ʜᴀʀɪ.', { parse_mode: 'HTML' }); } catch (_) {}
+        return ctx.reply('✓ ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + targetId + '</code> · ' + days + ' ʜᴀʀɪ.', { parse_mode: 'HTML' });
+      } catch (err) {
+        return ctx.reply('✕ ɢᴀɢᴀʟ: ' + String(err.message || err).slice(0, 120));
+      }
+    }
+    if (ownerAction === 'broadcast') {
+      await clearOwnerAction(ctx.from.id);
+      return ctx.reply('▤ ʙʀᴏᴀᴅᴄᴀsᴛ ᴅɪᴛᴇʀɪᴍᴀ. (ғɪᴛᴜʀ sᴇᴘᴇɴᴜʜɴʏᴀ ᴍᴇᴍᴇʀʟᴜᴋᴀɴ ᴅᴀғᴛᴀʀ ᴜsᴇʀ ɪᴅ ᴅɪ ʀᴇᴅɪs)', { parse_mode: 'HTML' });
+    }
+  }
+
+  // User contact admin — forward message to owner
+  const contactState = await redis.get('contact:state:' + ctx.from.id);
+  if (contactState === 'waiting') {
+    await redis.del('contact:state:' + ctx.from.id);
+    const uname = ctx.from.username ? '@' + ctx.from.username : '-';
+    const fullName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Pengguna';
+    if (!ADMIN_ID) {
+      return ctx.reply('✕ <b>ᴀᴅᴍɪɴ ʙᴇʟᴜᴍ ᴅɪᴋᴏɴғɪɢᴜʀᴀsɪ</b>\n\n<blockquote>sᴇᴛ ᴇɴᴠ ADMIN_ID ᴅɪ ᴠᴇʀᴄᴇʟ.</blockquote>', { parse_mode: 'HTML' });
+    }
+    try {
+      await ctx.telegram.sendMessage(
+        ADMIN_ID,
+        '✉︎ <b>ᴘᴇsᴀɴ ᴅᴀʀɪ ᴜsᴇʀ</b>\n\n' +
+        '▸ ɴᴀᴍᴀ ⦂ <b>' + escapeHtml(fullName) + '</b>\n' +
+        '▸ ᴜsᴇʀ ⦂ <b>' + escapeHtml(uname) + '</b>\n' +
+        '▸ ɪᴅ ⦂ <code>' + ctx.from.id + '</code>\n\n' +
+        '<blockquote>' + escapeHtml(text) + '</blockquote>',
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [styledCallback('↩ BALAS', 'contact:reply:' + ctx.from.id, 'primary')]
+          ])
+        }
+      );
+      return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴀᴅᴍɪɴ ᴀᴋᴀɴ ᴍᴇᴍʙᴀʟᴀs sᴇʙᴇɢᴀɪᴍᴀɴᴀ ᴍᴜɴɢᴋɪɴ.', { parse_mode: 'HTML' });
+    } catch (err) {
+      console.error('[contact forward]', err && err.message || err);
+      return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ ᴘᴇsᴀɴ</b>\n\n<blockquote>' + escapeHtml(String(err.message || err).slice(0, 120)) + '</blockquote>', { parse_mode: 'HTML' });
+    }
+  }
+
   const mode = await redis.get('detect:mode:' + ctx.from.id);
   if (mode !== 'waiting_numbers') return next();
   const phones = extractPhoneCandidates(text);
