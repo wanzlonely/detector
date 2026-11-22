@@ -357,5 +357,254 @@ function buildProgressText(processed, total, stageLabel) {
   );
 }
 
-// processDetection and rest of file continue in next commit if needed
+async function processDetection(ctx, numbers) {
+  const userId = ctx.from.id;
+  const jobId = Date.now().toString(36);
+  await redis.set('detect:active:' + userId, jobId, { ex: 600 });
+  await redis.del('detect:mode:' + userId);
+  const total = numbers.length;
+  const results = new Array(total);
+  let progressMsg;
+  let currentStageLabel = 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+  let stageProcessed = 0;
+  let stageTotal = total;
+  try {
+    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
+  } catch (_) {}
+  async function updateProgress() {
+    if (!progressMsg) return;
+    try {
+      await ctx.telegram.editMessageText(progressMsg.chat.id, progressMsg.message_id, undefined, buildProgressText(stageProcessed, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
+    } catch (_) {}
+  }
+  function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+  async function checkOne(raw, waveOpts) {
+    const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
+    if (stop) return { cancelled: true };
+    try {
+      const opts = Object.assign({ skipSticky: true }, waveOpts || {});
+      let result = await checkWhatsAppCooldown(raw, opts);
+      if (result && !result.cancelled && (result.softFallback || result.needsRecheck || (Number(result.confidence) || 0) < 0.55)) {
+        if ((waveOpts && waveOpts.wave) !== 'full') {
+          try {
+            const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
+            if (retry && !retry.error && (Number(retry.confidence) || 0) >= (Number(result.confidence) || 0)) result = retry;
+          } catch (_) {}
+        }
+      }
+      if (result && !result.error) {
+        await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
+        return result;
+      }
+    } catch (err) {
+      try {
+        const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
+        if (retry && !retry.error) {
+          await addCheckLog(userId, retry.formattedNumber || raw, retry.accountStatus || '-', retry.proxyTag || '-');
+          return retry;
+        }
+      } catch (_) {}
+      const digits = String(raw || '').replace(/\D/g, '');
+      return { formattedNumber: digits ? ('+' + digits) : String(raw || ''), isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
+    }
+    const digits = String(raw || '').replace(/\D/g, '');
+    return { formattedNumber: digits ? ('+' + digits) : String(raw || ''), isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
+  }
+  async function runPool(indexes, waveOpts) {
+    let cursor = 0;
+    stageProcessed = 0;
+    stageTotal = indexes.length || 1;
+    let conc;
+    if (indexes.length >= 20) conc = 5;
+    else if (indexes.length >= 12) conc = 6;
+    else if (indexes.length >= 6) conc = 7;
+    else conc = Math.min(8, indexes.length || 1);
+    const CONCURRENCY_SAFE = Math.max(1, conc);
+    async function worker(workerId) {
+      if (workerId > 0) await sleep(workerId * 70);
+      while (cursor < indexes.length) {
+        const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
+        if (stop) return;
+        const pos = cursor++;
+        if (pos >= indexes.length) return;
+        const i = indexes[pos];
+        results[i] = await checkOne(numbers[i], waveOpts);
+        stageProcessed += 1;
+        if (stageProcessed === 1 || stageProcessed === stageTotal || stageProcessed % 2 === 0) await updateProgress();
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
+    stageProcessed = stageTotal;
+    await updateProgress();
+  }
+  const allIdx = Array.from({ length: total }, (_, i) => i);
+  if (total >= 4) {
+    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · sᴄᴀɴ ᴄᴇᴘᴀᴛ';
+    await runPool(allIdx, { wave: 'exist' });
+    const needFull = [];
+    for (let i = 0; i < total; i++) {
+      const r = results[i];
+      if (!r || r.cancelled) continue;
+      const conf = Number(r.confidence) || 0;
+      const clearLiveCooldown = r.anyCooldown && r.primaryTimer && r.primaryTimer.rawSeconds > 0 && conf >= 0.82;
+      const clearBan = r.isBanned && conf >= 0.88;
+      const clearReady = r.isReady && (r.existClear || conf >= 0.84) && !r.anyCooldown;
+      const clearClone = (r.isCloneBlocked || r.isSecurityBlock) && conf >= 0.85;
+      if (clearLiveCooldown || clearBan || clearReady || clearClone) continue;
+      needFull.push(i);
+    }
+    if (needFull.length) {
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴅᴀʟᴀᴍ';
+      await runPool(needFull, { wave: 'full' });
+    } else {
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · sᴇʟᴇsᴀɪ';
+      stageProcessed = total;
+      stageTotal = total;
+      await updateProgress();
+    }
+  } else {
+    currentStageLabel = total > 1 ? 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+    await runPool(allIdx, { wave: 'full' });
+  }
+  const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
+  await redis.del('detect:active:' + userId);
+  await redis.del('detect:stop:' + userId + ':' + jobId);
+  if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+
+  const groups = { ready: [], cooldown: [], clone: [], restricted: [], other: [] };
+  for (const r of results) {
+    if (!r || r.cancelled) continue;
+    const num = r.formattedNumber || '-';
+    if (r.isBanned === true || r.accountStatus === 'BANNED') {
+      groups.restricted.push(num);
+    } else if (r.isCloneBlocked || r.isSecurityBlock) {
+      let secs = Number(r.secondarySeconds) || 0;
+      if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
+      if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
+      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      let label;
+      if (secs > 0) label = formatCooldownSmallCaps(secs) + ' · ' + dev;
+      else label = dev;
+      groups.clone.push({ line: num + ' ⦂ ' + label, secs: secs || 0 });
+    } else if (r.isReady && !r.anyCooldown) {
+      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      groups.ready.push({ line: num + ' ⦂ ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
+    } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
+      let secs = 0;
+      if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
+      else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
+      else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
+      const dur = formatCooldownSmallCaps(secs);
+      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' · ' + dev, secs: secs });
+    } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
+      const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
+      groups.other.push(num + note);
+    } else {
+      const note = r.description ? (' · ' + r.description) : '';
+      groups.other.push(num + note);
+    }
+  }
+
+  groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0));
+  groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
+  groups.clone.sort((a, b) => {
+    const sa = typeof a === 'object' ? (a.secs ?? 0) : 0;
+    const sb = typeof b === 'object' ? (b.secs ?? 0) : 0;
+    return sa - sb;
+  });
+
+  const lines = [];
+  lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
+  lines.push(buildProgressBar(100) + ' 100%');
+  lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
+  lines.push('✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ ⦂ <b>' + groups.ready.length + '</b>');
+  lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
+  lines.push('△ ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
+  lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.restricted.length + '</b>');
+  if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
+  lines.push('');
+  lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
+  if (groups.ready.length) {
+    lines.push('');
+    lines.push('✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
+    lines.push('');
+    groups.ready.forEach((n) => lines.push(n.line || n));
+  }
+  if (groups.cooldown.length) {
+    lines.push('');
+    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
+    lines.push('');
+    groups.cooldown.forEach((n) => lines.push(n.line || n));
+  }
+  if (groups.clone.length) {
+    lines.push('');
+    lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
+    lines.push('');
+    groups.clone.forEach((n) => lines.push(typeof n === 'object' ? (n.line || n) : n));
+  }
+  if (groups.restricted.length) {
+    lines.push('');
+    lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
+    lines.push('');
+    groups.restricted.forEach((n) => lines.push(n));
+  }
+  if (groups.other.length) {
+    lines.push('');
+    lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
+    lines.push('');
+    groups.other.forEach((n) => lines.push(n));
+  }
+  try {
+    const user = await getEffectiveUser(ctx);
+    const checkedCount = results.filter((r) => r && !r.cancelled).length || total;
+    if (!isOwner(ctx) && !isUserVip(user)) {
+      await consumeQuota(ctx.from.id, Math.min(checkedCount, 1));
+    } else {
+      await incrementUserChecks(ctx.from.id, checkedCount);
+    }
+  } catch (e) { console.error('[quota/leaderboard]', e && e.message || e); }
+  const refreshKey = 'detect:refresh:' + userId + ':' + jobId;
+  try {
+    await redis.set(refreshKey, JSON.stringify(numbers), { ex: 3600 });
+  } catch (_) {}
+  return ctx.reply(lines.join('\n'), {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([
+      [styledCallback('↻ UPDATE STATUS', 'detect:refresh:' + jobId, 'success')]
+    ])
+  });
+}
+
+bot.on('text', async (ctx, next) => {
+  const text = (ctx.message && ctx.message.text) || '';
+  if (/^(⌖\s*DETECT|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
+  const mode = await redis.get('detect:mode:' + ctx.from.id);
+  if (mode !== 'waiting_numbers') return next();
+  const phones = extractPhoneCandidates(text);
+  if (!phones.length) {
+    return ctx.reply('✦ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ ⦂ +6281234567890</blockquote>', { parse_mode: 'HTML' });
+  }
+  const user = await getEffectiveUser(ctx);
+  const isVip = isOwner(ctx) || isUserVip(user);
+  const max = isVip ? 30 : 1;
+  const list = phones.slice(0, max);
+  if (!isVip && phones.length > 1) {
+    return ctx.reply('✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ 1 ɴᴏᴍᴏʀ.\nᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>', {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
+    });
+  }
+  return processDetection(ctx, list);
+});
+
+if (require.main === module) {
+  process.on('unhandledRejection', (err) => { console.error('[unhandledRejection]', err && err.stack || err); });
+  process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err && err.stack || err); });
+  bot.launch({ dropPendingUpdates: true })
+    .then(() => console.log('[bot] launched successfully'))
+    .catch((err) => { console.error('[launch]', err && err.stack || err); process.exitCode = 1; });
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}
 module.exports = bot;
