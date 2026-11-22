@@ -456,7 +456,10 @@ async function processDetection(ctx, numbers) {
   for (const r of results) {
     if (!r || r.cancelled) continue;
     const num = r.formattedNumber || '-';
-    if (r.isBanned || r.accountStatus === 'BANNED' || r.accountStatus === 'RESTRICTED') {
+    if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
+      const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
+      groups.other.push('· ' + num + note);
+    } else if (r.isBanned || r.accountStatus === 'BANNED' || r.accountStatus === 'RESTRICTED') {
       groups.restricted.push('· ' + num + ' ⦂ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴅᴀꜰᴛᴀʀᴋᴀɴ');
     } else if (r.isCloneBlocked || r.isSecurityBlock) {
       groups.clone.push('· ' + num + ' ⦂ ᴀᴘʟɪᴋᴀsɪ ʀᴇsᴍɪ');
@@ -481,7 +484,6 @@ async function processDetection(ctx, numbers) {
     }
   }
 
-  // Siap: perangkat terdaftar dulu, lalu siap. Cooldown: timer terkecil dulu
   groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0));
   groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
 
