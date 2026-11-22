@@ -200,10 +200,9 @@ function applyPatternLibrary(exist, code, timers) {
 
 function detectBanSignals(exist, code, parsed, patternHints) {
   if (patternHints.includes('HARD_BAN')) return true;
-  if (parsed && parsed.isBanned === true) return true;
+  if (parsed && parsed.isBanned === true && (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal)) return true;
   return Boolean(
     exist.status === 'banned' || code.status === 'banned' ||
-    exist.reason === 'blocked' || code.reason === 'blocked' ||
     exist.reason === 'banned' || code.reason === 'banned' ||
     exist.violation_type || code.violation_type ||
     exist.in_app_ban_appeal || code.in_app_ban_appeal
@@ -312,9 +311,9 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (hasLiveVoice) reasons.push('voice_wait:' + timers.voice);
   else if (hasLiveWait) reasons.push('other_channel_wait');
 
-  if (isBanned && (timers.wa_old_eligible || hasLiveWait || timers.device_name)) {
+  if (isBanned && !patternHints.includes('HARD_BAN')) {
     isBanned = false;
-    reasons.push('ban_overridden_by_live_path');
+    reasons.push('ban_soft_cleared');
   }
 
   const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
@@ -350,9 +349,12 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const effectiveCooldown = isReady ? false : (meaningfulCooldown || (!hasDevicePath && hasLiveWait));
 
   const isPartial = Boolean(meta && (meta.partial || meta.existOnly));
+  const anyChannelSignal =
+    timers.sms > 0 || timers.voice > 0 || timers.flash > 0 || timers.email > 0 ||
+    timers.wa_old > 0 || timers.is_code_sent || hasDevicePath;
   const smsOptionMissing =
     !isBanned && !isCloneBlocked && !isSecurityBlock && !effectiveCooldown && !isReady &&
-    !hasDevicePath && !isPartial &&
+    !hasDevicePath && !isPartial && !anyChannelSignal &&
     (
       (timers.exist_no_routes && smsAvailable === false) ||
       (engineState === 'NO_ROUTES' && patternHints.includes('NO_ROUTES') && smsAvailable === false)
