@@ -15,6 +15,7 @@
  * 13 Proxy geo-match confidence boost
  * 14 Ban-borderline second dual opinion
  * 15 Cross-round timer consistency pick
+ * + secondaryPath: device|ready|cooldown even when clone
  */
 const WADetector = require('./waEngine');
 const { executeWithProxyRotation, getHealth } = require('./proxyManager');
@@ -468,6 +469,19 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const existClear = Boolean(meta && meta.existOnly && (isReady || (effectiveCooldown && hasLiveSms) || isBanned || isCloneBlocked) && confidence >= EXIST_CLEAR_CONFIDENCE);
   const needsRecheck = Boolean(!existClear && (meta && meta.existOnly) && confidence < EXIST_CLEAR_CONFIDENCE);
 
+  let secondaryPath = null;
+  let secondarySeconds = 0;
+  if (hasDevicePath) {
+    secondaryPath = 'device';
+  } else if (hasLiveSms || (!hasDevicePath && hasLiveWait)) {
+    secondaryPath = 'cooldown';
+    secondarySeconds = liveSmsWait > 0 ? liveSmsWait : (
+      timers.voice > 0 ? timers.voice : (timers.flash > 0 ? timers.flash : (timers.email > 0 ? timers.email : 0))
+    );
+  } else if (existSmsOpen || engineReady || hasOpenPath) {
+    secondaryPath = 'ready';
+  }
+
   return {
     formattedNumber: normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone),
     region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country)) || null,
@@ -476,7 +490,9 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     channels, primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
     proxyInfo: proxyMode + ' · ' + sessionTag, proxyTag: sessionTag, proxyCountry: countryIso2,
     confidence, existClear, needsRecheck, decisionReasons: reasons, patternHints,
-    softFallback: false, error: false, partialResponse: Boolean(meta && meta.partial)
+    softFallback: false, error: false, partialResponse: Boolean(meta && meta.partial),
+    secondaryPath: secondaryPath,
+    secondarySeconds: secondarySeconds
   };
 }
 
@@ -540,7 +556,9 @@ function softFallback(rawNumber, payloads, countryIso2, lastError) {
     needsRecheck: true,
     decisionReasons: ['soft_fallback'],
     patternHints: ['SOFT_FALLBACK'],
-    error: false
+    error: false,
+    secondaryPath: null,
+    secondarySeconds: 0
   };
 }
 
