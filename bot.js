@@ -365,9 +365,9 @@ function toSmallCapsDevice(name) {
   return String(name).toLowerCase().replace(/[a-z]/g, (ch) => map[ch] || ch);
 }
 function deviceLabel(r) {
-  // Ada jalur perangkat terdaftar (wa_old) atau nama device dari API
-  if (r && (r.deviceName || r.waOldEligible)) return 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
-  return 'ᴛᴀɴᴘᴀ ᴘᴇʀᴀɴɢᴋᴀᴛ';
+  // Label pendek agar nomor panjang (multi-negara) tidak pindah baris
+  if (r && (r.deviceName || r.waOldEligible)) return 'ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+  return 'ᴛᴀɴᴘᴀ';
 }
 
 function buildProgressText(processed, total, stageLabel) {
@@ -422,65 +422,66 @@ async function processDetection(ctx, numbers, detectOpts) {
     if (stop) return { cancelled: true };
     const digits = String(raw || '').replace(/\D/g, '');
     const safeNumber = digits ? ('+' + digits) : String(raw || '');
-    try {
-      const opts = Object.assign({ skipSticky: true, forceRefresh: Boolean(detectOpts.forceRefresh) }, waveOpts || {});
-      let result = await checkWhatsAppCooldown(raw, opts);
-      // Retry once only if soft/low-confidence and not already full wave
-      if (result && !result.cancelled && (result.softFallback || result.needsRecheck || (Number(result.confidence) || 0) < 0.55)) {
-        if ((waveOpts && waveOpts.wave) !== 'full') {
-          await sleep(200);
-          try {
-            const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
-            if (retry && !retry.error) {
-              const better =
-                (!retry.softFallback && result.softFallback) ||
-                (Number(retry.confidence) || 0) > (Number(result.confidence) || 0) ||
-                retry.isReady || retry.anyCooldown || retry.isBanned || retry.isCloneBlocked;
-              if (better) result = retry;
-            }
-          } catch (_) {}
-        }
-      }
-      if (result) {
-        preserveNumber(raw, result);
-        // Soft result yang punya sinyal jelas tetap dipakai
-        if (result.softFallback && (result.isReady || result.anyCooldown || result.isBanned || result.isCloneBlocked || result.isSecurityBlock)) {
-          result.softFallback = false;
-          result.needsRecheck = false;
-        }
-        if (!result.error) {
-          await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-').catch(() => {});
-        }
-        return result;
-      }
-    } catch (err) {
-      await sleep(250);
+    const opts = Object.assign({ skipSticky: true, forceRefresh: Boolean(detectOpts.forceRefresh) }, waveOpts || {});
+    let last = null;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      const stop2 = await redis.get('detect:stop:' + userId + ':' + jobId);
+      if (stop2) return { cancelled: true };
       try {
-        const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
-        if (retry) {
-          preserveNumber(raw, retry);
-          if (!retry.error) {
-            await addCheckLog(userId, retry.formattedNumber || safeNumber, retry.accountStatus || '-', retry.proxyTag || '-').catch(() => {});
+        let result = await checkWhatsAppCooldown(raw, opts);
+        if (result && !result.cancelled) {
+          preserveNumber(raw, result);
+          // soft / network → retry with backoff
+          const isNetFail = result.softFallback || result.needsRecheck ||
+            (result.description && /transport|network|too_many|timeout|ECONN|unstable/i.test(String(result.description)));
+          if (isNetFail && attempt < 4) {
+            last = result;
+            await sleep(400 * attempt + Math.floor(Math.random() * 400));
+            continue;
           }
-          return retry;
+          if (result.softFallback && (result.isReady || result.anyCooldown || result.isBanned)) {
+            result.softFallback = false;
+            result.needsRecheck = false;
+          }
+          if (!result.error && !result.softFallback) {
+            await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-').catch(() => {});
+          }
+          return result;
         }
-      } catch (_) {}
-      return { formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
+      } catch (err) {
+        last = {
+          formattedNumber: safeNumber,
+          isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false,
+          accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.2,
+          needsRecheck: true,
+          description: String((err && err.message) || 'network').slice(0, 120)
+        };
+        await sleep(500 * attempt + Math.floor(Math.random() * 500));
+      }
     }
-    return { formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
+    // Final: jangan biarkan "Lainnya" kosong info — kembalikan last atau soft
+    if (last) {
+      preserveNumber(raw, last);
+      return last;
+    }
+    return {
+      formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false,
+      anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true,
+      confidence: 0.2, needsRecheck: true, description: 'Respons tidak stabil · coba ulang'
+    };
   }
   async function runPool(indexes, waveOpts) {
     let cursor = 0;
     stageProcessed = 0;
     stageTotal = indexes.length || 1;
     let conc;
-    if (indexes.length >= 20) conc = 6;
-    else if (indexes.length >= 10) conc = 7;
-    else if (indexes.length >= 4) conc = 8;
-    else conc = Math.min(10, indexes.length || 1);
+    if (indexes.length >= 20) conc = 3;
+    else if (indexes.length >= 12) conc = 4;
+    else if (indexes.length >= 6) conc = 5;
+    else conc = Math.min(6, indexes.length || 1);
     const CONCURRENCY_SAFE = Math.max(1, conc);
     async function worker(workerId) {
-      if (workerId > 0) await sleep(workerId * 40);
+      if (workerId > 0) await sleep(workerId * 120);
       while (cursor < indexes.length) {
         const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
         if (stop) return;
@@ -519,7 +520,7 @@ async function processDetection(ctx, numbers, detectOpts) {
     }
     r.formattedNumber = num;
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
-      groups.restricted.push(num);
+      groups.restricted.push('<code>' + num + '</code>');
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
       if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
@@ -528,10 +529,10 @@ async function processDetection(ctx, numbers, detectOpts) {
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
       const dev = deviceLabel(r);
-      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' · ' + dev, secs: secs });
+      groups.cooldown.push({ line: '<code>' + num + '</code> · ' + dur + ' · ' + dev, secs: secs });
     } else if (r.isReady) {
       const dev = deviceLabel(r);
-      groups.ready.push({ line: num + ' ⦂ ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
+      groups.ready.push({ line: '<code>' + num + '</code> · ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
       groups.other.push(num + note);
