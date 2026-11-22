@@ -368,7 +368,7 @@ async function processDetection(ctx, numbers) {
       if (result && !result.cancelled && (result.softFallback || result.needsRecheck || (Number(result.confidence) || 0) < 0.55)) {
         if ((waveOpts && waveOpts.wave) !== 'full') {
           try {
-            const retry = await checkWhatsAppCooldown(raw, { wave: 'full' });
+            const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
             if (retry && !retry.error && (Number(retry.confidence) || 0) >= (Number(result.confidence) || 0)) result = retry;
           } catch (_) {}
         }
@@ -379,7 +379,7 @@ async function processDetection(ctx, numbers) {
       }
     } catch (err) {
       try {
-        const retry = await checkWhatsAppCooldown(raw, { wave: 'full' });
+        const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
         if (retry && !retry.error) {
           await addCheckLog(userId, retry.formattedNumber || raw, retry.accountStatus || '-', retry.proxyTag || '-');
           return retry;
@@ -459,7 +459,23 @@ async function processDetection(ctx, numbers) {
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
       groups.restricted.push('· ' + num + ' ⦂ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴅᴀꜰᴛᴀʀᴋᴀɴ');
     } else if (r.isCloneBlocked || r.isSecurityBlock) {
-      groups.clone.push('· ' + num + ' ⦂ ᴀᴘʟɪᴋᴀsɪ ʀᴇsᴍɪ');
+      let extra = '';
+      const sec = r.secondaryPath || (
+        (r.deviceName || r.waOldEligible) ? 'device' :
+        (r.anyCooldown ? 'cooldown' :
+        (r.isReady ? 'ready' : null))
+      );
+      if (sec === 'device') {
+        extra = ' · ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+      } else if (sec === 'cooldown') {
+        let secs = Number(r.secondarySeconds) || 0;
+        if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
+        if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
+        extra = secs > 0 ? (' · ᴄᴏᴏʟᴅᴏᴡɴ ' + formatCooldownSmallCaps(secs)) : ' · ᴄᴏᴏʟᴅᴏᴡɴ';
+      } else if (sec === 'ready') {
+        extra = ' · sɪᴀᴘ';
+      }
+      groups.clone.push('· ' + num + ' ⦂ ᴀᴘʟɪᴋᴀsɪ ʀᴇsᴍɪ' + extra);
     } else if (r.isReady && !r.anyCooldown) {
       if (r.deviceName || r.waOldEligible || r.accountStatus === 'REGISTERED_ON_DEVICE') {
         groups.ready.push({ line: '· ' + num + ' ⦂ ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ', rank: 0 });
