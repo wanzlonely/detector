@@ -337,6 +337,26 @@ bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
   return processDetection(ctx, numbers, { forceRefresh: true });
 });
 
+bot.action('detect:info', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const infoText = [
+    'ⓘ <b>ᴋᴇᴛᴇʀᴀɴɢᴀɴ ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>',
+    '──────────────────────',
+    '✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>',
+    'ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ʟᴏɢɪɴ sᴇᴋᴀʀᴀɴɢ.',
+    '',
+    '◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>',
+    'ɴᴏᴍᴏʀ sᴇᴅᴀɴɢ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ, ᴛᴜɴɢɢᴜ sᴇsᴜᴀɪ ᴡᴀᴋᴛᴜ ʏᴀɴɢ ᴛᴇʀᴛᴇʀᴀ.',
+    '',
+    '✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>',
+    'ɴᴏᴍᴏʀ ᴛᴇʀᴋᴇɴᴀ ʙᴀᴛᴀsᴀɴ / ʙʟᴏᴋɪʀ sᴇᴍᴇɴᴛᴀʀᴀ.',
+    '──────────────────────',
+    '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ ⦂ ᴋᴏᴅᴇ ᴍᴀsᴜᴋ ᴋᴇ ᴡᴀ ᴅɪ ʜᴘ ʟᴀᴍᴀ.',
+    '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴘᴀɴɢɢɪʟᴀɴ.'
+  ].join('\n');
+  return ctx.reply(infoText, { parse_mode: 'HTML' });
+});
+
 function buildProgressBar(pct) {
   const filled = Math.round(pct / 10);
   return '●'.repeat(filled) + '○'.repeat(10 - filled);
@@ -370,15 +390,23 @@ function deviceLabel(r) {
   return '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ';
 }
 
-function buildProgressText(processed, total, stageLabel) {
+function buildProgressText(processed, total, stageLabel, currentNumber) {
   const safeTotal = total > 0 ? total : 1;
   const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
   const pct = Math.round((safeProcessed / safeTotal) * 100);
-  const title = stageLabel || 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+  const isDone = safeProcessed >= safeTotal;
+  const title = isDone
+    ? '✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ'
+    : '◔  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ʙᴇʀᴊᴀʟᴀɴ';
+  const currentLine = isDone
+    ? 'sᴀᴀᴛ ɪɴɪ ⦂ sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ'
+    : ('sᴀᴀᴛ ɪɴɪ ⦂ ' + (currentNumber || '-'));
   return (
-    '⟳ <b>' + title + '</b>\n\n' +
+    title + '\n\n' +
     buildProgressBar(pct) + '  ' + pct + '%\n' +
-    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ'
+    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ\n' +
+    currentLine + '\n' +
+    '──────────────────────'
   );
 }
 
@@ -394,13 +422,14 @@ async function processDetection(ctx, numbers, detectOpts) {
   let currentStageLabel = 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
   let stageProcessed = 0;
   let stageTotal = total;
+  let currentNumber = '-';
   try {
-    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
+    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel, currentNumber), { parse_mode: 'HTML' });
   } catch (_) {}
   async function updateProgress() {
     if (!progressMsg) return;
     try {
-      await ctx.telegram.editMessageText(progressMsg.chat.id, progressMsg.message_id, undefined, buildProgressText(stageProcessed, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
+      await ctx.telegram.editMessageText(progressMsg.chat.id, progressMsg.message_id, undefined, buildProgressText(stageProcessed, stageTotal, currentStageLabel, currentNumber), { parse_mode: 'HTML' });
     } catch (_) {}
   }
   function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -489,6 +518,10 @@ async function processDetection(ctx, numbers, detectOpts) {
         const pos = cursor++;
         if (pos >= indexes.length) return;
         const i = indexes[pos];
+        const rawNum = numbers[i];
+        const digs = String(rawNum || '').replace(/\D/g, '');
+        currentNumber = digs ? ('+' + digs) : String(rawNum || '-');
+        await updateProgress();
         results[i] = await checkOne(numbers[i], waveOpts);
         stageProcessed += 1;
         if (stageProcessed === 1 || stageProcessed === stageTotal || stageProcessed % 2 === 0) await updateProgress();
@@ -547,11 +580,12 @@ async function processDetection(ctx, numbers, detectOpts) {
   groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
 
   const lines = [];
-  lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
+  lines.push('✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ');
   lines.push('');
   lines.push(buildProgressBar(100) + '  100%');
   lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
-  lines.push('');
+  lines.push('sᴀᴀᴛ ɪɴɪ ⦂ sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ');
+  lines.push('──────────────────────');
   lines.push('✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ ⦂ <b>' + groups.ready.length + '</b>');
   lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
   lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.restricted.length + '</b>');
@@ -578,20 +612,6 @@ async function processDetection(ctx, numbers, detectOpts) {
     lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
     groups.other.forEach((n) => lines.push(n));
   }
-  lines.push('──────────────────────');
-  lines.push('ⓘ <b>ᴋᴇᴛᴇʀᴀɴɢᴀɴ ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
-  lines.push('──────────────────────');
-  lines.push('✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
-  lines.push('ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ʟᴏɢɪɴ sᴇᴋᴀʀᴀɴɢ.');
-  lines.push('');
-  lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
-  lines.push('ɴᴏᴍᴏʀ sᴇᴅᴀɴɢ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ, ᴛᴜɴɢɢᴜ sᴇsᴜᴀɪ ᴡᴀᴋᴛᴜ ʏᴀɴɢ ᴛᴇʀᴛᴇʀᴀ.');
-  lines.push('');
-  lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
-  lines.push('ɴᴏᴍᴏʀ ᴛᴇʀᴋᴇɴᴀ ʙᴀᴛᴀsᴀɴ / ʙʟᴏᴋɪʀ sᴇᴍᴇɴᴛᴀʀᴀ.');
-  lines.push('──────────────────────');
-  lines.push('◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ ⦂ ᴋᴏᴅᴇ ᴍᴀsᴜᴋ ᴋᴇ ᴡᴀ ᴅɪ ʜᴘ ʟᴀᴍᴀ.');
-  lines.push('○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴘᴀɴɢɢɪʟᴀɴ.');
   try {
     const user = await getEffectiveUser(ctx);
     const checkedCount = results.filter((r) => r && !r.cancelled).length || total;
@@ -608,7 +628,8 @@ async function processDetection(ctx, numbers, detectOpts) {
   return ctx.reply(lines.join('\n'), {
     parse_mode: 'HTML',
     ...Markup.inlineKeyboard([
-      [styledCallback('↻ UPDATE STATUS', 'detect:refresh:' + jobId, 'success')]
+      [styledCallback('↻ UPDATE STATUS', 'detect:refresh:' + jobId, 'success')],
+      [styledCallback('ⓘ KETERANGAN HASIL', 'detect:info', 'primary')]
     ])
   });
 }
