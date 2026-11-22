@@ -457,16 +457,15 @@ async function processDetection(ctx, numbers) {
     if (!r || r.cancelled) continue;
     const num = r.formattedNumber || '-';
     if (r.isBanned || r.accountStatus === 'BANNED' || r.accountStatus === 'RESTRICTED') {
-      groups.restricted.push(num);
+      groups.restricted.push('· ' + num + ' ⦂ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴅᴀꜰᴛᴀʀᴋᴀɴ');
     } else if (r.isCloneBlocked || r.isSecurityBlock) {
-      groups.clone.push(num);
+      groups.clone.push('· ' + num + ' ⦂ ᴀᴘʟɪᴋᴀsɪ ʀᴇsᴍɪ');
     } else if (r.isReady && !r.anyCooldown) {
-      let line = num;
-      if (r.deviceName || r.waOldEligible) {
-        const dev = r.deviceName ? String(r.deviceName) : 'perangkat terdaftar';
-        line += ' · ' + dev;
+      if (r.deviceName || r.waOldEligible || r.accountStatus === 'REGISTERED_ON_DEVICE') {
+        groups.ready.push('· ' + num + ' ⦂ ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ');
+      } else {
+        groups.ready.push('· ' + num + ' ⦂ sɪᴀᴘ');
       }
-      groups.ready.push(line);
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
       if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
@@ -474,9 +473,11 @@ async function processDetection(ctx, numbers) {
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
       groups.cooldown.push('· ' + num + ' ⦂ ' + dur);
+    } else if (r.smsOptionMissing || r.accountStatus === 'SMS_UNAVAILABLE') {
+      groups.restricted.push('· ' + num + ' ⦂ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴅᴀꜰᴛᴀʀᴋᴀɴ');
     } else {
       const note = r.description ? (' · ' + r.description) : '';
-      groups.other.push(num + note);
+      groups.other.push('· ' + num + note);
     }
   }
 
@@ -493,8 +494,9 @@ async function processDetection(ctx, numbers) {
   lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
   if (groups.ready.length) {
     lines.push('');
-    lines.push('✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
-    groups.ready.forEach((n) => lines.push('· ' + n));
+    lines.push('✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
+    lines.push('');
+    groups.ready.forEach((n) => lines.push(n));
   }
   if (groups.cooldown.length) {
     lines.push('');
@@ -505,17 +507,20 @@ async function processDetection(ctx, numbers) {
   if (groups.clone.length) {
     lines.push('');
     lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
-    groups.clone.forEach((n) => lines.push('· ' + n));
+    lines.push('');
+    groups.clone.forEach((n) => lines.push(n));
   }
   if (groups.restricted.length) {
     lines.push('');
     lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
-    groups.restricted.forEach((n) => lines.push('· ' + n));
+    lines.push('');
+    groups.restricted.forEach((n) => lines.push(n));
   }
   if (groups.other.length) {
     lines.push('');
     lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
-    groups.other.forEach((n) => lines.push('· ' + n));
+    lines.push('');
+    groups.other.forEach((n) => lines.push(n));
   }
   try {
     const user = await getEffectiveUser(ctx);
