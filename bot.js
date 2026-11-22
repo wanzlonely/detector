@@ -256,16 +256,18 @@ function extractPhoneCandidates(text) {
     if (/^(19|20)\d{2}$/.test(digits)) continue;
     if (seen.has(digits)) continue;
     seen.add(digits);
-    phones.push(hasPlus || digits.length >= 10 ? ('+' + digits) : digits);
+    if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) digits = '62' + digits.slice(1);
+    phones.push('+' + digits);
   }
   if (!phones.length) {
     const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
     for (const line of lines) {
-      const digits = line.replace(/\D/g, '');
+      let digits = line.replace(/\D/g, '');
       if (digits.length < 8 || digits.length > 15) continue;
+      if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) digits = '62' + digits.slice(1);
       if (seen.has(digits)) continue;
       seen.add(digits);
-      phones.push(line.includes('+') ? ('+' + digits) : digits);
+      phones.push('+' + digits);
     }
   }
   return phones;
@@ -378,9 +380,24 @@ async function processDetection(ctx, numbers) {
     } catch (_) {}
   }
   function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+  function preserveNumber(raw, result) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    const fallback = digits ? ('+' + digits) : String(raw || '');
+    if (!result) return fallback;
+    const shown = String(result.formattedNumber || '').replace(/\D/g, '');
+    // If result lost country code (shorter/different than input), force original
+    if (!shown || (digits.length >= 10 && shown.length < digits.length - 1) || (digits.length >= 10 && !digits.endsWith(shown.slice(-8)))) {
+      result.formattedNumber = fallback;
+    } else if (!String(result.formattedNumber || '').startsWith('+') && digits) {
+      result.formattedNumber = '+' + shown;
+    }
+    return result.formattedNumber || fallback;
+  }
   async function checkOne(raw, waveOpts) {
     const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
     if (stop) return { cancelled: true };
+    const digits = String(raw || '').replace(/\D/g, '');
+    const safeNumber = digits ? ('+' + digits) : String(raw || '');
     try {
       const opts = Object.assign({ skipSticky: true }, waveOpts || {});
       let result = await checkWhatsAppCooldown(raw, opts);
@@ -393,22 +410,26 @@ async function processDetection(ctx, numbers) {
         }
       }
       if (result && !result.error) {
-        await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
+        preserveNumber(raw, result);
+        await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
+        return result;
+      }
+      if (result) {
+        preserveNumber(raw, result);
         return result;
       }
     } catch (err) {
       try {
         const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
         if (retry && !retry.error) {
-          await addCheckLog(userId, retry.formattedNumber || raw, retry.accountStatus || '-', retry.proxyTag || '-');
+          preserveNumber(raw, retry);
+          await addCheckLog(userId, retry.formattedNumber || safeNumber, retry.accountStatus || '-', retry.proxyTag || '-');
           return retry;
         }
       } catch (_) {}
-      const digits = String(raw || '').replace(/\D/g, '');
-      return { formattedNumber: digits ? ('+' + digits) : String(raw || ''), isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
+      return { formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
     }
-    const digits = String(raw || '').replace(/\D/g, '');
-    return { formattedNumber: digits ? ('+' + digits) : String(raw || ''), isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
+    return { formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
   }
   async function runPool(indexes, waveOpts) {
     let cursor = 0;
@@ -590,10 +611,16 @@ bot.on('text', async (ctx, next) => {
   const max = isVip ? 30 : 1;
   const list = phones.slice(0, max);
   if (!isVip && phones.length > 1) {
-    return ctx.reply('✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ 1 ɴᴏᴍᴏʀ.\nᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>', {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
-    });
+    return ctx.reply(
+      '✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n' +
+      '<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ <b>1 ɴᴏᴍᴏʀ</b> ᴘᴇʀ ᴋɪʀɪᴍᴀɴ.\n' +
+      'ᴋᴀᴍᴜ ᴋɪʀɪᴍ <b>' + phones.length + '</b> ɴᴏᴍᴏʀ — ʜᴀɴʏᴀ ʏᴀɴɢ ᴘᴇʀᴛᴀᴍᴀ ʏᴀɴɢ ᴅɪᴘʀᴏsᴇs.\n' +
+      'ᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>',
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
+      }
+    );
   }
   return processDetection(ctx, list);
 });
