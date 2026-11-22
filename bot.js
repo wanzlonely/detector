@@ -518,13 +518,17 @@ async function processDetection(ctx, numbers) {
       let secs = Number(r.secondarySeconds) || 0;
       if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
       if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      let dev = (r.deviceName && String(r.deviceName).trim()) || '';
+      if (!dev && r.waOldEligible) dev = 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+      if (!dev) dev = 'ᴜɴᴋɴᴏᴡɴ';
       let label;
       if (secs > 0) label = formatCooldownSmallCaps(secs) + ' · ' + dev;
       else label = dev;
       groups.clone.push({ line: num + ' ⦂ ' + label, secs: secs || 0 });
     } else if (r.isReady && !r.anyCooldown) {
-      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      let dev = (r.deviceName && String(r.deviceName).trim()) || '';
+      if (!dev && r.waOldEligible) dev = 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+      if (!dev) dev = 'ᴜɴᴋɴᴏᴡɴ';
       groups.ready.push({ line: num + ' ⦂ ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
@@ -532,7 +536,9 @@ async function processDetection(ctx, numbers) {
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
-      const dev = (r.deviceName && String(r.deviceName).trim()) || 'ᴜɴᴋɴᴏᴡɴ';
+      let dev = (r.deviceName && String(r.deviceName).trim()) || '';
+      if (!dev && r.waOldEligible) dev = 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+      if (!dev) dev = 'ᴜɴᴋɴᴏᴡɴ';
       groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' · ' + dev, secs: secs });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
