@@ -110,15 +110,27 @@ function renderLeaderboard(rows) {
 function renderReferral({ link, stats }) {
   const coins = (stats && stats.coins) || 0;
   const invited = (stats && (stats.total || stats.invited)) || 0;
+  const rewarded = (stats && stats.rewarded) || 0;
   return [
-    '♧ <b>ʀᴇғᴇʀʀᴀʟ</b>',
+    '♧ <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀʀᴀʟ</b> ♧',
+    '<i>ᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ · ᴅᴀᴘᴀᴛᴋᴀɴ ᴋᴏɪɴ</i>',
     '',
-    '▸ ᴋᴏɪɴ ⦂ <b>' + coins + '</b>',
-    '▸ ᴛᴇʀᴜɴᴅᴀɴɢ ⦂ <b>' + invited + '</b>',
+    '━━━━━━━━━━━━━━━━━━━━',
+    '▸ ᴋᴏɪɴ ᴋᴀᴍᴜ ⦂ <b>' + coins + '</b>',
+    '▸ ᴛᴇᴍᴀɴ ᴛᴇʀᴜɴᴅᴀɴɢ ⦂ <b>' + invited + '</b>',
+    '▸ ʜᴀᴅɪᴀʜ ᴅɪᴋʟᴀɪᴍ ⦂ <b>' + rewarded + '</b>',
+    '━━━━━━━━━━━━━━━━━━━━',
     '',
-    '<blockquote>ʙᴀɢɪᴋᴀɴ ᴛᴀᴜᴛᴀɴ ᴅɪ ʙᴀᴡᴀʜ. sᴇᴛɪᴀᴘ ʀᴇғᴇʀʀᴀʟ ʏᴀɴɢ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴇᴍʙᴇʀɪᴋᴀɴ 5 ᴋᴏɪɴ.</blockquote>',
+    '♛ <b>ᴄᴀʀᴀ ᴋᴇʀᴊᴀ</b>',
+    '1. ʙᴀɢɪᴋᴀɴ ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴ ᴋᴀᴍᴜ',
+    '2. ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ʟᴇᴡᴀᴛ ᴛᴀᴜᴛᴀɴ',
+    '3. ᴛᴇᴍᴀɴ sᴇʟᴇsᴀɪᴋᴀɴ <b>3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>',
+    '4. ᴋᴀᴍᴜ ᴅᴀᴘᴀᴛ <b>5 ᴋᴏɪɴ</b> ᴏᴛᴏᴍᴀᴛɪs',
     '',
-    '<code>' + escapeHtml(link) + '</code>'
+    '◈ <b>ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴ</b>',
+    '<code>' + escapeHtml(link) + '</code>',
+    '',
+    '<blockquote>ᴋᴏɪɴ ʙɪsᴀ ᴅɪᴛᴜᴋᴀʀ ᴍᴇɴᴊᴀᴅɪ ᴋᴜᴏᴛᴀ ᴛᴀᴍʙᴀʜᴀɴ ᴀᴛᴀᴜ ᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ.</blockquote>'
   ].join('\n');
 }
 
