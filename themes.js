@@ -187,25 +187,25 @@ function renderStoreCatalog({ user, packages }) {
 
 function renderPackageDetailCard({ user, pkg }) {
   const perDay = Math.round(pkg.price / pkg.duration_days);
+  const days = Number(pkg.duration_days) || 1;
+  const paketName = escapeHtml(pkg.durationLabel || (days + ' hari'));
   return [
-    '✧ <b>ᴅᴇᴛᴀɪʟ ᴘᴀᴋᴇᴛ ᴘʀᴇᴍɪᴜᴍ</b> ✧',
-    '<i>ᴘᴇʀɪᴋsᴀ ʀɪɴᴄɪᴀɴ ᴘᴀᴋᴇᴛ sᴇʙᴇʟᴜᴍ ᴍᴇʟᴀɴᴊᴜᴛᴋᴀɴ.</i>',
+    '✦ <b>ᴅᴇᴛᴀɪʟ ᴘᴀᴋᴇᴛ ᴘʀᴇᴍɪᴜᴍ</b>',
+    'ᴘᴇʀɪᴋsᴀ ʀɪɴᴄɪᴀɴ ᴘᴇsᴀɴᴀɴ sᴇʙᴇʟᴜᴍ ᴍᴇʟᴀɴᴊᴜᴛᴋᴀɴ.',
     '',
     '◈ <b>ʀɪɴᴄɪᴀɴ ᴘᴇsᴀɴᴀɴ</b>',
-    '▸ ᴍᴀsᴀ ᴀᴋᴛɪғ ⦂ <b>' + escapeHtml(pkg.durationLabel) + '</b>',
+    '▸ ᴘᴀᴋᴇᴛ ⦂ <b>' + paketName + '</b>',
     '▸ ʜᴀʀɢᴀ ⦂ <b>' + formatIDR(pkg.price) + '</b>',
-    '▸ ʙɪᴀʏᴀ ʜᴀʀɪᴀɴ ⦂ <code>' + formatIDR(perDay) + '</code>',
-    '▸ ᴍᴇᴛᴏᴅᴇ ⦂ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴀɴᴜᴀʟ</b>',
+    '▸ ʙɪᴀʏᴀ ʜᴀʀɪᴀɴ ⦂ <b>' + formatIDR(perDay) + ' / ʜᴀʀɪ</b>',
+    '▸ ᴀᴋᴛɪᴠᴀsɪ ⦂ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴍᴀɴᴜᴀʟ</b>',
     '',
-    '♛ <b>ғɪᴛᴜʀ ᴘʀᴇᴍɪᴜᴍ</b>',
-    '✦ ᴋᴜᴏᴛᴀ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴇɴɢɪᴋᴜᴛɪ ᴘᴀᴋᴇᴛ',
-    '✦ ᴛᴀᴍᴘɪʟᴀɴ ʜᴀsɪʟ ᴅᴇɴɢᴀɴ ᴋᴀᴛᴇɢᴏʀɪ sᴛᴀᴛᴜs',
-    '✦ ᴀᴋsᴇs ғɪᴛᴜʀ ᴘʀᴇᴍɪᴜᴍ sᴇʟᴀᴍᴀ ᴍᴀsᴀ ᴀᴋᴛɪғ',
+    '♛ <b>ꜰɪᴛᴜʀ ᴘʀᴇᴍɪᴜᴍ</b>',
+    '· ᴀᴋsᴇs ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛᴀɴᴘᴀ ʙᴀᴛᴀs sᴇʟᴀᴍᴀ ' + days + ' ʜᴀʀɪ',
+    '· ᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ ᴅᴀʟᴀᴍ sᴀᴛᴜ ᴋɪʀɪᴍᴀɴ',
+    '· ʟᴀᴘᴏʀᴀɴ ʜᴀsɪʟ ᴛᴇʀᴋᴀᴛᴇɢᴏʀɪ & ʀᴏᴛᴀsɪ ᴘʀᴏxʏ',
     '',
-    pkg.highlight ? '<i>' + escapeHtml(pkg.highlight) + '</i>' : '',
-    '',
-    '<blockquote>ᴛᴇᴋᴀɴ ᴛᴏᴍʙᴏʟ ʙᴇʟɪ ᴜɴᴛᴜᴋ ᴍᴇʟɪʜᴀᴛ ᴘᴇᴛᴜɴᴊᴜᴋ ᴘᴇᴍʙᴀʏᴀʀᴀɴ.</blockquote>'
-  ].filter(Boolean).join('\n');
+    'ᴛᴇᴋᴀɴ ᴛᴏᴍʙᴏʟ ʙᴇʟɪ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇʟɪʜᴀᴛ ɪɴsᴛʀᴜᴋsɪ ᴘᴇᴍʙᴀʏᴀʀᴀɴ.'
+  ].join('\n');
 }
 
 function renderPaymentMaintenanceCard({ user, pkg }) {
@@ -273,7 +273,7 @@ function renderCooldownCard({ result, user, isVip }) {
     '◈ <b>ɪɴғᴏʀᴍᴀsɪ ᴛᴀʀɢᴇᴛ</b>',
     '▸ ɴᴏᴍᴏʀ ⦂ ' + numberDisplay,
     '▸ ɴᴇɢᴀʀᴀ ⦂ <b>' + escapeHtml(result.region) + '</b>',
-    '▸ sᴛᴀᴛᴜs ⦂ <b>' + status + '</b>',
+    '▸ sᴛᴀᴛs ⦂ <b>' + status + '</b>',
     '▸ ᴊᴀʟᴜʀ ⦂ <code>' + escapeHtml(result.proxyInfo) + '</code>',
     '',
     '⌁ <b>ʜᴀsɪʟ ᴀɴᴀʟɪsɪs</b>',
