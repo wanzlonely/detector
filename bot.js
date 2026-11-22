@@ -51,7 +51,7 @@ const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
 /** Telegram Bot API styled callback buttons (primary/success/danger) when supported */
 function styledCallback(text, data, style) {
   const btn = Markup.button.callback(text, data);
-  if (style) btn.style = style;
+  if (style) btn.style = style; // primary | success | danger
   return btn;
 }
 
@@ -108,17 +108,26 @@ bot.use((ctx, next) => next());
 
 async function getEffectiveUser(ctx) {
   const user = await getOrCreateUser(ctx.from);
-  if (!isOwner(ctx)) returnuser.vip_until: 4102444800, vip_tier: 'OWNER', vip_plan: 'OWNER ACCESS', bulk_limit: 30, free_used_today: 0 };
+  if (!isOwner(ctx)) return user;
+  return { ...user, vip_until: 4102444800, vip_tier: 'OWNER', vip_plan: 'OWNER ACCESS', bulk_limit: 30, free_used_today: 0 };
 }
 
 async function showHome(ctx) {
-  const user = await getEffectiveUser(ctx);
-  return ctx.reply(renderDashboard({
-    user,
-    isVip: isOwner(ctx) || isUserVip(user),
-    isOwner: isOwner(ctx),
-    brandName: BRAND_NAME
-  }), { parse_mode: 'HTML', ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime() });
+  try {
+    const user = await getEffectiveUser(ctx);
+    return await ctx.reply(renderDashboard({
+      user,
+      isVip: isOwner(ctx) || isUserVip(user),
+      isOwner: isOwner(ctx),
+      brandName: BRAND_NAME
+    }), {
+      parse_mode: 'HTML',
+      ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
+    });
+  } catch (err) {
+    console.error('[showHome]', err && err.stack || err);
+    return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴜᴀᴛ ᴍᴇɴᴜ</b>\n\n<blockquote>ᴄᴏʙᴀ /start ʟᴀɢɪ</blockquote>', { parse_mode: 'HTML' }).catch(() => {});
+  }
 }
 
 function buildStoreKeyboard() {
@@ -152,39 +161,60 @@ async function showPackage(ctx, pkg, edit) {
 async function showCheckout(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPaymentMaintenanceCard({ user, pkg });
-  const keyboard = Markup.inlineKeyboard([[styledCallback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier, 'danger')]]);
+  const keyboard = Markup.inlineKeyboard([[Markup.button.callback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier)]]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
 }
 
 bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
 
+// Global error handler – mencegah bot diam total saat ada unhandled rejection
+bot.catch((err, ctx) => {
+  console.error('[bot.catch]', err && err.stack || err);
+  try {
+    if (ctx && ctx.reply) {
+      ctx.reply('✕ <b>ᴛᴇʀᴊᴀᴅɪ ᴋᴇsᴀʟᴀʜᴀɴ</b>\n\n<blockquote>sɪʟᴀᴋᴀɴ ᴄᴏʙᴀ ʟᴀɢɪ /start</blockquote>', { parse_mode: 'HTML' }).catch(() => {});
+    }
+  } catch (_) {}
+});
+
 bot.start(async (ctx) => {
-  const payload = String(ctx.startPayload || '');
-  if (payload.startsWith('ref_')) {
-    const registered = await registerReferral(ctx.from.id, payload.slice(4));
-    if (registered) await ctx.reply('♧ ᴋᴀᴍᴜ ʙᴇʀɢᴀʙᴜɴɢ ᴍᴇʟᴀʟᴜɪ ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴ. sᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴘᴇʀᴛᴀᴍᴀ ᴀɢᴀʀ ᴘᴇɴɢᴜɴᴅᴀɴɢ ᴍᴇᴍᴘᴇʀᴏʟᴇʜ 5 ᴋᴏɪɴ ʀᴇғᴇʀʀᴀʟ.');
+  try {
+    const payload = String(ctx.startPayload || '');
+    if (payload.startsWith('ref_')) {
+      try {
+        const registered = await registerReferral(ctx.from.id, payload.slice(4));
+        if (registered) {
+          await ctx.reply('♧ Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh 5 koin referral.');
+        }
+      } catch (refErr) {
+        console.error('[start/ref]', refErr && refErr.message || refErr);
+      }
+    }
+    return await showHome(ctx);
+  } catch (err) {
+    console.error('[start]', err && err.stack || err);
+    return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴜᴀᴛ ᴅᴀsʜʙᴏᴀʀᴅ</b>\n\n<blockquote>ᴄᴏʙᴀ ᴋᴇᴍʙᴀʟɪ /start</blockquote>', { parse_mode: 'HTML' }).catch(() => {});
   }
-  return showHome(ctx);
 });
 bot.command('store', (ctx) => showStore(ctx, false));
 bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showStore(ctx, true); });
 bot.action(/^pkg:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
-  if (!pkg) return ctx.reply('✦ <b>ᴘᴀᴋᴇᴛ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>');
   return showPackage(ctx, pkg, true);
 });
 bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const pkg = getPackageById(ctx.match[1]);
-  if (!pkg) return ctx.reply('✦ <b>ᴘᴀᴋᴇᴛ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>');
   return showCheckout(ctx, pkg, true);
 });
 
 async function startContact(ctx) {
   await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
-  return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\n<blockquote>ᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ.\nᴀᴅᴍɪɴ ᴀᴋᴀɴ ᴍᴇᴍʙᴀʟᴀs sᴇᴄᴇᴘᴀᴛɴʏᴀ.</blockquote>', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('Batalkan', 'contact:cancel', 'danger')]]) });
+  return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\nᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ.\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('× BATALKAN', 'contact:cancel')]]) });
 }
 bot.hears('✉︎ HUBUNGI ADMIN', startContact);
 bot.action('contact:cancel', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await redis.del('contact:state:' + ctx.from.id); return ctx.reply('✕ <b>ᴘᴇɴɢɪʀɪᴍᴀɴ ᴘᴇsᴀɴ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' }); });
@@ -258,6 +288,9 @@ async function startDetect(ctx) {
   const limitHint = isVip ? 'ᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ / ᴋɪʀɪᴍᴀɴ' : '1 ɴᴏᴍᴏʀ (ғʀᴇᴇ)';
   return ctx.reply(
     '⌖ <b>ᴅᴇᴛᴇᴋsɪ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</b>\n\n' +
+    'ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴘᴇʀɪᴋsᴀ.\n' +
+    '· ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴀᴛᴀᴜ ᴋᴏᴍᴀ\n' +
+    '· sɪsᴛᴇᴍ ᴏᴛᴏᴍᴀᴛɪs ᴍᴇɴɢᴇᴋsᴛʀᴀᴋ ᴀɴɢᴋᴀ\n\n' +
     'sɪʟᴀᴋᴀɴ ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴄᴇᴋ.\n' +
     '• ᴘᴇɴɢᴇᴄᴇᴋᴀɴ ᴍᴀssᴀʟ ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴀᴛᴀᴜ ᴋᴏᴍᴀ.\n' +
     '• ʙᴏᴛ ᴏᴛᴏᴍᴀᴛɪs ᴍᴇɴɢᴀᴍʙɪʟ ᴀɴɢᴋᴀ sᴀᴊᴀ.\n\n' +
@@ -448,119 +481,94 @@ async function processDetection(ctx, numbers) {
   const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
   await redis.del('detect:active:' + userId);
   await redis.del('detect:stop:' + userId + ':' + jobId);
-  await redis.del('detect:exit:' + userId + ':' + jobId);
 
   if (stopped) {
     return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
   }
 
-  function pickCooldownDuration(r) {
-    const ch = r && r.channels;
-    const candidates = [
-      ch && ch.sms,
-      r && r.primaryTimer,
-      ch && ch.voice,
-      ch && ch.flash,
-      ch && ch.email
-    ].filter((t) => t && Number(t.rawSeconds) > 0);
-    if (!candidates.length) return null;
-    return candidates[0].uiTimer || candidates[0].formatted || null;
-  }
+  // Group results
+  const groups = {
+    ready: [],
+    cooldown: [],
+    clone: [],
+    restricted: [],
+    other: []
+  };
 
-  const groups = { ready: [], cooldown: [], clone: [], banned: [], smsUnavailable: [] };
-  let ok = 0;
-  for (let idx = 0; idx < results.length; idx++) {
-    const r = results[idx];
+  for (const r of results) {
     if (!r || r.cancelled) continue;
-    ok += 1;
-    const original = numbers[idx];
-    const digits = String((r && r.formattedNumber) || original || '').replace(/\D/g, '');
-    const num = digits ? ('+' + digits) : String(original || '');
-    if (r.isBanned) groups.banned.push(num);
-    else if (r.isCloneBlocked) groups.clone.push(num);
-    else if (r.anyCooldown || r.softFallback) {
-      groups.cooldown.push({ number: num, duration: pickCooldownDuration(r) });
-    } else if (r.smsOptionMissing || (r.smsAvailable === false && !r.isReady && !r.waOldEligible)) {
-      groups.smsUnavailable.push(num);
-    } else {
+    const num = r.formattedNumber || '-';
+    if (r.isBanned || r.accountStatus === 'BANNED' || r.accountStatus === 'RESTRICTED') {
+      groups.restricted.push(num);
+    } else if (r.isCloneBlocked) {
+      groups.clone.push(num);
+    } else if (r.isReady && !r.anyCooldown) {
       groups.ready.push(num);
+    } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
+      let line = num;
+      if (r.primaryTimer && r.primaryTimer.display) {
+        line += ' · ' + r.primaryTimer.display;
+      } else if (r.description) {
+        line += ' · ' + r.description;
+      }
+      groups.cooldown.push(line);
+    } else {
+      groups.other.push(num + (r.description ? ' · ' + r.description : ''));
     }
   }
 
   const lines = [];
   lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
-  lines.push('');
   lines.push(buildProgressBar(100) + ' 100%');
   lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
-  lines.push('');
   lines.push('✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ ⦂ <b>' + groups.ready.length + '</b>');
   lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
   lines.push('△ ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
-  lines.push('⊘ ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ⦂ <b>' + groups.smsUnavailable.length + '</b>');
-  lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.banned.length + '</b>');
-  lines.push('');
-  lines.push('sᴜᴋsᴇs ⦂ <b>' + ok + '</b> · ᴇʀʀᴏʀ ⦂ <b>0</b>');
+  lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.restricted.length + '</b>');
   lines.push('');
   lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
 
   if (groups.ready.length) {
     lines.push('');
-    lines.push('✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪғɪᴋᴀsɪ</b>');
-    lines.push(...groups.ready.map((n) => '<code>' + n + '</code>'));
+    lines.push('✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
+    groups.ready.forEach((n) => lines.push('· ' + n));
   }
   if (groups.cooldown.length) {
     lines.push('');
-    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
-    lines.push(...groups.cooldown.map((item) => {
-      if (item.duration) return '<code>' + item.number + '</code> — ' + item.duration;
-      return '<code>' + item.number + '</code>';
-    }));
+    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ</b>');
+    groups.cooldown.forEach((n) => lines.push('· ' + n));
   }
   if (groups.clone.length) {
     lines.push('');
     lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
-    lines.push(...groups.clone.map((n) => '<code>' + n + '</code>'));
+    groups.clone.forEach((n) => lines.push('· ' + n));
   }
-  if (groups.smsUnavailable.length) {
-    lines.push('');
-    lines.push('⊘ <b>ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
-    lines.push(...groups.smsUnavailable.map((n) => '<code>' + n + '</code>'));
-  }
-  if (groups.banned.length) {
+  if (groups.restricted.length) {
     lines.push('');
     lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
-    lines.push(...groups.banned.map((n) => '<code>' + n + '</code>'));
+    groups.restricted.forEach((n) => lines.push('· ' + n));
+  }
+  if (groups.other.length) {
+    lines.push('');
+    lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
+    groups.other.forEach((n) => lines.push('· ' + n));
   }
 
-  lines.push('');
-  lines.push('ᴘʀᴏsᴇs ⟿ <b>' + total + 'd</b>');
-
-  const text = lines.join('\n');
-  try {
-    if (progressMsg) {
-      await ctx.telegram.editMessageText(progressMsg.chat.id, progressMsg.message_id, undefined, text, { parse_mode: 'HTML' });
-    } else {
-      await ctx.reply(text, { parse_mode: 'HTML' });
-    }
-  } catch (_) {
-    await ctx.reply(text, { parse_mode: 'HTML' });
-  }
-
+  // Consume quota for free users
   try {
     const user = await getEffectiveUser(ctx);
-    if (!(isOwner(ctx) || isUserVip(user))) {
-      await consumeQuota(userId, Math.min(total, 3));
-    } else {
-      await consumeQuota(userId, total);
+    if (!isOwner(ctx) && !isUserVip(user)) {
+      await consumeQuota(ctx.from.id, Math.min(total, 1));
     }
   } catch (e) {
     console.error('[quota]', e && e.message || e);
   }
+
+  return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
 
 bot.on('text', async (ctx, next) => {
   const text = (ctx.message && ctx.message.text) || '';
-  if (!text || text.startsWith('/')) return next();
   if (/^(⌖\s*DETECT|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
 
   const mode = await redis.get('detect:mode:' + ctx.from.id);
@@ -587,10 +595,20 @@ bot.on('text', async (ctx, next) => {
 });
 
 if (require.main === module) {
-  bot.launch().then(() => console.log('[bot] launched')).catch((err) => {
-    console.error('[launch]', err && err.stack || err);
-    process.exitCode = 1;
+  process.on('unhandledRejection', (err) => {
+    console.error('[unhandledRejection]', err && err.stack || err);
   });
+  process.on('uncaughtException', (err) => {
+    console.error('[uncaughtException]', err && err.stack || err);
+  });
+
+  bot.launch({ dropPendingUpdates: true })
+    .then(() => console.log('[bot] launched successfully'))
+    .catch((err) => {
+      console.error('[launch]', err && err.stack || err);
+      process.exitCode = 1;
+    });
+
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }
