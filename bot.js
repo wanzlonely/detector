@@ -333,77 +333,160 @@ async function processDetection(ctx, numbers) {
   const jobId = Date.now().toString(36);
   await redis.set('detect:active:' + userId, jobId, { ex: 600 });
   await redis.del('detect:mode:' + userId);
+
   const total = numbers.length;
   const results = new Array(total);
+
   let progressMsg;
   let currentStageLabel = 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
   let stageProcessed = 0;
   let stageTotal = total;
+
   try {
     progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
   } catch (_) {}
+
   async function updateProgress() {
     if (!progressMsg) return;
     try {
-      await ctx.telegram.editMessageText(progressMsg.chat.id, progressMsg.message_id, undefined, buildProgressText(stageProcessed, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
+      await ctx.telegram.editMessageText(
+        progressMsg.chat.id,
+        progressMsg.message_id,
+        undefined,
+        buildProgressText(stageProcessed, stageTotal, currentStageLabel),
+        { parse_mode: 'HTML' }
+      );
     } catch (_) {}
   }
-  function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async function checkOne(raw, waveOpts) {
     const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
     if (stop) return { cancelled: true };
+
     try {
-      const result = await checkWhatsAppCooldown(raw, waveOpts || {});
+      let result = await checkWhatsAppCooldown(raw, waveOpts || {});
+      // Soft-fallback / low confidence → one forced full dual recheck
+      if (result && !result.cancelled && (result.softFallback || result.needsRecheck || (Number(result.confidence) || 0) < 0.55)) {
+        if ((waveOpts && waveOpts.wave) !== 'full') {
+          try {
+            const retry = await checkWhatsAppCooldown(raw, { wave: 'full' });
+            if (retry && !retry.error && (Number(retry.confidence) || 0) >= (Number(result.confidence) || 0)) {
+              result = retry;
+            }
+          } catch (_) {}
+        }
+      }
       if (result && !result.error) {
-        await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
+        await addCheckLog(
+          userId,
+          result.formattedNumber || raw,
+          result.accountStatus || result.description || '-',
+          result.proxyTag || result.proxyInfo || '-'
+        );
         return result;
       }
     } catch (err) {
+      // last chance full probe
+      try {
+        const retry = await checkWhatsAppCooldown(raw, { wave: 'full' });
+        if (retry && !retry.error) {
+          await addCheckLog(userId, retry.formattedNumber || raw, retry.accountStatus || '-', retry.proxyTag || '-');
+          return retry;
+        }
+      } catch (_) {}
       const digits = String(raw || '').replace(/\D/g, '');
       const display = digits ? ('+' + digits) : String(raw || '');
-      return { formattedNumber: display, isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: true, smsAvailable: null, smsOptionMissing: false, accountStatus: 'IN_COOLDOWN', error: false, softFallback: true, confidence: 0.35, needsRecheck: false, description: (err && err.message) || 'Respons tidak stabil' };
+      return {
+        formattedNumber: display,
+        isBanned: false,
+        isCloneBlocked: false,
+        isReady: false,
+        anyCooldown: false,
+        smsAvailable: null,
+        smsOptionMissing: false,
+        accountStatus: 'UNKNOWN',
+        error: false,
+        softFallback: true,
+        confidence: 0.3,
+        needsRecheck: true,
+        description: 'Respons tidak stabil · coba ulang'
+      };
     }
+
     const digits = String(raw || '').replace(/\D/g, '');
     const display = digits ? ('+' + digits) : String(raw || '');
-    return { formattedNumber: display, isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: true, accountStatus: 'IN_COOLDOWN', error: false, softFallback: true, confidence: 0.35, description: 'Respons tidak stabil' };
+    return {
+      formattedNumber: display,
+      isBanned: false,
+      isCloneBlocked: false,
+      isReady: false,
+      anyCooldown: false,
+      accountStatus: 'UNKNOWN',
+      error: false,
+      softFallback: true,
+      confidence: 0.3,
+      description: 'Respons tidak stabil · coba ulang'
+    };
   }
+
   async function runPool(indexes, waveOpts) {
     let cursor = 0;
     stageProcessed = 0;
     stageTotal = indexes.length || 1;
-    const CONCURRENCY_SAFE = Math.min(indexes.length >= 16 ? 5 : (indexes.length >= 8 ? 6 : 8), indexes.length || 1);
+    // Adaptive concurrency: keep WA rate-limits happy while staying fast
+    let conc;
+    if (indexes.length >= 20) conc = 5;
+    else if (indexes.length >= 12) conc = 6;
+    else if (indexes.length >= 6) conc = 7;
+    else conc = Math.min(8, indexes.length || 1);
+    const CONCURRENCY_SAFE = Math.max(1, conc);
+
     async function worker(workerId) {
-      if (workerId > 0) await sleep(workerId * 60);
+      if (workerId > 0) await sleep(workerId * 70);
       while (cursor < indexes.length) {
         const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
         if (stop) return;
         const pos = cursor++;
+        if (pos >= indexes.length) return;
         const i = indexes[pos];
         results[i] = await checkOne(numbers[i], waveOpts);
         stageProcessed += 1;
-        if (stageProcessed === stageTotal || stageProcessed % 2 === 0 || stageProcessed === 1) await updateProgress();
+        if (stageProcessed === 1 || stageProcessed === stageTotal || stageProcessed % 2 === 0) {
+          await updateProgress();
+        }
       }
     }
     await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
     stageProcessed = stageTotal;
     await updateProgress();
   }
+
   const allIdx = Array.from({ length: total }, (_, i) => i);
+
+  // Dual-wave: bulk ≥4 → exist triage then full only for ambiguous
   if (total >= 4) {
     currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · sᴄᴀɴ ᴄᴇᴘᴀᴛ';
     await runPool(allIdx, { wave: 'exist' });
+
     const needFull = [];
     for (let i = 0; i < total; i++) {
       const r = results[i];
       if (!r || r.cancelled) continue;
       const conf = Number(r.confidence) || 0;
+      // High-confidence clear decisions skip full dual
       const clearLiveCooldown = r.anyCooldown && r.primaryTimer && r.primaryTimer.rawSeconds > 0 && conf >= 0.82;
       const clearBan = r.isBanned && conf >= 0.88;
-      const clearReady = r.isReady && r.existClear && conf >= 0.82;
-      const clearClone = r.isCloneBlocked && conf >= 0.85;
+      const clearReady = r.isReady && (r.existClear || conf >= 0.84) && !r.anyCooldown;
+      const clearClone = (r.isCloneBlocked || r.isSecurityBlock) && conf >= 0.85;
       if (clearLiveCooldown || clearBan || clearReady || clearClone) continue;
+      // Ambiguous / soft / unknown → full dual
       needFull.push(i);
     }
+
     if (needFull.length) {
       currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴅᴀʟᴀᴍ';
       await runPool(needFull, { wave: 'full' });
@@ -417,24 +500,40 @@ async function processDetection(ctx, numbers) {
     currentStageLabel = total > 1 ? 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
     await runPool(allIdx, { wave: 'full' });
   }
+
   const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
   await redis.del('detect:active:' + userId);
   await redis.del('detect:stop:' + userId + ':' + jobId);
-  if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+  if (stopped) {
+    return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+  }
+
+  // Group results — 4 clear buckets + other
   const groups = { ready: [], cooldown: [], clone: [], restricted: [], other: [] };
   for (const r of results) {
     if (!r || r.cancelled) continue;
     const num = r.formattedNumber || '-';
-    if (r.isBanned || r.accountStatus === 'BANNED' || r.accountStatus === 'RESTRICTED') groups.restricted.push(num);
-    else if (r.isCloneBlocked) groups.clone.push(num);
-    else if (r.isReady && !r.anyCooldown) groups.ready.push(num);
-    else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
+    if (r.isBanned || r.accountStatus === 'BANNED' || r.accountStatus === 'RESTRICTED') {
+      groups.restricted.push(num);
+    } else if (r.isCloneBlocked || r.isSecurityBlock) {
+      groups.clone.push(num);
+    } else if (r.isReady && !r.anyCooldown) {
+      groups.ready.push(num);
+    } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let line = num;
-      if (r.primaryTimer && r.primaryTimer.display) line += ' · ' + r.primaryTimer.display;
-      else if (r.description) line += ' · ' + r.description;
+      if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) {
+        line += ' · ' + (r.primaryTimer.humanTime || r.primaryTimer.uiTimer || r.primaryTimer.display || '');
+      } else if (r.description && /cooldown|coba lagi|jam|menit/i.test(r.description)) {
+        line += ' · ' + r.description.replace(/^Cooldown aktif ·\s*/i, '');
+      }
       groups.cooldown.push(line);
-    } else groups.other.push(num + (r.description ? ' · ' + r.description : ''));
+    } else {
+      // soft / unknown — show as other, not fake cooldown
+      const note = r.description ? (' · ' + r.description) : '';
+      groups.other.push(num + note);
+    }
   }
+
   const lines = [];
   lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
   lines.push(buildProgressBar(100) + ' 100%');
@@ -443,17 +542,44 @@ async function processDetection(ctx, numbers) {
   lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
   lines.push('△ ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
   lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.restricted.length + '</b>');
+  if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
   lines.push('');
   lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
-  if (groups.ready.length) { lines.push(''); lines.push('✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>'); groups.ready.forEach((n) => lines.push('· ' + n)); }
-  if (groups.cooldown.length) { lines.push(''); lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ</b>'); groups.cooldown.forEach((n) => lines.push('· ' + n)); }
-  if (groups.clone.length) { lines.push(''); lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>'); groups.clone.forEach((n) => lines.push('· ' + n)); }
-  if (groups.restricted.length) { lines.push(''); lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>'); groups.restricted.forEach((n) => lines.push('· ' + n)); }
-  if (groups.other.length) { lines.push(''); lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>'); groups.other.forEach((n) => lines.push('· ' + n)); }
+  if (groups.ready.length) {
+    lines.push('');
+    lines.push('✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
+    groups.ready.forEach((n) => lines.push('· ' + n));
+  }
+  if (groups.cooldown.length) {
+    lines.push('');
+    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ</b>');
+    groups.cooldown.forEach((n) => lines.push('· ' + n));
+  }
+  if (groups.clone.length) {
+    lines.push('');
+    lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
+    groups.clone.forEach((n) => lines.push('· ' + n));
+  }
+  if (groups.restricted.length) {
+    lines.push('');
+    lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
+    groups.restricted.forEach((n) => lines.push('· ' + n));
+  }
+  if (groups.other.length) {
+    lines.push('');
+    lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
+    groups.other.forEach((n) => lines.push('· ' + n));
+  }
+
   try {
     const user = await getEffectiveUser(ctx);
-    if (!isOwner(ctx) && !isUserVip(user)) await consumeQuota(ctx.from.id, Math.min(total, 1));
-  } catch (e) { console.error('[quota]', e && e.message || e); }
+    if (!isOwner(ctx) && !isUserVip(user)) {
+      await consumeQuota(ctx.from.id, Math.min(total, 1));
+    }
+  } catch (e) {
+    console.error('[quota]', e && e.message || e);
+  }
+
   return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
 
