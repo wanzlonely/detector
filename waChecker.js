@@ -190,10 +190,10 @@ function extractChannelTimers(existRaw, codeRaw) {
   let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
   if (voiceWait >= 240 && existVoice === 0 && isWaOldMethod) voiceWait = 0;
   if (flashWait >= 240 && existFlash === 0 && isWaOldMethod) flashWait = 0;
+  const deviceName = pickDeviceName(exist, code);
   const waOldEligible =
     Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1 ||
-    Boolean(exist.wa_old_device_name || code.wa_old_device_name);
-  const deviceName = exist.wa_old_device_name || code.wa_old_device_name || exist.device_name || code.device_name || null;
+    Boolean(deviceName);
   return {
     sms: smsSeconds, voice: voiceWait, flash: flashWait, email: emailWait, wa_old: waOldWait,
     retry_after: Math.max(existRetry, codeRetry),
@@ -201,6 +201,62 @@ function extractChannelTimers(existRaw, codeRaw) {
     exist_no_routes: existNoRoutes, code_no_routes: codeNoRoutes, is_code_sent: isCodeSent,
     exist_sms: existSms, code_sms: codeSmsRaw
   };
+}
+
+function pickDeviceName(exist, code) {
+  const sources = [exist, code];
+  const keys = [
+    'wa_old_device_name', 'wa_old_device', 'device_name', 'old_device_name',
+    'wa_device_name', 'registered_device_name', 'device', 'phone_model',
+    'model', 'device_model', 'wa_old_model', 'last_device_name'
+  ];
+  for (const src of sources) {
+    if (!src || typeof src !== 'object') continue;
+    for (const k of keys) {
+      const v = src[k];
+      if (v == null) continue;
+      if (typeof v === 'string' && v.trim()) return cleanDeviceName(v);
+      if (typeof v === 'object') {
+        const nested = v.name || v.device_name || v.model || v.model_name || v.device || null;
+        if (nested && String(nested).trim()) return cleanDeviceName(nested);
+      }
+    }
+    // nested security / account objects
+    for (const nestKey of ['account_security', 'security', 'device_info', 'wa_old']) {
+      const nest = src[nestKey];
+      if (!nest || typeof nest !== 'object') continue;
+      for (const k of keys) {
+        const v = nest[k];
+        if (typeof v === 'string' && v.trim()) return cleanDeviceName(v);
+      }
+    }
+  }
+  // last resort: scan raw JSON string for known patterns near device keywords
+  try {
+    const blob = JSON.stringify({ exist, code });
+    const patterns = [
+      /"wa_old_device_name"\s*:\s*"([^"]{2,60})"/i,
+      /"device_name"\s*:\s*"([^"]{2,60})"/i,
+      /"old_device_name"\s*:\s*"([^"]{2,60})"/i,
+      /"wa_device_name"\s*:\s*"([^"]{2,60})"/i
+    ];
+    for (const re of patterns) {
+      const m = blob.match(re);
+      if (m && m[1] && m[1].trim()) return cleanDeviceName(m[1]);
+    }
+  } catch (_) {}
+  return null;
+}
+
+function cleanDeviceName(name) {
+  let s = String(name || '').trim();
+  if (!s) return null;
+  // strip junk wrappers
+  s = s.replace(/^[\s"']+|[\s"']+$/g, '');
+  if (!s || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined' || s === '-') return null;
+  // keep readable length
+  if (s.length > 40) s = s.slice(0, 40).trim();
+  return s;
 }
 
 function buildChannel(seconds) {
