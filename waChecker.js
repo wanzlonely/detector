@@ -444,38 +444,36 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     smsSeconds = engineCd;
   }
 
-  // ========== 4) READY vs COOLDOWN — aturan ketat ==========
-  // SIAP = SMS tidak CD (smsSeconds === 0) dan jalur SMS terbuka
-  // COOLDOWN = smsSeconds > 0 (meski perangkat lain tersedia)
+  // ========== 4) SMS status (siap / cooldown) — dihitung SELALU untuk label sekunder ==========
+  // SIAP = SMS tidak CD; COOLDOWN = SMS CD (meski device tersedia)
+  // Untuk nomor clone/ban, flag ini tetap diisi agar tampilan sekunder akurat
   let isCooldown = false;
   let isReady = false;
 
-  if (!isBanned && !isCloneBlocked && !isSecurityBlock) {
-    if (smsSeconds > 0) {
-      // SMS sedang cooldown → SELALU cooldown WhatsApp
+  if (smsSeconds > 0) {
+    isCooldown = true;
+    isReady = false;
+  } else {
+    const existAnswered = Boolean(existText && String(existText).trim());
+    const smsPathOpen = existAnswered && !existNoRoutes;
+    const engineReady = Boolean(parsed && parsed.isReady);
+    const engineCdFlag = Boolean(parsed && parsed.isCooldown);
+    const st = String((parsed && parsed.state) || '').toUpperCase();
+
+    if (engineCdFlag && (st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN')) {
       isCooldown = true;
       isReady = false;
-    } else {
-      // smsSeconds === 0
-      const existAnswered = Boolean(existText && String(existText).trim());
-      const smsPathOpen = existAnswered && !existNoRoutes;
-      const engineReady = Boolean(parsed && parsed.isReady);
-      const engineCdFlag = Boolean(parsed && parsed.isCooldown);
-      const st = String((parsed && parsed.state) || '').toUpperCase();
-
-      if (engineCdFlag && (st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN')) {
-        // CD tanpa timer pasti
-        isCooldown = true;
-        isReady = false;
-      } else if (smsPathOpen || engineReady || st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
-        isReady = true;
-        isCooldown = false;
-      } else if (engineCdFlag) {
-        isCooldown = true;
-        isReady = false;
-      }
+    } else if (smsPathOpen || engineReady || st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
+      isReady = true;
+      isCooldown = false;
+    } else if (engineCdFlag) {
+      isCooldown = true;
+      isReady = false;
     }
   }
+
+  // Kategori utama: ban > clone > (ready/cooldown dipakai di grouping bot)
+  // isReady/isCooldown tetap true untuk label sekunder di grup clone
 
   // ========== 5) DEVICE PATH (label saja, tidak mengubah siap/cd) ==========
   const hasDevicePath = Boolean(
@@ -635,7 +633,7 @@ function softFallback(rawNumber, payloads, countryIso2, lastError) {
 
 async function checkWhatsAppCooldown(rawNumber, options) {
   const opts = options || {};
-  if (!opts.skipSticky && opts.wave !== 'exist') {
+  if (!opts.skipSticky && !opts.forceRefresh && opts.wave !== 'exist') {
     const cached = stickyGet(rawNumber);
     if (cached) {
       return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
