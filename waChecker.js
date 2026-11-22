@@ -480,7 +480,15 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   }
 
   return {
-    formattedNumber: normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone),
+    formattedNumber: (function () {
+      const raw = payloads.rawNumber;
+      const rawDigits = String(raw || '').replace(/\D/g, '');
+      const safe = rawDigits ? ('+' + rawDigits) : String(raw || '');
+      const norm = normalizeDisplayNumber(raw, payloads.phoneInfo, parsed && parsed.phone);
+      const shown = String(norm || '').replace(/\D/g, '');
+      if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) return safe;
+      return norm || safe;
+    })(),
     region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country)) || null,
     accountStatus, isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
     anyCooldown: effectiveCooldown, description, deviceName: timers.device_name || null, waOldEligible: Boolean(timers.wa_old_eligible || hasDevicePath),
@@ -528,8 +536,15 @@ function mergeConsensus(results) {
 }
 
 function softFallback(rawNumber, payloads, countryIso2, lastError) {
+  const rawDigits = String(rawNumber || '').replace(/\D/g, '');
+  const safeFmt = rawDigits ? ('+' + rawDigits) : String(rawNumber || '');
+  let formatted = normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null);
+  const shown = String(formatted || '').replace(/\D/g, '');
+  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) {
+    formatted = safeFmt;
+  }
   return {
-    formattedNumber: normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null),
+    formattedNumber: formatted || safeFmt,
     region: null,
     accountStatus: 'UNKNOWN',
     isBanned: false,
