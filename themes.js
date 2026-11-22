@@ -274,7 +274,7 @@ function renderCooldownCard({ result, user, isVip }) {
     '▸ ɴᴏᴍᴏʀ ⦂ ' + numberDisplay,
     '▸ ɴᴇɢᴀʀᴀ ⦂ <b>' + escapeHtml(result.region) + '</b>',
     '▸ sᴛᴀᴛᴜs ⦂ <b>' + status + '</b>',
-    '▸ ᴊᴀʟᴜʀ ⦂ <code>' + escapeHtml conf.result.proxyInfo) + '</code>',
+    '▸ ᴊᴀʟᴜʀ ⦂ <code>' + escapeHtml(result.proxyInfo) + '</code>',
     '',
     '⌁ <b>ʜᴀsɪʟ ᴀɴᴀʟɪsɪs</b>',
     verdict,
