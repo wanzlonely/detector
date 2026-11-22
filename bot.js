@@ -320,7 +320,7 @@ bot.action('detect:cancel_prompt', async (ctx) => {
 });
 
 bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery('Memperbarui status…').catch(() => {});
+  await ctx.answerCbQuery('Memperbarui status real-time…').catch(() => {});
   const userId = ctx.from && ctx.from.id;
   const jobId = ctx.match[1];
   if (!userId || !jobId) return;
@@ -333,7 +333,8 @@ bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
   if (!Array.isArray(numbers) || !numbers.length) {
     return ctx.reply('✦ <b>ᴅᴀᴛᴀ ʀᴇғʀᴇsʜ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>sɪʟᴀᴋᴀɴ ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.</blockquote>', { parse_mode: 'HTML' });
   }
-  return processDetection(ctx, numbers);
+  // Detect ulang dari server — tidak pakai cache/sticky
+  return processDetection(ctx, numbers, { forceRefresh: true });
 });
 
 function buildProgressBar(pct) {
@@ -381,7 +382,8 @@ function buildProgressText(processed, total, stageLabel) {
   );
 }
 
-async function processDetection(ctx, numbers) {
+async function processDetection(ctx, numbers, detectOpts) {
+  detectOpts = detectOpts || {};
   const userId = ctx.from.id;
   const jobId = Date.now().toString(36);
   await redis.set('detect:active:' + userId, jobId, { ex: 600 });
@@ -421,7 +423,7 @@ async function processDetection(ctx, numbers) {
     const digits = String(raw || '').replace(/\D/g, '');
     const safeNumber = digits ? ('+' + digits) : String(raw || '');
     try {
-      const opts = Object.assign({ skipSticky: true }, waveOpts || {});
+      const opts = Object.assign({ skipSticky: true, forceRefresh: Boolean(detectOpts.forceRefresh) }, waveOpts || {});
       let result = await checkWhatsAppCooldown(raw, opts);
       // Retry once only if soft/low-confidence and not already full wave
       if (result && !result.cancelled && (result.softFallback || result.needsRecheck || (Number(result.confidence) || 0) < 0.55)) {
@@ -503,7 +505,7 @@ async function processDetection(ctx, numbers) {
   await redis.del('detect:stop:' + userId + ':' + jobId);
   if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 
-  const groups = { ready: [], cooldown: [], clone: [], restricted: [], other: [] };
+  const groups = { ready: [], cooldown: [], restricted: [], other: [] };
   for (let gi = 0; gi < results.length; gi++) {
     const r = results[gi];
     if (!r || r.cancelled) continue;
@@ -518,26 +520,18 @@ async function processDetection(ctx, numbers) {
     r.formattedNumber = num;
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
       groups.restricted.push(num);
-    } else if (r.isCloneBlocked || r.isSecurityBlock) {
-      let secs = Number(r.secondarySeconds) || 0;
-      if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
-      if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-      const dev = deviceLabel(r);
-      let label;
-      if (secs > 0) label = formatCooldownSmallCaps(secs) + ' · ' + dev;
-      else label = dev;
-      groups.clone.push({ line: num + ' ⦂ ' + label, secs: secs || 0 });
-    } else if (r.isReady && !r.anyCooldown) {
-      const dev = deviceLabel(r);
-      groups.ready.push({ line: num + ' ⦂ ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
       if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
+      else if (r.secondarySeconds > 0) secs = Number(r.secondarySeconds) || 0;
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
       const dev = deviceLabel(r);
       groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' · ' + dev, secs: secs });
+    } else if (r.isReady) {
+      const dev = deviceLabel(r);
+      groups.ready.push({ line: num + ' ⦂ ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
       groups.other.push(num + note);
@@ -549,11 +543,6 @@ async function processDetection(ctx, numbers) {
 
   groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0));
   groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
-  groups.clone.sort((a, b) => {
-    const sa = typeof a === 'object' ? (a.secs ?? 0) : 0;
-    const sb = typeof b === 'object' ? (b.secs ?? 0) : 0;
-    return sa - sb;
-  });
 
   const lines = [];
   lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
@@ -561,7 +550,6 @@ async function processDetection(ctx, numbers) {
   lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
   lines.push('✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ ⦂ <b>' + groups.ready.length + '</b>');
   lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
-  lines.push('△ ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
   lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.restricted.length + '</b>');
   if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
   lines.push('');
@@ -577,12 +565,6 @@ async function processDetection(ctx, numbers) {
     lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
     lines.push('');
     groups.cooldown.forEach((n) => lines.push(n.line || n));
-  }
-  if (groups.clone.length) {
-    lines.push('');
-    lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
-    lines.push('');
-    groups.clone.forEach((n) => lines.push(typeof n === 'object' ? (n.line || n) : n));
   }
   if (groups.restricted.length) {
     lines.push('');
