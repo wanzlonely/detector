@@ -43,218 +43,184 @@ function formatSensitiveNumber(formattedNumber, privacyMode) {
   return '<tg-spoiler><code>' + escapeHtml(formattedNumber) + '</code></tg-spoiler>';
 }
 
-function line() {
-  return '\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501';
-}
-
-function softLine() {
-  return '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500';
-}
-
 function renderDashboard({ user, isVip, isOwner = false, brandName }) {
   const identity = escapeHtml(user.full_name || 'Pengguna');
   const username = user.username && user.username !== '-' ? '@' + escapeHtml(user.username) : 'Tidak tersedia';
   const totalCount = Number(user.total_checks || 0);
   const total = totalCount.toLocaleString('id-ID');
-  const access = isOwner ? 'OWNER' : isVip ? 'PREMIUM' : 'BASIC';
+  const access = isOwner ? 'ᴏᴡɴᴇʀ ᴀᴄᴄᴇss' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : 'ғʀᴇᴇ ᴍᴇᴍʙᴇʀ';
   const quota = isOwner || isVip
-    ? 'Tanpa batas'
-    : Math.max(0, 3 - Number(user.free_used_today || 0)) + ' / 3 tersisa';
-  const level = isOwner ? 'Owner' : isVip ? 'Premium' : totalCount >= 100 ? 'Active' : 'Regular';
-  const brand = escapeHtml(brandName || 'META DETECT');
+    ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs'
+    : Math.max(0, 3 - Number(user.free_used_today || 0)) + ' / 3 ᴛᴇʀsɪsᴀ';
+  const level = isOwner ? 'ᴏᴡɴᴇʀ' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : totalCount >= 100 ? 'ᴀᴄᴛɪᴠᴇ' : 'ʀᴇɢᴜʟᴇʀ';
 
   return [
-    '<b>' + brand + '</b>',
-    '<i>WhatsApp Number Intelligence</i>',
-    line(),
+    '✦ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ</b> ✦',
+    '<i>ᴀᴅᴠᴀɴᴄᴇᴅ ᴡʜᴀᴛsᴀᴘᴘ ᴛᴇʟᴇᴍᴇᴛʀʏ</i>',
     '',
-    '<b>STATUS AKUN</b>',
-    softLine(),
-    'Nama     \u00b7  <b>' + identity + '</b>',
-    'User     \u00b7  <b>' + username + '</b>',
-    'ID       \u00b7  <code>' + user.telegram_id + '</code>',
-    'Akses    \u00b7  <b>' + access + '</b>',
-    'Kuota    \u00b7  <b>' + escapeHtml(quota) + '</b>',
-    'Total    \u00b7  <b>' + total + '</b> deteksi',
-    'Level    \u00b7  <b>' + level + '</b>',
+    '⚙ <b>sᴛᴀᴛᴜs ᴀᴋᴜɴ</b>',
+    '▸ ɴᴀᴍᴀ ⦂ <b>' + identity + '</b>',
+    '▸ ᴜsᴇʀ ⦂ <b>' + username + '</b>',
+    '▸ ɪᴅ ⦂ <code>' + user.telegram_id + '</code>',
+    '▸ ᴀᴋsᴇs ⦂ <b>' + access + '</b>',
+    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + escapeHtml(quota) + '</b>',
+    '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + total + ' ᴅᴇᴛᴇᴋsɪ</b>',
+    '▸ ʟᴇᴠᴇʟ ⦂ <b>' + level + '</b>',
     '',
-    '<blockquote>Pilih menu di bawah untuk memulai deteksi, melihat statistik, atau mengundang teman.</blockquote>',
+    '<blockquote>ᴘɪʟɪʜ ᴍᴇɴᴜ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴜʟᴀɪ ᴍᴇɴᴅᴇᴛᴇᴋsɪ, ᴍᴇʟɪʜᴀᴛ sᴛᴀᴛɪsᴛɪᴋ, ᴀᴛᴀᴜ ᴍᴇɴɢᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ.</blockquote>',
     '',
-    '<i>Sistem aktif</i>'
+    '◈ sɪsᴛᴇᴍ ᴀᴋᴛɪꜰ'
   ].join('\n');
 }
 
 function renderStatus({ user, isVip, isOwner = false, referralStats }) {
   const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
-  const expiry = isOwner ? 'Tanpa batas' : isVip ? formatDateWIB(user.vip_until) : 'Belum berlangganan';
-  const access = isOwner ? 'OWNER' : isVip ? 'PREMIUM' : 'BASIC';
+  const expiry = isOwner ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : isVip ? formatDateWIB(user.vip_until) : 'ʙᴇʟᴜᴍ ʙᴇʀʟᴀɴɢɢᴀɴᴀɴ';
 
   return [
-    '<b>RINGKASAN STATUS</b>',
-    '<i>Keanggotaan & aktivitas akun</i>',
-    line(),
+    '◈ <b>ʀɪɴɢᴋᴀsᴀɴ sᴛᴀᴛᴜs ᴀᴋᴜɴ</b> ◈',
+    '<i>ɪɴғᴏʀᴍᴀsɪ ᴋᴇᴀɴɢɢᴏᴛᴀᴀɴ & ᴀᴋᴛɪᴠɪᴛᴀs</i>',
     '',
-    '<b>PROFIL</b>',
-    softLine(),
-    'Nama     \u00b7  <b>' + escapeHtml(user.full_name || 'Pengguna') + '</b>',
-    'ID       \u00b7  <code>' + user.telegram_id + '</code>',
-    'Akses    \u00b7  <b>' + access + '</b>',
-    'Kuota    \u00b7  <b>' + (isVip || isOwner ? 'Tanpa batas' : remaining + ' / 3 tersisa') + '</b>',
-    'Total    \u00b7  <b>' + Number(user.total_checks || 0).toLocaleString('id-ID') + '</b> pemeriksaan',
-    'Aktif s/d \u00b7  <b>' + escapeHtml(expiry) + '</b>',
+    '⚙ <b>ᴘʀᴏғɪʟ ᴀᴋᴜɴ</b>',
+    '▸ ɴᴀᴍᴀ ⦂ <b>' + escapeHtml(user.full_name || 'Pengguna') + '</b>',
+    '▸ ɪᴅ ⦂ <code>' + user.telegram_id + '</code>',
+    '▸ ᴀᴋsᴇs ⦂ <b>' + (isOwner ? 'ᴏᴡɴᴇʀ ᴀᴄᴄᴇss' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : 'ғʀᴇᴇ ᴍᴇᴍʙᴇʀ') + '</b>',
+    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip || isOwner ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3 ᴛᴇʀsɪsᴀ') + '</b>',
+    '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + Number(user.total_checks || 0).toLocaleString('id-ID') + ' ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>',
+    '▸ ᴍᴀsᴀ ᴀᴋᴛɪғ ⦂ <b>' + escapeHtml(expiry) + '</b>',
     '',
-    '<b>REFERRAL</b>',
-    softLine(),
-    'Teman bergabung  \u00b7  <b>' + Number(referralStats.total || 0).toLocaleString('id-ID') + '</b>',
-    'Hadiah diterima  \u00b7  <b>' + Number(referralStats.rewarded || 0) + '</b> hari premium',
+    '♧ <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀᴀʟ</b>',
+    '▸ ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ⦂ <b>' + Number(referralStats.total || 0).toLocaleString('id-ID') + '</b>',
+    '▸ ʜᴀᴅɪᴀʜ ᴅɪᴛᴇʀɪᴍᴀ ⦂ <b>' + Number(referralStats.rewarded || 0) + ' ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>',
     '',
-    '<i>Sistem aktif</i>'
+    '◈ sɪsᴛᴇᴍ ᴀᴋᴛɪꜰ'
   ].join('\n');
 }
 
 function renderLeaderboard(rows) {
+  const medals = ['♛', '♜', '♞'];
   const lines = rows.length
     ? rows.slice(0, 10).map((row, index) => {
         const rank = String(index + 1).padStart(2, '0');
+        const medal = medals[index] || rank;
         const name = escapeHtml(row.full_name || 'Pengguna');
         const count = Number(row.total_checks || 0).toLocaleString('id-ID');
-        return '<b>#' + rank + '</b>  ' + name + '\n      <code>' + count + '</code> pemeriksaan';
+        return medal + ' ✧ <b>' + name + '</b>\n      └ <b>' + count + '</b> ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
       }).join('\n\n')
-    : '<i>Belum ada data. Jadilah pengguna pertama di papan peringkat.</i>';
+    : '<i>ʙᴇʟᴜᴍ ᴀᴅᴀ ᴅᴀᴛᴀ. ᴊᴀᴅɪʟᴀʜ ᴘᴇɴɢɢᴜɴᴀ ᴘᴇʀᴛᴀᴍᴀ ᴅɪ ᴘᴀᴘᴀɴ ᴘᴇʀɪɴɢᴋᴀᴛ.</i>';
 
   return [
-    '<b>TOP 10 DETECTOR</b>',
-    '<i>Peringkat berdasarkan total pemeriksaan</i>',
-    line(),
+    '♛ <b>ᴛᴏᴘ 𝟷𝟶 ᴅᴇᴛᴇᴄᴛᴏʀ · ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ</b> ♛',
     '',
     lines,
     '',
-    softLine(),
-    '<i>Update otomatis setelah setiap sesi deteksi</i>'
+    '♧ sᴛᴀᴛᴜs ᴅɪ ᴀᴛᴀs ᴀᴅᴀʟᴀʜ ᴜsᴇʀ ʏᴀɴɢ ᴘᴀʟɪɴɢ ᴀᴋᴛɪғ'
   ].join('\n');
 }
 
 function renderReferral({ link, stats }) {
   return [
-    '<b>PROGRAM REFERRAL</b>',
-    '<i>Undang teman \u00b7 kumpulkan koin \u00b7 tukar hadiah</i>',
-    line(),
+    '♧ <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀʀᴀʟ · ᴋᴏɪɴ ʀᴇᴡᴀʀᴅ</b>',
+    '<i>ᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ · ᴋᴜᴍᴘᴜʟᴋᴀɴ ᴋᴏɪɴ · ᴛᴜᴋᴀʀ ʜᴀᴅɪᴀʜ</i>',
     '',
-    '<b>CARA MENDAPATKAN KOIN</b>',
-    softLine(),
-    '1. Bagikan tautan undanganmu',
-    '2. Teman bergabung melalui tautan',
-    '3. Teman menyelesaikan 3 pemeriksaan',
-    '4. Kamu mendapat <b>+5 koin</b>',
+    '✦ <b>ᴄᴀʀᴀ ᴍᴇɴᴅᴀᴘᴀᴛᴋᴀɴ ᴋᴏɪɴ</b>',
+    '① ʙᴀɢɪᴋᴀɴ ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴᴍᴜ.',
+    '② ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ᴍᴇʟᴀʟᴜɪ ᴛᴀᴜᴛᴀɴ.',
+    '③ ᴛᴇᴍᴀɴ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ.',
+    '④ ᴋᴀᴍᴜ ᴍᴇɴᴅᴀᴘᴀᴛᴋᴀɴ <b>+5 ᴋᴏɪɴ</b>.',
     '',
-    '<b>STATISTIK</b>',
-    softLine(),
-    'Teman bergabung   \u00b7  <b>' + Number(stats.total || 0) + '</b>',
-    'Undangan berhasil \u00b7  <b>' + Number(stats.rewarded || 0) + '</b>',
-    'Saldo koin        \u00b7  <b>' + Number(stats.coins || 0) + '</b>',
+    '◈ <b>sᴛᴀᴛɪsᴛɪᴋ ʀᴇғᴇʀᴀʟ</b>',
+    '▸ ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ⦂ <b>' + Number(stats.total || 0) + '</b>',
+    '▸ ᴜɴᴅᴀɴɢᴀɴ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + Number(stats.rewarded || 0) + '</b>',
+    '▸ sᴀʟᴅᴏ ᴋᴏɪɴ ⦂ <b>' + Number(stats.coins || 0) + ' ᴋᴏɪɴ</b>',
     '',
-    '<b>TAUTAN UNDANGAN</b>',
+    '⌁ <b>ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴ ᴘʀɪʙᴀᴅɪ</b>',
     '<code>' + escapeHtml(link) + '</code>',
     '',
-    '<blockquote>Tekan tombol bagikan untuk mengirim tautan ke teman. Jumlah undangan tidak dibatasi.</blockquote>'
+    '<blockquote>ᴛᴇᴋᴀɴ ᴛᴏᴍʙᴏʟ ʙᴀɢɪᴋᴀɴ ᴜɴᴛᴜᴋ ᴍᴇɴɢɪʀɪᴍ ᴛᴀᴜᴛᴀɴ ᴋᴇ ᴛᴇᴍᴀɴ. ᴊᴜᴍʟᴀʜ ᴜɴᴅᴀɴɢᴀɴ ᴛɪᴅᴀᴋ ᴅɪʙᴀᴛᴀsɪ.</blockquote>'
   ].join('\n');
 }
 
 function renderReferralExchange(stats) {
   return [
-    '<b>PENUKARAN KOIN</b>',
-    line(),
+    '✦ <b>ᴘᴇɴᴜᴋᴀʀᴀɴ ᴋᴏɪɴ ʀᴇғᴇʀʀᴀʟ</b>',
     '',
-    'Saldo koin \u00b7  <b>' + Number(stats.coins || 0) + '</b>',
+    'sᴀʟᴅᴏ ᴋᴏɪɴ ⦂ <b>' + Number(stats.coins || 0) + ' ᴋᴏɪɴ</b>',
     '',
-    '<b>PAKET TERSEDIA</b>',
-    softLine(),
-    '5 koin   \u2192  +10 kuota deteksi',
-    '15 koin  \u2192  Premium 3 hari',
-    '30 koin  \u2192  Premium 7 hari',
-    '100 koin \u2192  Premium 30 hari',
+    'ᴘɪʟɪʜ ᴘᴀᴋᴇᴛ ᴀᴋsᴇs ᴅɪ ʙᴀᴡᴀʜ ⦂',
+    '▸ 5 ᴋᴏɪɴ ⟿ +10 ᴋᴜᴏᴛᴀ ᴅᴇᴛᴇᴋsɪ',
+    '▸ 15 ᴋᴏɪɴ ⟿ ᴘʀᴇᴍɪᴜᴍ 3 ʜᴀʀɪ',
+    '▸ 30 ᴋᴏɪɴ ⟿ ᴘʀᴇᴍɪᴜᴍ 7 ʜᴀʀɪ',
+    '▸ 100 ᴋᴏɪɴ ⟿ ᴘʀᴇᴍɪᴜᴍ 30 ʜᴀʀɪ',
     '',
-    '<blockquote>Kumpulkan koin dengan mengundang teman, lalu tukar melalui tombol di bawah.</blockquote>'
+    '<blockquote>ᴋᴜᴍᴘᴜʟᴋᴀɴ ᴋᴏɪɴ ᴅᴇɴɢᴀɴ ᴍᴇɴɢᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ.</blockquote>'
   ].join('\n');
 }
 
 function renderStoreCatalog({ user, packages }) {
-  const access = user && (String(user.vip_tier || '').toUpperCase() === 'OWNER' || Number(user.vip_until || 0) > Math.floor(Date.now() / 1000))
-    ? 'PREMIUM'
-    : 'BASIC';
-
-  const packageLines = (packages || []).map((pkg) => {
+  const packageLines = (packages || []).map((pkg, index) => {
     const perDay = Math.round(pkg.price / pkg.duration_days);
+    const marker = ['✦', '◈', '✧', '◆', '♛'][index] || '▪';
     return (
-      '<b>' + Number(pkg.duration_days) + ' hari</b>  \u2014  <b>' + formatIDR(pkg.price) + '</b>\n' +
-      '   setara ' + formatIDR(perDay) + ' / hari \u00b7 <i>' + escapeHtml(pkg.tag || '') + '</i>'
+      marker + ' <b>' + Number(pkg.duration_days) + ' ʜᴀʀɪ</b> — <b>' + formatIDR(pkg.price) + '</b> · <i>' + toSmallCaps(pkg.tag || '') + '</i>\n' +
+      '   <i>sᴇᴛᴀʀᴀ ' + formatIDR(perDay) + ' / ʜᴀʀɪ</i>'
     );
   }).join('\n\n');
 
   return [
-    '<b>META DETECT \u00b7 PREMIUM</b>',
-    '<i>Akses tanpa batas untuk pemeriksaan massal</i>',
-    line(),
+    '✦ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ · ᴘʀᴇᴍɪᴜᴍ</b>',
+    'ᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ᴘᴇɴɢɢᴜɴᴀᴀɴ ʟᴇʙɪʜ ʟᴇʟᴜᴀsᴀ.',
     '',
-    '<b>STATUS ANDA</b>',
-    softLine(),
-    'Role \u00b7  <b>' + access + ' USER</b>',
+    '♛ <b>ᴋᴇᴜɴɢɢᴜʟᴀɴ ᴘʀᴇᴍɪᴜᴍ</b>',
+    '· ᴋᴜᴏᴛᴀ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴇɴɢɪᴋᴜᴛɪ ᴘᴀᴋᴇᴛ ʏᴀɴɢ ᴀᴋᴛɪғ',
+    '· ʜᴀsɪʟ ᴅɪᴛᴀᴍᴘɪʟᴋᴀɴ ᴅᴇɴɢᴀɴ ᴋᴀᴛᴇɢᴏʀɪ sᴛᴀᴛᴜs ʏᴀɴɢ ᴊᴇʟᴀs',
+    '· ᴀᴋsᴇs ғɪᴛᴜʀ ᴘʀᴇᴍɪᴜᴍ sᴇʟᴀᴍᴀ ᴍᴀsᴀ ᴀᴋᴛɪғ',
     '',
-    '<b>MANFAAT PREMIUM</b>',
-    softLine(),
-    '\u00b7 Deteksi hingga 30 nomor per kiriman',
-    '\u00b7 Kuota mengikuti paket aktif',
-    '\u00b7 Hasil dikelompokkan per status',
-    '\u00b7 Prioritas proxy sesuai negara nomor',
+    '▤ <b>ᴘɪʟɪʜ ᴅᴜʀᴀsɪ ᴘᴀᴋᴇᴛ</b>',
+    '━━━━━━━━━━━━━━━━━━━━',
+    packageLines || '<i>ᴘᴀᴋᴇᴛ ʙᴇʟᴜᴍ ᴛᴇʀsᴇᴅɪᴀ</i>',
+    '━━━━━━━━━━━━━━━━━━━━',
     '',
-    '<b>PILIH DURASI</b>',
-    softLine(),
-    packageLines || '<i>Paket belum tersedia</i>',
-    '',
-    '<blockquote>Pilih paket melalui tombol di bawah. Detail tagihan muncul sebelum pembayaran.</blockquote>'
+    '<blockquote>ᴘɪʟɪʜ ᴘᴀᴋᴇᴛ ᴍᴇʟᴀʟᴜɪ ᴛᴏᴍʙᴏʟ ᴅɪ ʙᴀᴡᴀʜ. ᴅᴇᴛᴀɪʟ ᴛᴀɢɪʜᴀɴ ᴀᴋᴀɴ ᴍᴜɴᴄᴜʟ sᴇʙᴇʟᴜᴍ ᴘᴇᴍʙᴀʏᴀʀᴀɴ.</blockquote>'
   ].join('\n');
 }
 
 function renderPackageDetailCard({ user, pkg }) {
   const perDay = Math.round(pkg.price / pkg.duration_days);
   return [
-    '<b>DETAIL PAKET</b>',
-    '<i>Periksa rincian sebelum melanjutkan</i>',
-    line(),
+    '✧ <b>ᴅᴇᴛᴀɪʟ ᴘᴀᴋᴇᴛ ᴘʀᴇᴍɪᴜᴍ</b> ✧',
+    '<i>ᴘᴇʀɪᴋsᴀ ʀɪɴᴄɪᴀɴ ᴘᴀᴋᴇᴛ sᴇʙᴇʟᴜᴍ ᴍᴇʟᴀɴᴊᴜᴛᴋᴀɴ.</i>',
     '',
-    '<b>RINCIAN PESANAN</b>',
-    softLine(),
-    'Masa aktif  \u00b7  <b>' + escapeHtml(pkg.durationLabel) + '</b>',
-    'Harga       \u00b7  <b>' + formatIDR(pkg.price) + '</b>',
-    'Biaya harian \u00b7  <code>' + formatIDR(perDay) + '</code>',
-    'Metode      \u00b7  <b>Konfirmasi manual</b>',
+    '◈ <b>ʀɪɴᴄɪᴀɴ ᴘᴇsᴀɴᴀɴ</b>',
+    '▸ ᴍᴀsᴀ ᴀᴋᴛɪғ ⦂ <b>' + escapeHtml(pkg.durationLabel) + '</b>',
+    '▸ ʜᴀʀɢᴀ ⦂ <b>' + formatIDR(pkg.price) + '</b>',
+    '▸ ʙɪᴀʏᴀ ʜᴀʀɪᴀɴ ⦂ <code>' + formatIDR(perDay) + '</code>',
+    '▸ ᴍᴇᴛᴏᴅᴇ ⦂ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴀɴᴜᴀʟ</b>',
     '',
-    '<b>FITUR PREMIUM</b>',
-    softLine(),
-    '\u00b7 Kuota pemeriksaan mengikuti paket',
-    '\u00b7 Tampilan hasil dengan kategori status',
-    '\u00b7 Akses fitur premium selama masa aktif',
+    '♛ <b>ғɪᴛᴜʀ ᴘʀᴇᴍɪᴜᴍ</b>',
+    '✦ ᴋᴜᴏᴛᴀ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴇɴɢɪᴋᴜᴛɪ ᴘᴀᴋᴇᴛ',
+    '✦ ᴛᴀᴍᴘɪʟᴀɴ ʜᴀsɪʟ ᴅᴇɴɢᴀɴ ᴋᴀᴛᴇɢᴏʀɪ sᴛᴀᴛᴜs',
+    '✦ ᴀᴋsᴇs ғɪᴛᴜʀ ᴘʀᴇᴍɪᴜᴍ sᴇʟᴀᴍᴀ ᴍᴀsᴀ ᴀᴋᴛɪғ',
     '',
     pkg.highlight ? '<i>' + escapeHtml(pkg.highlight) + '</i>' : '',
     '',
-    '<blockquote>Tekan tombol beli untuk melihat petunjuk pembayaran.</blockquote>'
+    '<blockquote>ᴛᴇᴋᴀɴ ᴛᴏᴍʙᴏʟ ʙᴇʟɪ ᴜɴᴛᴜᴋ ᴍᴇʟɪʜᴀᴛ ᴘᴇᴛᴜɴᴊᴜᴋ ᴘᴇᴍʙᴀʏᴀʀᴀɴ.</blockquote>'
   ].filter(Boolean).join('\n');
 }
 
 function renderPaymentMaintenanceCard({ user, pkg }) {
   return [
-    '<b>KONFIRMASI PEMBELIAN</b>',
-    line(),
+    '▣ <b>ᴋᴏɴғɪʀᴍᴀsɪ ᴘᴇᴍʙᴇʟɪᴀɴ</b>',
+    '<i>ᴘᴀsᴛɪᴋᴀɴ ᴅᴇᴛᴀɪʟ ᴘᴀᴋᴇᴛ sᴜᴅᴀʜ sᴇsᴜᴀɪ.</i>',
     '',
-    '<b>RINCIAN</b>',
-    softLine(),
-    'Produk  \u00b7  <b>META DETECT PREMIUM</b>',
-    'Durasi  \u00b7  <b>' + escapeHtml(pkg.durationLabel) + '</b>',
-    'Total   \u00b7  <b>' + formatIDR(pkg.price) + '</b>',
+    '◈ <b>ʀɪɴᴄɪᴀɴ ᴘᴇsᴀɴᴀɴ</b>',
+    '▸ ᴘʀᴏᴅᴜᴋ ⦂ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ ᴘʀᴇᴍɪᴜᴍ</b>',
+    '▸ ᴅᴜʀᴀsɪ ⦂ <b>' + escapeHtml(pkg.durationLabel) + '</b>',
+    '▸ ᴛᴏᴛᴀʟ ʙᴀʏᴀʀ ⦂ <b>' + formatIDR(pkg.price) + '</b>',
     '',
-    '<blockquote expandable>Pembayaran otomatis belum tersedia. Silakan kembali ke katalog paket atau hubungi admin untuk aktivasi manual.</blockquote>',
+    '<blockquote>ᴘᴇᴍʙᴀʏᴀʀᴀɴ ᴏᴛᴏᴍᴀᴛɪs ʙᴇʟᴜᴍ ᴛᴇʀsᴇᴅɪᴀ. sɪʟᴀᴋᴀɴ ᴋᴇᴍʙᴀʟɪ ᴋᴇ ᴋᴀᴛᴀʟᴏɢ ᴘᴀᴋᴇᴛ ᴀᴛᴀᴜ ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ.</blockquote>',
     '',
-    '<i>Pastikan pembayaran hanya melalui kanal resmi admin.</i>'
+    '⛨ ᴘᴀsᴛɪᴋᴀɴ ᴘᴇᴍʙᴀʏᴀʀᴀɴ ʜᴀɴʏᴀ ᴅɪʟᴀᴋᴜᴋᴀɴ ᴍᴇʟᴀʟᴜɪ ᴋᴀɴᴀʟ ʀᴇsᴍɪ ᴀᴅᴍɪɴ.'
   ].join('\n');
 }
 
@@ -268,21 +234,21 @@ function renderDetectionSummary({ results, elapsedSeconds }) {
     else if (item.result.anyCooldown) {
       const sms = item.result.channels && item.result.channels.sms;
       const timer = sms && (sms.formatted || sms.uiTimer || sms.humanTime);
-      groups.cooldown.push(number + (timer ? ' \u2014 ' + escapeHtml(timer) : ''));
+      groups.cooldown.push(number + (timer ? ' — ' + escapeHtml(timer) : ''));
     } else if (item.result.isReady) groups.ready.push(number);
     else if (item.result.smsAvailable === false) groups.smsUnavailable.push(number);
     else groups.failed.push(number);
   }
   return [
-    '<b>HASIL DETEKSI</b>',
-    ...(groups.ready.length ? ['', '<b>SIAP DIVERIFIKASI</b>', ...groups.ready] : []),
-    ...(groups.cooldown.length ? ['', '<b>COOLDOWN WHATSAPP</b>', ...groups.cooldown] : []),
-    ...(groups.clone.length ? ['', '<b>TIDAK SUPPORT CLONE</b>', ...groups.clone] : []),
-    ...(groups.smsUnavailable.length ? ['', '<b>OPSI SMS TIDAK DITEMUKAN</b>', ...groups.smsUnavailable] : []),
-    ...(groups.restricted.length ? ['', '<b>DIBATASI</b>', ...groups.restricted] : []),
-    ...(groups.failed.length ? ['', '<b>GAGAL DIPROSES</b>', ...groups.failed] : []),
+    '⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>',
+    ...(groups.ready.length ? ['', '✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪғɪᴋᴀsɪ</b>', ...groups.ready] : []),
+    ...(groups.cooldown.length ? ['', '◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>', ...groups.cooldown] : []),
+    ...(groups.clone.length ? ['', '△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>', ...groups.clone] : []),
+    ...(groups.smsUnavailable.length ? ['', '⊘ <b>ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>', ...groups.smsUnavailable] : []),
+    ...(groups.restricted.length ? ['', '✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>', ...groups.restricted] : []),
+    ...(groups.failed.length ? ['', '⚠ <b>ɢᴀɢᴀʟ ᴅɪᴘʀᴏsᴇs</b>', ...groups.failed] : []),
     '',
-    'Proses  \u00b7  ' + Math.max(0, Number(elapsedSeconds) || 0) + 'd'
+    'ᴘʀᴏsᴇs ⟿ ' + Math.max(0, Number(elapsedSeconds) || 0) + 'd'
   ].join('\n');
 }
 
@@ -290,38 +256,34 @@ function renderCooldownCard({ result, user, isVip }) {
   const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
   const numberDisplay = formatSensitiveNumber(result.formattedNumber, Boolean(user.privacy_mode));
   const sms = result.channels.sms;
-  const status = result.isBanned ? 'DIBLOKIR' : result.anyCooldown ? 'COOLDOWN AKTIF' : 'SIAP';
+  const status = result.isBanned ? 'ᴅɪʙʟᴏᴋɪʀ' : result.anyCooldown ? 'ᴄᴏᴏʟᴅᴏᴡɴ ᴀᴋᴛɪғ' : 'sɪᴀᴘ';
   const verdict = result.isBanned
-    ? 'Nomor terdeteksi memiliki pembatasan dari layanan WhatsApp.'
+    ? 'ɴᴏᴍᴏʀ ᴛᴇʀᴅᴇᴛᴇᴋsɪ ᴍᴇᴍɪʟɪᴋɪ ᴘᴇᴍʙᴀᴛᴀsᴀɴ ᴅᴀʀɪ ʟᴀʏᴀɴᴀɴ ᴡʜᴀᴛsᴀᴘᴘ.'
     : result.anyCooldown
-      ? 'Nomor masih berada dalam masa tunggu verifikasi.'
-      : 'Tidak ditemukan masa tunggu aktif pada pemeriksaan ini.';
+      ? 'ɴᴏᴍᴏʀ ᴍᴀsɪʜ ʙᴇʀᴀᴅᴀ ᴅᴀʟᴀᴍ ᴍᴀsᴀ ᴛᴜɴɢɢᴜ ᴠᴇʀɪғɪᴋᴀsɪ.'
+      : 'ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ᴍᴀsᴀ ᴛᴜɴɢɢᴜ ᴀᴋᴛɪғ ᴘᴀᴅᴀ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ɪɴɪ.';
   const access = String(user.vip_tier).toUpperCase() === 'OWNER'
-    ? 'OWNER ACCESS'
-    : !isVip ? 'FREE \u00b7 ' + remaining + '/3' : 'PREMIUM ACCESS';
+    ? '♛ ᴏᴡɴᴇʀ ᴀᴄᴄᴇss'
+    : !isVip ? 'ғʀᴇᴇ · ' + remaining + '/3' : '✦ ᴘʀᴇᴍɪᴜᴍ ᴀᴄᴄᴇss';
 
   return [
-    '<b>HASIL PEMERIKSAAN</b>',
-    '<i>Analisis status nomor WhatsApp</i>',
-    line(),
+    '✦ <b>ʜᴀsɪʟ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b> ✦',
+    '<i>ᴀɴᴀʟɪsɪs sᴛᴀᴛᴜs ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</i>',
     '',
-    '<b>TARGET</b>',
-    softLine(),
-    'Nomor   \u00b7  ' + numberDisplay,
-    'Negara  \u00b7  <b>' + escapeHtml(result.region) + '</b>',
-    'Status  \u00b7  <b>' + status + '</b>',
-    'Jalur   \u00b7  <code>' + escapeHtml(result.proxyInfo) + '</code>',
+    '◈ <b>ɪɴғᴏʀᴍᴀsɪ ᴛᴀʀɢᴇᴛ</b>',
+    '▸ ɴᴏᴍᴏʀ ⦂ ' + numberDisplay,
+    '▸ ɴᴇɢᴀʀᴀ ⦂ <b>' + escapeHtml(result.region) + '</b>',
+    '▸ sᴛᴀᴛᴜs ⦂ <b>' + status + '</b>',
+    '▸ ᴊᴀʟᴜʀ ⦂ <code>' + escapeHtml(result.proxyInfo) + '</code>',
     '',
-    '<b>ANALISIS</b>',
-    softLine(),
+    '⌁ <b>ʜᴀsɪʟ ᴀɴᴀʟɪsɪs</b>',
     verdict,
     '',
-    '<b>VERIFIKASI SMS</b>',
-    softLine(),
-    'Masa tunggu \u00b7  <b>' + (sms.isCooldown ? escapeHtml(sms.uiTimer) : 'Tidak aktif') + '</b>',
-    'Durasi      \u00b7  <code>' + (sms.isCooldown ? escapeHtml(sms.humanTime) : 'Ready') + '</code>',
+    '⚙ <b>ᴠᴇʀɪғɪᴋᴀsɪ sᴍs</b>',
+    '▸ ᴍᴀsᴀ ᴛᴜɴɢɢᴜ ⦂ <b>' + (sms.isCooldown ? escapeHtml(sms.uiTimer) : 'ᴛɪᴅᴀᴋ ᴀᴋᴛɪғ') + '</b>',
+    '▸ ᴅᴜʀᴀsɪ ⦂ <code>' + (sms.isCooldown ? escapeHtml(sms.humanTime) : 'ʀᴇᴀᴅʏ') + '</code>',
     '',
-    '<i>' + formatDateWIB(Math.floor(Date.now() / 1000)) + ' \u00b7 ' + access + '</i>'
+    '◈ ' + formatDateWIB(Math.floor(Date.now() / 1000)) + ' · ' + access
   ].join('\n');
 }
 
