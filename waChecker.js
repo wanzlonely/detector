@@ -1,9 +1,9 @@
 const WADetector = require('./waEngine');
 const { executeWithProxyRotation, getHealth } = require('./proxyManager');
 
-const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 8000);
-const INTERNAL_RETRIES = Math.min(4, Math.max(2, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 3)));
-const CONSENSUS_ENABLED = String(process.env.WA_CONSENSUS || '1') !== '0';
+const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 7000);
+const INTERNAL_RETRIES = Math.min(3, Math.max(1, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 2)));
+const CONSENSUS_ENABLED = String(process.env.WA_CONSENSUS || '0') === '1';
 const LOW_CONFIDENCE_THRESHOLD = Number(process.env.WA_LOW_CONFIDENCE || 0.72);
 const EXIST_CLEAR_CONFIDENCE = Number(process.env.WA_EXIST_CLEAR || 0.82);
 const STICKY_TTL_MS = Number(process.env.WA_STICKY_TTL_MS || 45000);
@@ -179,10 +179,12 @@ function extractChannelTimers(existRaw, codeRaw) {
       (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 5) ||
       (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 5 && num(code.send_sms_wait) === 0));
   let smsSeconds = 0;
-  if (existSms > 0) smsSeconds = existSms;
-  else if (!isWaOldEcho && codeSmsRaw > 0) {
-    if (codeSmsRaw >= 240 && existSms === 0 && !num(code.send_sms_wait)) smsSeconds = 0;
-    else smsSeconds = codeSmsRaw;
+  if (existSms > 0) {
+    smsSeconds = existSms;
+  } else if (!isWaOldEcho && codeSmsRaw > 0) {
+    // codeSmsRaw <= 180 sering echo wa_old — sudah difilter isWaOldEcho
+    // codeSmsRaw > 180 adalah cooldown SMS nyata dari server
+    smsSeconds = codeSmsRaw;
   }
   if (smsSeconds === 0 && !isWaOldEcho && existRetry > 30) smsSeconds = existRetry;
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
@@ -355,206 +357,144 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const codeResponse = safeJson(codeText);
   const parsed = WADetector.parseDualResponse(payloads.phoneInfo, existText || '{}', codeText || '{}');
   const timers = extractChannelTimers(existResponse, codeResponse);
-  const engineState = String((parsed && parsed.state) || '').toUpperCase();
   const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
-  const smsAvailable = resolveSmsAvailability(existResponse, codeResponse, timers, patternHints);
-  const channels = {
-    sms: buildChannel(timers.sms), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash),
-    email: buildChannel(timers.email), wa_old: buildChannel(timers.wa_old)
-  };
-  const engineReady = Boolean(parsed && parsed.isReady);
-  const engineCooldown = Boolean(parsed && parsed.isCooldown);
-  const engineClone = Boolean(parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock));
-  const engineSecurity = Boolean(parsed && parsed.isSecurityBlock);
-  const liveSmsWait = timers.exist_sms > 0 ? timers.exist_sms : timers.sms;
-  const hasLiveSms = liveSmsWait > 0;
-  const hasLiveVoice = timers.voice > 15;
-  const existSmsOpenEarly = timers.exist_sms === 0 && !timers.exist_no_routes;
-  const hasLiveWait = hasLiveSms || (!existSmsOpenEarly && (hasLiveVoice || timers.flash > 15 || timers.email > 15));
-  const reasons = [];
+
+  // --- Ground truth: live SMS wait from exist + code ---
+  const existSmsWait = Math.max(
+    num(existResponse.sms_wait),
+    num(existResponse.send_sms_wait),
+    num(existResponse.sms_cooldown)
+  );
+  const codeSmsWait = Math.max(
+    num(codeResponse.sms_wait),
+    num(codeResponse.send_sms_wait),
+    num(codeResponse.sms_cooldown)
+  );
+  const existNoRoutes = existResponse.reason === 'no_routes' || existResponse.reason === 'no_route';
+
+  // SMS cooldown: exist first, then timers (already filters wa_old echo), then code if not echo
+  let smsSeconds = 0;
+  if (existSmsWait > 0) {
+    smsSeconds = existSmsWait;
+  } else if (timers.sms > 0) {
+    smsSeconds = timers.sms;
+  } else if (!timers.is_wa_old_echo && codeSmsWait > 180) {
+    // cooldown nyata dari code (>3 menit), bukan echo wa_old
+    smsSeconds = codeSmsWait;
+  } else if (!timers.is_wa_old_echo && timers.retry_after > 180 && timers.retry_after < 86400 * 14) {
+    smsSeconds = timers.retry_after;
+  }
+
+  // SMS open = exist menjawab, tidak no_routes, dan tidak ada wait
+  const existSmsOpen = Boolean(existText) && !existNoRoutes && smsSeconds === 0;
+
+  // Device path
+  const hasDevicePath = Boolean(
+    timers.wa_old_eligible ||
+    timers.device_name ||
+    (parsed && String(parsed.state || '').toUpperCase() === 'REGISTERED_ON_DEVICE') ||
+    Number(existResponse.wa_old_eligible || codeResponse.wa_old_eligible || 0) === 1
+  );
+
+  // Ban / clone / security
   let isBanned = detectBanSignals(existResponse, codeResponse, parsed, patternHints);
-  if (isBanned && (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
+  if (isBanned && (smsSeconds > 0 || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
     if (!patternHints.includes('HARD_BAN')) {
       const hard =
         existResponse.status === 'banned' || codeResponse.status === 'banned' ||
         existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
-        existResponse.reason === 'blocked' || codeResponse.reason === 'blocked';
+        existResponse.reason === 'blocked' || codeResponse.reason === 'blocked' ||
+        existResponse.violation_type || codeResponse.violation_type;
       if (!hard) isBanned = false;
     }
   }
-  if (engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN') isBanned = false;
-  if (isBanned) reasons.push('ban_signal');
   const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
+  const engineClone = Boolean(parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock));
+  const engineSecurity = Boolean(parsed && parsed.isSecurityBlock);
   const isCloneBlocked = (cloneSig.isCloneBlocked || engineClone) && !isBanned;
   const isSecurityBlock = (cloneSig.isSecurityBlock || engineSecurity) && !isBanned && !isCloneBlocked;
-  if (isCloneBlocked) reasons.push('clone_or_unofficial');
-  if (isSecurityBlock) reasons.push('security_block');
-  if (hasLiveSms) reasons.push('exist_sms_wait:' + liveSmsWait);
-  else if (hasLiveVoice) reasons.push('voice_wait:' + timers.voice);
-  else if (hasLiveWait) reasons.push('other_channel_wait');
 
-  if (isBanned && !patternHints.includes('HARD_BAN')) {
-    isBanned = false;
-    reasons.push('ban_soft_cleared');
-  }
+  // Cooldown vs Ready — SMS wait is absolute priority
+  const finalCooldown = !isBanned && !isCloneBlocked && !isSecurityBlock && smsSeconds > 0;
+  // Ready only when SMS path is open (exist sms wait = 0) and not blocked
+  const finalReady = !isBanned && !isCloneBlocked && !isSecurityBlock && !finalCooldown && existSmsOpen;
 
-  const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
-  const hasDevicePath = Boolean(timers.wa_old_eligible || timers.device_name || engineState === 'REGISTERED_ON_DEVICE');
-
-  // SMS cooldown is ground truth for "siap diverifikasi".
-  // Device path alone is NOT enough if SMS still has a live wait.
-  const smsTrulyOpen = existSmsOpen && !hasLiveSms && timers.sms === 0;
-
-  const meaningfulCooldown =
-    !isBanned && !isCloneBlocked && !isSecurityBlock &&
-    (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT') ||
-      engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN' ||
-      (hasLiveSms && hasDevicePath));
-
-  const hasOpenPath =
-    engineReady || smsAvailable === true || hasDevicePath || timers.is_code_sent ||
-    patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG') ||
-    patternHints.includes('METHOD_NOT_ALLOWED_SOFT') ||
-    (smsAvailable !== false && !timers.exist_no_routes) ||
-    (existSmsOpen && smsAvailable !== false);
-
-  // isReady = benar-benar siap menerima SMS verifikasi (tidak ada SMS cooldown).
-  // Perangkat terdaftar + SMS open → ready. Perangkat + SMS CD → cooldown (bukan ready).
-  let isReady = false;
-  if (!isBanned && !isCloneBlocked && !isSecurityBlock && smsTrulyOpen) {
-    if (hasDevicePath) {
-      isReady = true;
-      reasons.push('device_path_sms_open');
-    } else if (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY' || smsAvailable === true) {
-      isReady = true;
-      reasons.push('open_path_ready');
-    } else if (existSmsOpen && smsAvailable !== false) {
-      isReady = true;
-      reasons.push('exist_sms_open');
-    }
-  }
-  if (hasLiveSms || timers.sms > 0) isReady = false;
-
-  const effectiveCooldown = isReady ? false : (meaningfulCooldown || hasLiveWait || (hasLiveSms && !isBanned && !isCloneBlocked && !isSecurityBlock));
-
-  const isPartial = Boolean(meta && (meta.partial || meta.existOnly));
-  const anyChannelSignal =
-    timers.sms > 0 || timers.voice > 0 || timers.flash > 0 || timers.email > 0 ||
-    timers.wa_old > 0 || timers.is_code_sent || hasDevicePath;
-  const smsOptionMissing =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !effectiveCooldown && !isReady &&
-    !hasDevicePath && !isPartial && !anyChannelSignal &&
-    (
-      (timers.exist_no_routes && smsAvailable === false) ||
-      (engineState === 'NO_ROUTES' && patternHints.includes('NO_ROUTES') && smsAvailable === false)
-    ) &&
-    !patternHints.includes('HIGH_REREG');
-  if (smsOptionMissing) reasons.push('sms_option_missing');
-  if (isReady) reasons.push('ready');
-  if (effectiveCooldown) reasons.push('cooldown');
-
-  let description = (parsed && parsed.description) || '';
-  if (isBanned) description = 'Nomor dibatasi / diblokir oleh WhatsApp.';
-  else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone).';
-  else if (isSecurityBlock) description = 'Demi keamanan: login sementara tidak tersedia.';
-  else if (effectiveCooldown) {
-    const ch = hasLiveSms ? channels.sms : (channels.voice.rawSeconds > 0 ? channels.voice : channels.flash);
-    const t = (ch && (ch.humanTime || ch.uiTimer)) || 'aktif';
-    const base = t.startsWith('Coba lagi') ? t : ('Cooldown aktif · ' + t);
-    description = hasDevicePath
-      ? (timers.device_name ? ('Perangkat terdaftar (' + timers.device_name + ') · ' + base) : ('Perangkat terdaftar · ' + base))
-      : base;
-  } else if (isReady) {
-    description = hasDevicePath && timers.device_name
-      ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
-      : (hasDevicePath ? 'Siap diverifikasi · perangkat terdaftar' : 'Nomor siap menerima verifikasi SMS.');
-  } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
+  const channels = {
+    sms: buildChannel(smsSeconds),
+    voice: buildChannel(timers.voice),
+    flash: buildChannel(timers.flash),
+    email: buildChannel(timers.email),
+    wa_old: buildChannel(timers.wa_old)
+  };
 
   let accountStatus = 'UNKNOWN';
-  if (isBanned) accountStatus = 'BANNED';
-  else if (isCloneBlocked) accountStatus = 'CLONE_BLOCKED';
-  else if (isSecurityBlock) accountStatus = 'SECURITY_BLOCK';
-  else if (isReady && (hasDevicePath || timers.wa_old_eligible)) accountStatus = 'REGISTERED_ON_DEVICE';
-  else if (isReady) accountStatus = 'READY';
-  else if (effectiveCooldown && hasDevicePath) accountStatus = 'IN_COOLDOWN';
-  else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
-  else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
-
-  let signalCount = 0;
-  if (hasDevicePath) signalCount += 1;
-  if (hasLiveSms) signalCount += 1;
-  if (timers.is_code_sent) signalCount += 1;
-  if (existSmsOpen && !hasLiveSms) signalCount += 1;
-  if (engineReady) signalCount += 1;
-  if (patternHints.includes('HARD_BAN')) signalCount += 2;
-
-  let confidence = 0.55;
-  if (isBanned && patternHints.includes('HARD_BAN')) confidence = 0.96;
-  else if (isBanned) confidence = 0.9;
-  else if (isCloneBlocked || isSecurityBlock) confidence = 0.88;
-  else if (isReady && hasDevicePath) confidence = 0.92;
-  else if (effectiveCooldown && hasLiveSms) confidence = 0.93;
-  else if (effectiveCooldown) confidence = 0.8;
-  else if (isReady && (timers.is_code_sent || engineReady)) confidence = 0.9;
-  else if (isReady && existSmsOpen) confidence = 0.86;
-  else if (isReady) confidence = 0.8;
-  else if (smsOptionMissing) confidence = 0.75;
-
-  if (signalCount >= 3) confidence = Math.min(0.98, confidence + 0.04);
-  else if (signalCount >= 2) confidence = Math.min(0.96, confidence + 0.02);
-
-  const proxyIso = String(countryIso2 || '').toLowerCase();
-  const tag = String(sessionTag || proxyMode || '').toLowerCase();
-  if (proxyIso && (tag.includes(proxyIso) || tag.includes('geo'))) {
-    confidence = Math.min(0.99, confidence + 0.03);
-    reasons.push('proxy_geo_match');
+  let description = '';
+  if (isBanned) {
+    accountStatus = 'BANNED';
+    description = 'Nomor dibatasi / banned';
+  } else if (isCloneBlocked) {
+    accountStatus = 'CLONE_BLOCKED';
+    description = 'Tidak support clone';
+  } else if (isSecurityBlock) {
+    accountStatus = 'SECURITY_BLOCK';
+    description = 'Security block';
+  } else if (finalCooldown) {
+    accountStatus = 'IN_COOLDOWN';
+    description = 'Cooldown SMS · ' + (channels.sms.uiTimer || '0s');
+  } else if (finalReady && hasDevicePath) {
+    accountStatus = 'REGISTERED_ON_DEVICE';
+    description = 'Siap diverifikasi · perangkat terdaftar';
+  } else if (finalReady) {
+    accountStatus = 'READY';
+    description = 'Siap diverifikasi';
+  } else if (existNoRoutes) {
+    accountStatus = 'NO_ROUTES';
+    description = 'Jalur SMS tidak tersedia';
+  } else if (parsed && parsed.description) {
+    description = parsed.description;
   }
 
-  if (meta && meta.partial) confidence = Math.max(0.4, confidence - 0.08);
-  if (meta && meta.existOnly) confidence = Math.min(confidence, 0.88);
+  const confidence =
+    isBanned || isCloneBlocked || finalReady || finalCooldown ? 0.92 :
+    existText ? 0.6 : 0.35;
 
-  const ordered = [channels.sms, channels.voice, channels.flash, channels.email].filter((t) => t && t.rawSeconds > 0);
-  const primary = (hasLiveSms ? channels.sms : null) || ordered[0] || buildChannel(0);
-  const existClear = Boolean(meta && meta.existOnly && (isReady || (effectiveCooldown && hasLiveSms) || isBanned || isCloneBlocked) && confidence >= EXIST_CLEAR_CONFIDENCE);
-  const needsRecheck = Boolean(!existClear && (meta && meta.existOnly) && confidence < EXIST_CLEAR_CONFIDENCE);
-
-  let secondaryPath = null;
-  let secondarySeconds = 0;
-  // Prefer SMS cooldown when present, even if device is registered.
-  // Lets clone section show accurate "cooldown / siap / perangkat" labels.
-  if (hasLiveSms || (hasLiveWait && timers.sms > 0)) {
-    secondaryPath = 'cooldown';
-    secondarySeconds = liveSmsWait > 0 ? liveSmsWait : timers.sms;
-  } else if (hasDevicePath) {
-    secondaryPath = 'device';
-  } else if (hasLiveWait) {
-    secondaryPath = 'cooldown';
-    secondarySeconds = liveSmsWait > 0 ? liveSmsWait : (
-      timers.voice > 0 ? timers.voice : (timers.flash > 0 ? timers.flash : (timers.email > 0 ? timers.email : 0))
-    );
-  } else if (existSmsOpen || engineReady || hasOpenPath || smsTrulyOpen) {
-    secondaryPath = 'ready';
+  const rawDigits = String(payloads.rawNumber || '').replace(/\D/g, '');
+  const safeFmt = rawDigits ? ('+' + rawDigits) : String(payloads.rawNumber || '');
+  let formatted = normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone);
+  const shown = String(formatted || '').replace(/\D/g, '');
+  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) {
+    formatted = safeFmt;
   }
 
   return {
-    formattedNumber: (function () {
-      const raw = payloads.rawNumber;
-      const rawDigits = String(raw || '').replace(/\D/g, '');
-      const safe = rawDigits ? ('+' + rawDigits) : String(raw || '');
-      const norm = normalizeDisplayNumber(raw, payloads.phoneInfo, parsed && parsed.phone);
-      const shown = String(norm || '').replace(/\D/g, '');
-      if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) return safe;
-      return norm || safe;
-    })(),
-    region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country)) || null,
-    accountStatus, isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
-    anyCooldown: effectiveCooldown, description, deviceName: timers.device_name || null, waOldEligible: Boolean(timers.wa_old_eligible || hasDevicePath),
-    channels, primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
-    proxyInfo: proxyMode + ' · ' + sessionTag, proxyTag: sessionTag, proxyCountry: countryIso2,
-    confidence, existClear, needsRecheck, decisionReasons: reasons, patternHints,
-    softFallback: false, error: false, partialResponse: Boolean(meta && meta.partial),
-    secondaryPath: secondaryPath,
-    secondarySeconds: secondarySeconds
+    formattedNumber: formatted || safeFmt,
+    region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country || payloads.phoneInfo.iso)) || null,
+    accountStatus,
+    isBanned,
+    isCloneBlocked: isCloneBlocked || isSecurityBlock,
+    isSecurityBlock,
+    isReady: finalReady,
+    smsAvailable: finalReady || finalCooldown,
+    smsOptionMissing: existNoRoutes,
+    anyCooldown: finalCooldown,
+    description,
+    deviceName: timers.device_name || null,
+    waOldEligible: hasDevicePath,
+    channels,
+    primaryTimer: { rawSeconds: channels.sms.rawSeconds, uiTimer: channels.sms.uiTimer, humanTime: channels.sms.humanTime },
+    proxyInfo: String(proxyMode || '') + ' · ' + String(sessionTag || ''),
+    proxyTag: sessionTag,
+    proxyCountry: countryIso2,
+    confidence,
+    existClear: finalReady || finalCooldown || isBanned || isCloneBlocked,
+    needsRecheck: accountStatus === 'UNKNOWN',
+    decisionReasons: [],
+    patternHints,
+    softFallback: false,
+    error: false,
+    partialResponse: Boolean(meta && meta.partial),
+    secondaryPath: finalCooldown ? 'cooldown' : (hasDevicePath ? 'device' : (finalReady ? 'ready' : null)),
+    secondarySeconds: smsSeconds
   };
 }
 
@@ -682,7 +622,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
         }
       }
       if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) {
-        await sleep(120 + Math.floor(Math.random() * 180));
+        await sleep(80 + Math.floor(Math.random() * 100));
         continue;
       }
       if (rounds.length >= 2) {
@@ -694,7 +634,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
     } catch (err) {
       lastError = err;
       if (attempt < INTERNAL_RETRIES) {
-        await sleep(150 + Math.floor(Math.random() * 220));
+        await sleep(100 + Math.floor(Math.random() * 120));
         continue;
       }
     }
