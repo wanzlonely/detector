@@ -86,24 +86,29 @@ function renderStatus({ user, isVip, isOwner = false, referralStats }) {
   ].join('\n');
 }
 
-function renderLeaderboard(rows) {
-  const medals = ['♛', '♜', '♞'];
+function renderLeaderboard(rows, myRank) {
+  const medals = ['♛', '♜', '♝', '♞', '♟', '♙', '♘', '♗', '♖', '♕'];
   const lines = (rows && rows.length)
     ? rows.slice(0, 10).map((row, index) => {
         const rank = String(index + 1).padStart(2, '0');
-        const medal = medals[index] || rank;
+        const medal = medals[index] || '•';
         const name = escapeHtml(row.full_name || 'Pengguna');
         const count = Number(row.total_checks || 0).toLocaleString('id-ID');
-        return medal + ' ✧ <b>' + name + '</b>\n      └ <b>' + count + '</b> ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
+        return medal + ' ' + rank + ' · <b>' + name + '</b>\n      └ <b>' + count + '</b> ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
       }).join('\n\n')
     : '<i>ʙᴇʟᴜᴍ ᴀᴅᴀ ᴅᴀᴛᴀ. ᴊᴀᴅɪʟᴀʜ ᴘᴇɴɢɢᴜɴᴀ ᴘᴇʀᴛᴀᴍᴀ ᴅɪ ᴘᴀᴘᴀɴ ᴘᴇʀɪɴɢᴋᴀᴛ.</i>';
 
+  const rankText = (myRank && myRank > 0)
+    ? String(myRank)
+    : '—';
+
   return [
-    '♛ <b>ᴛᴏᴘ 𝟷𝟶 ᴅᴇᴛᴇᴄᴛᴏʀ · ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ</b> ♛',
-    '',
+    '✦ <b>ᴛᴏᴘ 10 ᴅᴇᴛᴇᴄᴛᴏʀ · ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ</b>',
+    '──────────────────────',
     lines,
-    '',
-    '♧ sᴛᴀᴛᴜs ᴅɪ ᴀᴛᴀs ᴀᴅᴀʟᴀʜ ᴜsᴇʀ ʏᴀɴɢ ᴘᴀʟɪɴɢ ᴀᴋᴛɪғ'
+    '──────────────────────',
+    '⌖ ᴘᴇʀɪɴɢᴋᴀᴛ ᴋᴀᴍᴜ ⦂ <b>' + rankText + '</b>',
+    'ⓘ ᴅɪᴘᴇʀʙᴀʀᴜɪ ʀᴇᴀʟ-ᴛɪᴍᴇ ʙᴇʀᴅᴀsᴀʀᴋᴀɴ ᴛᴏᴛᴀʟ ᴄᴇᴋ'
   ].join('\n');
 }
 
