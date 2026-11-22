@@ -173,20 +173,21 @@ function extractChannelTimers(existRaw, codeRaw) {
   const isCodeSent = code.status === 'sent' || code.status === 'ok';
   const codeMethod = String(code.method || code.login_method || '').toLowerCase();
   const isWaOldMethod = codeMethod.includes('wa_old');
+  // Echo wa_old: exist SMS open tapi code mengembalikan timer pendek dari method wa_old
   const isWaOldEcho =
-    existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 180 &&
+    existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 360 &&
     (isCodeSent || isWaOldMethod ||
-      (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 5) ||
-      (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 5 && num(code.send_sms_wait) === 0));
+      (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 15) ||
+      (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 15 && num(code.send_sms_wait) === 0));
+  // SMS CD hanya dari exist.* — code sms_wait sering echo wa_old (2–5 menit) palsu
   let smsSeconds = 0;
   if (existSms > 0) {
     smsSeconds = existSms;
-  } else if (!isWaOldEcho && codeSmsRaw > 0) {
-    // codeSmsRaw <= 180 sering echo wa_old — sudah difilter isWaOldEcho
-    // codeSmsRaw > 180 adalah cooldown SMS nyata dari server
+  } else if (!isWaOldEcho && codeSmsRaw > 0 && !isWaOldMethod && !isCodeSent) {
+    // code CD hanya dipakai jika BUKAN probe wa_old / status sent
     smsSeconds = codeSmsRaw;
   }
-  if (smsSeconds === 0 && !isWaOldEcho && existRetry > 30) smsSeconds = existRetry;
+  // JANGAN pakai existRetry sebagai SMS CD — sering retry_after wa_old (~120–300s)
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
   let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
   let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
@@ -391,91 +392,77 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const timers = extractChannelTimers(existResponse, codeResponse);
   const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
 
-  // ========== 1) BAN (hard only) ==========
+  // ========== BAN ==========
   const hardBan = Boolean(
     existResponse.status === 'banned' || codeResponse.status === 'banned' ||
     existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
     existResponse.reason === 'blocked' || codeResponse.reason === 'blocked' ||
     existResponse.violation_type || codeResponse.violation_type ||
     existResponse.in_app_ban_appeal || codeResponse.in_app_ban_appeal ||
-    existResponse.appeal_token || codeResponse.appeal_token ||
-    (parsed && parsed.isBanned && patternHints.includes('HARD_BAN'))
+    existResponse.appeal_token || codeResponse.appeal_token
   );
-  let isBanned = hardBan || Boolean(parsed && parsed.isBanned && (
-    existResponse.violation_type || codeResponse.violation_type ||
-    existResponse.in_app_ban_appeal || codeResponse.in_app_ban_appeal ||
-    existResponse.status === 'banned' || codeResponse.status === 'banned'
-  ));
+  let isBanned = hardBan;
 
-  // ========== 2) CLONE / UNOFFICIAL / SECURITY ==========
+  // ========== CLONE / SECURITY (tidak mempengaruhi siap/cd grouping) ==========
   const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
-  let isCloneBlocked = Boolean(
-    (parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) ||
-    cloneSig.isCloneBlocked
-  );
-  let isSecurityBlock = Boolean(
-    (parsed && parsed.isSecurityBlock) || cloneSig.isSecurityBlock
-  );
-  // Ban mengalahkan clone; clone mengalahkan security label terpisah
+  let isCloneBlocked = Boolean((parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) || cloneSig.isCloneBlocked);
+  let isSecurityBlock = Boolean((parsed && parsed.isSecurityBlock) || cloneSig.isSecurityBlock);
   if (isBanned) { isCloneBlocked = false; isSecurityBlock = false; }
   if (isCloneBlocked) isSecurityBlock = false;
 
-  // ========== 3) SMS COOLDOWN SECONDS (inti akurasi) ==========
-  // "Coba lagi dalam 42.51" di WA = SMS sedang CD → HARUS masuk cooldown, BUKAN siap
-  // Device/wa_old tersedia TIDAK membuat status menjadi siap jika SMS CD
+  // ========== SMS COOLDOWN — HANYA dari exist (sumber kebenaran UI WA) ==========
+  // exist.sms_wait / send_sms_wait > 0  → cooldown nyata (seperti "Coba lagi dalam 42.51")
+  // exist.sms_wait === 0 & bukan no_routes → SMS terbuka → SIAP
+  // code.sms_wait sering echo wa_old 2–5 menit → JANGAN dipakai sebagai CD SMS
   const existNoRoutes = Boolean(
     timers.exist_no_routes ||
     existResponse.reason === 'no_routes' ||
     existResponse.reason === 'no_route'
   );
   const existSms = Math.max(0, Number(timers.exist_sms) || 0);
-  const engineCd = Math.max(0, Number(parsed && parsed.cooldownSeconds) || 0);
-  const timerSms = Math.max(0, Number(timers.sms) || 0);
+  const existAnswered = Boolean(existText && String(existText).trim());
 
   let smsSeconds = 0;
   if (existSms > 0) {
     smsSeconds = existSms;
-  } else if (timerSms > 0 && !timers.is_wa_old_echo) {
-    smsSeconds = timerSms;
-  } else if (engineCd > 180) {
-    // engine CD panjang = SMS CD nyata (bukan echo wa_old ~125s)
-    smsSeconds = engineCd;
-  } else if (engineCd > 0 && parsed && parsed.isCooldown && !parsed.isReady) {
+  }
+  // Fallback: engine cooldown HANYA jika panjang (>6 menit) dan exist tidak menjawab open
+  // Hindari false 5m dari wa_old echo
+  const engineCd = Math.max(0, Number(parsed && parsed.cooldownSeconds) || 0);
+  if (smsSeconds === 0 && existSms === 0 && engineCd >= 360 && parsed && parsed.isCooldown && !parsed.isReady) {
     smsSeconds = engineCd;
   }
 
-  // ========== 4) SMS status (siap / cooldown) — dihitung SELALU untuk label sekunder ==========
-  // SIAP = SMS tidak CD; COOLDOWN = SMS CD (meski device tersedia)
-  // Untuk nomor clone/ban, flag ini tetap diisi agar tampilan sekunder akurat
+  // ========== READY vs COOLDOWN ==========
   let isCooldown = false;
   let isReady = false;
 
-  if (smsSeconds > 0) {
-    isCooldown = true;
-    isReady = false;
-  } else {
-    const existAnswered = Boolean(existText && String(existText).trim());
-    const smsPathOpen = existAnswered && !existNoRoutes;
-    const engineReady = Boolean(parsed && parsed.isReady);
-    const engineCdFlag = Boolean(parsed && parsed.isCooldown);
-    const st = String((parsed && parsed.state) || '').toUpperCase();
-
-    if (engineCdFlag && (st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN')) {
+  if (!isBanned) {
+    if (smsSeconds > 0) {
+      // SMS CD nyata dari exist
       isCooldown = true;
       isReady = false;
-    } else if (smsPathOpen || engineReady || st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
+    } else if (existAnswered && !existNoRoutes) {
+      // exist bilang SMS open (wait=0) → SIAP diverifikasi
       isReady = true;
       isCooldown = false;
-    } else if (engineCdFlag) {
-      isCooldown = true;
-      isReady = false;
+    } else {
+      // exist tidak jelas — ikut engine dengan hati-hati
+      const st = String((parsed && parsed.state) || '').toUpperCase();
+      if (parsed && parsed.isReady) {
+        isReady = true;
+      } else if (parsed && parsed.isCooldown && engineCd >= 360) {
+        isCooldown = true;
+        smsSeconds = engineCd;
+      } else if (st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
+        isReady = true;
+      } else if (st === 'IN_COOLDOWN' || st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN') {
+        isCooldown = true;
+        if (engineCd > 0) smsSeconds = engineCd;
+      }
     }
   }
 
-  // Kategori utama: ban > clone > (ready/cooldown dipakai di grouping bot)
-  // isReady/isCooldown tetap true untuk label sekunder di grup clone
-
-  // ========== 5) DEVICE PATH (label saja, tidak mengubah siap/cd) ==========
   const hasDevicePath = Boolean(
     timers.wa_old_eligible ||
     timers.device_name ||
@@ -496,12 +483,6 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   if (isBanned) {
     accountStatus = 'BANNED';
     description = description || 'Nomor dibatasi / banned';
-  } else if (isCloneBlocked) {
-    accountStatus = 'CLONE_BLOCKED';
-    description = description || 'Tidak support clone';
-  } else if (isSecurityBlock) {
-    accountStatus = 'SECURITY_BLOCK';
-    description = description || 'Security block';
   } else if (isCooldown) {
     accountStatus = 'IN_COOLDOWN';
     description = description || ('Cooldown SMS · ' + (channels.sms.uiTimer || '0s'));
@@ -513,9 +494,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     description = description || 'Jalur SMS tidak tersedia';
   }
 
-  const confidence =
-    isBanned || isCloneBlocked || isReady || isCooldown ? 0.94 :
-    (existText ? 0.5 : 0.3);
+  const confidence = isBanned || isReady || isCooldown ? 0.94 : (existAnswered ? 0.5 : 0.3);
 
   const rawDigits = String(payloads.rawNumber || '').replace(/\D/g, '');
   const safeFmt = rawDigits ? ('+' + rawDigits) : String(payloads.rawNumber || '');
@@ -530,8 +509,8 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country || payloads.phoneInfo.iso)) || null,
     accountStatus,
     isBanned,
-    isCloneBlocked: isCloneBlocked || isSecurityBlock,
-    isSecurityBlock,
+    isCloneBlocked: false,
+    isSecurityBlock: false,
     isReady,
     smsAvailable: isReady || isCooldown,
     smsOptionMissing: existNoRoutes,
@@ -545,7 +524,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     proxyTag: sessionTag,
     proxyCountry: countryIso2,
     confidence,
-    existClear: isReady || isCooldown || isBanned || isCloneBlocked,
+    existClear: isReady || isCooldown || isBanned,
     needsRecheck: accountStatus === 'UNKNOWN',
     decisionReasons: [],
     patternHints,
