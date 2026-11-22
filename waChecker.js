@@ -344,10 +344,15 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
   const hasDevicePath = Boolean(timers.wa_old_eligible || timers.device_name || engineState === 'REGISTERED_ON_DEVICE');
 
+  // SMS cooldown is ground truth for "siap diverifikasi".
+  // Device path alone is NOT enough if SMS still has a live wait.
+  const smsTrulyOpen = existSmsOpen && !hasLiveSms && timers.sms === 0;
+
   const meaningfulCooldown =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !hasDevicePath &&
+    !isBanned && !isCloneBlocked && !isSecurityBlock &&
     (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT') ||
-      engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN');
+      engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN' ||
+      (hasLiveSms && hasDevicePath));
 
   const hasOpenPath =
     engineReady || smsAvailable === true || hasDevicePath || timers.is_code_sent ||
@@ -356,22 +361,24 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     (smsAvailable !== false && !timers.exist_no_routes) ||
     (existSmsOpen && smsAvailable !== false);
 
+  // isReady = benar-benar siap menerima SMS verifikasi (tidak ada SMS cooldown).
+  // Perangkat terdaftar + SMS open → ready. Perangkat + SMS CD → cooldown (bukan ready).
   let isReady = false;
-  if (!isBanned && !isCloneBlocked && !isSecurityBlock) {
+  if (!isBanned && !isCloneBlocked && !isSecurityBlock && smsTrulyOpen) {
     if (hasDevicePath) {
       isReady = true;
-      reasons.push('device_path_ready');
-    } else if (!hasLiveWait && (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY')) {
+      reasons.push('device_path_sms_open');
+    } else if (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY' || smsAvailable === true) {
       isReady = true;
       reasons.push('open_path_ready');
-    } else if (existSmsOpen && !hasLiveWait && smsAvailable !== false) {
+    } else if (existSmsOpen && smsAvailable !== false) {
       isReady = true;
       reasons.push('exist_sms_open');
     }
   }
-  if (!hasDevicePath && hasLiveWait) isReady = false;
+  if (hasLiveSms || timers.sms > 0) isReady = false;
 
-  const effectiveCooldown = isReady ? false : (meaningfulCooldown || (!hasDevicePath && hasLiveWait));
+  const effectiveCooldown = isReady ? false : (meaningfulCooldown || hasLiveWait || (hasLiveSms && !isBanned && !isCloneBlocked && !isSecurityBlock));
 
   const isPartial = Boolean(meta && (meta.partial || meta.existOnly));
   const anyChannelSignal =
@@ -396,11 +403,14 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (effectiveCooldown) {
     const ch = hasLiveSms ? channels.sms : (channels.voice.rawSeconds > 0 ? channels.voice : channels.flash);
     const t = (ch && (ch.humanTime || ch.uiTimer)) || 'aktif';
-    description = t.startsWith('Coba lagi') ? t : ('Cooldown aktif · ' + t);
+    const base = t.startsWith('Coba lagi') ? t : ('Cooldown aktif · ' + t);
+    description = hasDevicePath
+      ? (timers.device_name ? ('Perangkat terdaftar (' + timers.device_name + ') · ' + base) : ('Perangkat terdaftar · ' + base))
+      : base;
   } else if (isReady) {
     description = hasDevicePath && timers.device_name
       ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
-      : (hasDevicePath ? 'Siap diverifikasi · perangkat terdaftar' : 'Nomor siap menerima verifikasi.');
+      : (hasDevicePath ? 'Siap diverifikasi · perangkat terdaftar' : 'Nomor siap menerima verifikasi SMS.');
   } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
 
   let accountStatus = 'UNKNOWN';
@@ -409,6 +419,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (isSecurityBlock) accountStatus = 'SECURITY_BLOCK';
   else if (isReady && (hasDevicePath || timers.wa_old_eligible)) accountStatus = 'REGISTERED_ON_DEVICE';
   else if (isReady) accountStatus = 'READY';
+  else if (effectiveCooldown && hasDevicePath) accountStatus = 'IN_COOLDOWN';
   else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
   else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
 
@@ -452,14 +463,19 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
 
   let secondaryPath = null;
   let secondarySeconds = 0;
-  if (hasDevicePath) {
+  // Prefer SMS cooldown when present, even if device is registered.
+  // Lets clone section show accurate "cooldown / siap / perangkat" labels.
+  if (hasLiveSms || (hasLiveWait && timers.sms > 0)) {
+    secondaryPath = 'cooldown';
+    secondarySeconds = liveSmsWait > 0 ? liveSmsWait : timers.sms;
+  } else if (hasDevicePath) {
     secondaryPath = 'device';
-  } else if (hasLiveSms || (!hasDevicePath && hasLiveWait)) {
+  } else if (hasLiveWait) {
     secondaryPath = 'cooldown';
     secondarySeconds = liveSmsWait > 0 ? liveSmsWait : (
       timers.voice > 0 ? timers.voice : (timers.flash > 0 ? timers.flash : (timers.email > 0 ? timers.email : 0))
     );
-  } else if (existSmsOpen || engineReady || hasOpenPath) {
+  } else if (existSmsOpen || engineReady || hasOpenPath || smsTrulyOpen) {
     secondaryPath = 'ready';
   }
 
