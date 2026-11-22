@@ -108,8 +108,7 @@ bot.use((ctx, next) => next());
 
 async function getEffectiveUser(ctx) {
   const user = await getOrCreateUser(ctx.from);
-  if (!isOwner(ctx)) return user;
-  return { ...user, vip_until: 4102444800, vip_tier: 'OWNER', vip_plan: 'OWNER ACCESS', bulk_limit: 30, free_used_today: 0 };
+  if (!isOwner(ctx)) returnuser.vip_until: 4102444800, vip_tier: 'OWNER', vip_plan: 'OWNER ACCESS', bulk_limit: 30, free_used_today: 0 };
 }
 
 async function showHome(ctx) {
@@ -259,16 +258,15 @@ async function startDetect(ctx) {
   const limitHint = isVip ? 'ᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ / ᴋɪʀɪᴍᴀɴ' : '1 ɴᴏᴍᴏʀ (ғʀᴇᴇ)';
   return ctx.reply(
     '⌖ <b>ᴅᴇᴛᴇᴋsɪ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</b>\n\n' +
-    '<blockquote>sɪʟᴀᴋᴀɴ ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴄᴇᴋ.\n' +
+    'sɪʟᴀᴋᴀɴ ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴄᴇᴋ.\n' +
     '• ᴘᴇɴɢᴇᴄᴇᴋᴀɴ ᴍᴀssᴀʟ ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴀᴛᴀᴜ ᴋᴏᴍᴀ.\n' +
-    '• ʙᴏᴛ ᴏᴛᴏᴍᴀᴛɪs ᴍᴇɴɢᴀᴍʙɪʟ ᴀɴɢᴋᴀ sᴀᴊᴀ.</blockquote>\n\n' +
+    '• ʙᴏᴛ ᴏᴛᴏᴍᴀᴛɪs ᴍᴇɴɢᴀᴍʙɪʟ ᴀɴɢᴋᴀ sᴀᴊᴀ.\n\n' +
     'ᴄᴏɴᴛᴏʜ ⦂\n' +
     '<code>+6281234567890</code>\n' +
-    '<code>081234567890</code>\n' +
-    '<code>+22956196321 (Low) · Jul 2024</code>\n\n' +
+    '<code>+6281234567890 (Low) · Jul 2024</code>\n\n' +
     '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3') + '</b>\n' +
     '▸ ʟɪᴍɪᴛ ⦂ <b>' + limitHint + '</b>\n\n' +
-    'ᴋᴇᴛɪᴋ /cancel ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.',
+    'ᴋʟɪᴋ ᴅɪ ʙᴀᴡᴀʜ ɪɴɪ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.',
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
