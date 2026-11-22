@@ -1,7 +1,7 @@
 const WADetector = require('./waEngine');
 const { executeWithProxyRotation, getHealth } = require('./proxyManager');
 
-const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 10000);
+const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 8000);
 const INTERNAL_RETRIES = Math.min(4, Math.max(2, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 3)));
 const CONSENSUS_ENABLED = String(process.env.WA_CONSENSUS || '1') !== '0';
 const LOW_CONFIDENCE_THRESHOLD = Number(process.env.WA_LOW_CONFIDENCE || 0.72);
@@ -259,7 +259,7 @@ async function runDualProbe(payloads, headers, countryIso2) {
     try {
       existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
     } catch (_) {}
-    await sleep(80);
+    await sleep(60);
     try {
       codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
     } catch (_) {}
@@ -353,10 +353,10 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
   let accountStatus = 'UNKNOWN';
   if (isBanned) accountStatus = 'BANNED';
-  else if (isCloneBlocked) accountStatus = 'CLONE_OR_UNOFFICIAL_APP_BLOCK';
+  else if (isCloneBlocked) accountStatus = 'CLONE_BLOCKED';
   else if (isSecurityBlock) accountStatus = 'SECURITY_BLOCK';
   else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
-  else if (isReady) accountStatus = timers.wa_old_eligible ? 'REGISTERED_ON_DEVICE' : 'AVAILABLE_READY';
+  else if (isReady) accountStatus = 'READY';
   else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
   let confidence = 0.55;
   if (isBanned && patternHints.includes('HARD_BAN')) confidence = 0.96;
@@ -366,39 +366,31 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (effectiveCooldown) confidence = 0.8;
   else if (isReady && (timers.wa_old_eligible || timers.is_code_sent || engineReady)) confidence = 0.9;
   else if (isReady && existSmsOpen) confidence = 0.86;
-  else if (isReady) confidence = 0.78;
-  else if (smsOptionMissing) confidence = 0.7;
-  if (meta && meta.partial && !hasLiveSms) confidence -= 0.1;
-  if (meta && meta.existOnly && !hasLiveSms && !isBanned) confidence -= 0.06;
-  if (patternHints.includes('WA_OLD_ECHO') && isReady) confidence = Math.max(confidence, 0.88);
-  confidence = Math.max(0.2, Math.min(0.99, confidence));
-  const ordered = [channels.sms, channels.voice, channels.flash, channels.email].filter((t) => t && t.rawSeconds > 0);
-  const primary = ordered[0] || buildChannel(0);
-  const existClear =
-    Boolean(meta && meta.existOnly) && confidence >= EXIST_CLEAR_CONFIDENCE && accountStatus !== 'UNKNOWN' &&
-    (isBanned || isCloneBlocked || hasLiveSms || (isReady && existSmsOpen));
+  else if (isReady) confidence = 0.8;
+  else if (smsOptionMissing) confidence = 0.75;
+  if (meta && meta.partial) confidence = Math.max(0.4, confidence - 0.08);
+  if (meta && meta.existOnly) confidence = Math.min(confidence, 0.88);
+  const primary = hasLiveSms ? channels.sms : (channels.voice.rawSeconds > 0 ? channels.voice : (channels.flash.rawSeconds > 0 ? channels.flash : channels.sms));
+  const existClear = Boolean(meta && meta.existOnly && (isReady || (effectiveCooldown && hasLiveSms) || isBanned || isCloneBlocked) && confidence >= EXIST_CLEAR_CONFIDENCE);
+  const needsRecheck = Boolean(!existClear && (meta && meta.existOnly) && confidence < EXIST_CLEAR_CONFIDENCE);
   return {
     formattedNumber: normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone),
-    region: (parsed && parsed.country) || payloads.phoneInfo?.country_name || '-',
+    region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country)) || null,
     accountStatus, isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
     anyCooldown: effectiveCooldown, description, deviceName: timers.device_name || null, waOldEligible: timers.wa_old_eligible,
     channels, primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
     proxyInfo: proxyMode + ' · ' + sessionTag, proxyTag: sessionTag, proxyCountry: countryIso2,
-    rawStatus: (parsed && parsed.rawStatus) || existResponse.status || codeResponse.status || null,
-    rawReason: (parsed && parsed.rawReason) || existResponse.reason || codeResponse.reason || null,
-    isWaOldEcho: timers.is_wa_old_echo, partialResponse: !existText || !codeText, engineState, patternHints,
-    decisionReasons: reasons.slice(0, 6), confidence, existClear,
-    needsRecheck: confidence < LOW_CONFIDENCE_THRESHOLD || accountStatus === 'UNKNOWN', error: false
+    confidence, existClear, needsRecheck, decisionReasons: reasons, patternHints,
+    softFallback: false, error: false, partialResponse: Boolean(meta && meta.partial)
   };
 }
 
 function mergeConsensus(results) {
-  if (!results.length) return null;
-  if (results.length === 1) return results[0];
-  const score = { ready: 0, cooldown: 0, banned: 0, clone: 0, sms: 0 };
+  if (!results || !results.length) return softFallback('', {}, null, null);
+  const score = { ready: 0, cooldown: 0, clone: 0, ban: 0, sms: 0 };
   for (const r of results) {
     const w = Number(r.confidence) || 0.5;
-    if (r.isBanned) score.banned += w;
+    if (r.isBanned) score.ban += w;
     else if (r.isCloneBlocked || r.isSecurityBlock) score.clone += w;
     else if (r.anyCooldown) score.cooldown += w;
     else if (r.smsOptionMissing) score.sms += w;
@@ -406,25 +398,24 @@ function mergeConsensus(results) {
     else score.cooldown += w * 0.5;
   }
   let best = 'cooldown'; let bestVal = -1;
-  for (const [k, v] of Object.entries(score)) { if (v > bestVal) { bestVal = v; best = k; } }
-  const match = results.filter((r) => {
-    if (best === 'banned') return r.isBanned;
+  for (const k of Object.keys(score)) {
+    if (score[k] > bestVal) { bestVal = score[k]; best = k; }
+  }
+  const base = results.filter((r) => {
+    if (best === 'ban') return r.isBanned;
     if (best === 'clone') return r.isCloneBlocked || r.isSecurityBlock;
     if (best === 'cooldown') return r.anyCooldown || r.softFallback;
     if (best === 'sms') return r.smsOptionMissing;
     if (best === 'ready') return r.isReady;
     return false;
-  }).sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
-  const base = match || results.slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
-  const avgConf = results.reduce((s, r) => s + (r.confidence || 0), 0) / results.length;
-  return { ...base, confidence: Math.min(0.99, Math.max(avgConf, base.confidence || 0)), consensusVotes: score, consensusRounds: results.length, needsRecheck: false };
+  }).sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0] || results[0];
+  return { ...base, confidence: Math.min(0.99, (base.confidence || 0) + 0.05), consensusVotes: bestVal, consensusRounds: results.length, needsRecheck: false };
 }
 
 function softFallback(rawNumber, payloads, countryIso2, lastError) {
   return {
-    formattedNumber: normalizeDisplayNumber(rawNumber, payloads.phoneInfo, null),
-    region: payloads.phoneInfo?.country_name || '-',
-    accountStatus: 'IN_COOLDOWN', isBanned: false, isCloneBlocked: false, isSecurityBlock: false, isReady: false,
+    formattedNumber: normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null),
+    region: null, accountStatus: 'UNKNOWN', isBanned: false, isCloneBlocked: false, isSecurityBlock: false, isReady: false,
     smsAvailable: null, smsOptionMissing: false, anyCooldown: true,
     description: 'Respons tidak stabil — coba ulang sebentar.',
     deviceName: null, waOldEligible: false,
@@ -474,7 +465,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
         }
       }
       if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) {
-        await sleep(280 + Math.floor(Math.random() * 350));
+        await sleep(120 + Math.floor(Math.random() * 180));
         continue;
       }
       if (rounds.length >= 2) return { ...mergeConsensus(rounds), probeMode: 'consensus' };
@@ -482,7 +473,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
     } catch (err) {
       lastError = err;
       if (attempt < INTERNAL_RETRIES) {
-        await sleep(320 + Math.floor(Math.random() * 500));
+        await sleep(150 + Math.floor(Math.random() * 220));
         continue;
       }
     }
