@@ -364,7 +364,8 @@ async function processDetection(ctx, numbers) {
     const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
     if (stop) return { cancelled: true };
     try {
-      let result = await checkWhatsAppCooldown(raw, waveOpts || {});
+      const opts = Object.assign({ skipSticky: true }, waveOpts || {});
+      let result = await checkWhatsAppCooldown(raw, opts);
       if (result && !result.cancelled && (result.softFallback || result.needsRecheck || (Number(result.confidence) || 0) < 0.55)) {
         if ((waveOpts && waveOpts.wave) !== 'full') {
           try {
@@ -459,28 +460,32 @@ async function processDetection(ctx, numbers) {
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
       groups.restricted.push('· ' + num + ' ⦂ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴅᴀꜰᴛᴀʀᴋᴀɴ');
     } else if (r.isCloneBlocked || r.isSecurityBlock) {
-      let extra = '';
       const sec = r.secondaryPath || (
         (r.deviceName || r.waOldEligible) ? 'device' :
-        (r.anyCooldown ? 'cooldown' :
+        ((Number(r.secondarySeconds) || (r.primaryTimer && r.primaryTimer.rawSeconds) || 0) > 0 ? 'cooldown' :
         (r.isReady ? 'ready' : null))
       );
+      let label = 'sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs';
+      let sortSecs = 0;
       if (sec === 'device') {
-        extra = ' · ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+        label = 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+        sortSecs = -1;
       } else if (sec === 'cooldown') {
         let secs = Number(r.secondarySeconds) || 0;
         if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
         if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-        extra = secs > 0 ? (' · ᴄᴏᴏʟᴅᴏᴡɴ ' + formatCooldownSmallCaps(secs)) : ' · ᴄᴏᴏʟᴅᴏᴡɴ';
+        label = secs > 0 ? formatCooldownSmallCaps(secs) : 'ᴄᴏᴏʟᴅᴏᴡɴ';
+        sortSecs = secs > 0 ? secs : 999999;
       } else if (sec === 'ready') {
-        extra = ' · sɪᴀᴘ';
+        label = 'sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs';
+        sortSecs = 0;
       }
-      groups.clone.push('· ' + num + ' ⦂ ᴀᴘʟɪᴋᴀsɪ ʀᴇsᴍɪ' + extra);
+      groups.clone.push({ line: '· ' + num + ' ⦂ ' + label, secs: sortSecs });
     } else if (r.isReady && !r.anyCooldown) {
       if (r.deviceName || r.waOldEligible || r.accountStatus === 'REGISTERED_ON_DEVICE') {
         groups.ready.push({ line: '· ' + num + ' ⦂ ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ', rank: 0 });
       } else {
-        groups.ready.push({ line: '· ' + num + ' ⦂ sɪᴀᴘ', rank: 1 });
+        groups.ready.push({ line: '· ' + num + ' ⦂ sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs', rank: 1 });
       }
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
@@ -500,6 +505,11 @@ async function processDetection(ctx, numbers) {
 
   groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0));
   groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
+  groups.clone.sort((a, b) => {
+    const sa = typeof a === 'object' ? (a.secs ?? 0) : 0;
+    const sb = typeof b === 'object' ? (b.secs ?? 0) : 0;
+    return sa - sb;
+  });
 
   const lines = [];
   lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
@@ -528,7 +538,7 @@ async function processDetection(ctx, numbers) {
     lines.push('');
     lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
     lines.push('');
-    groups.clone.forEach((n) => lines.push(n));
+    groups.clone.forEach((n) => lines.push(typeof n === 'object' ? (n.line || n) : n));
   }
   if (groups.restricted.length) {
     lines.push('');
