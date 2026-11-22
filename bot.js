@@ -314,6 +314,19 @@ function buildProgressBar(pct) {
   return '●'.repeat(filled) + '○'.repeat(10 - filled);
 }
 
+function formatCooldownSmallCaps(seconds) {
+  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+  if (sec <= 0) return '0ᴅᴇᴛɪᴋ';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const parts = [];
+  if (h > 0) parts.push(h + 'ᴊᴀᴍ');
+  if (m > 0) parts.push(m + 'ᴍᴇɴɪᴛ');
+  if (s > 0 || parts.length === 0) parts.push(s + 'ᴅᴇᴛɪᴋ');
+  return parts.join(' ');
+}
+
 function buildProgressText(processed, total, stageLabel) {
   const safeTotal = total > 0 ? total : 1;
   const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
@@ -455,17 +468,12 @@ async function processDetection(ctx, numbers) {
       }
       groups.ready.push(line);
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
-      let line = num;
-      let timer = '';
-      if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) {
-        timer = r.primaryTimer.humanTime || r.primaryTimer.uiTimer || '';
-      } else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) {
-        timer = r.channels.sms.humanTime || r.channels.sms.uiTimer || '';
-      } else if (r.description && /coba lagi|cooldown|jam|menit/i.test(r.description)) {
-        timer = String(r.description).replace(/^Cooldown aktif ·\s*/i, '');
-      }
-      if (timer) line += ' · ' + timer;
-      groups.cooldown.push(line);
+      let secs = 0;
+      if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
+      else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
+      else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
+      const dur = formatCooldownSmallCaps(secs);
+      groups.cooldown.push('· ' + num + ' ⦂ ' + dur);
     } else {
       const note = r.description ? (' · ' + r.description) : '';
       groups.other.push(num + note);
@@ -490,8 +498,9 @@ async function processDetection(ctx, numbers) {
   }
   if (groups.cooldown.length) {
     lines.push('');
-    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ</b>');
-    groups.cooldown.forEach((n) => lines.push('· ' + n));
+    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
+    lines.push('');
+    groups.cooldown.forEach((n) => lines.push(n));
   }
   if (groups.clone.length) {
     lines.push('');
