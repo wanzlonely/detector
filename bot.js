@@ -2,7 +2,7 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const {
   redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
-  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, redeemReferralReward,
+  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, getUserRank, redeemReferralReward,
   consumeQuota, addCheckLog, getCachedCheckResult, setCachedCheckResult, qualifyReferral,
   incrementUserChecks
 } = require('./database');
@@ -56,18 +56,15 @@ function styledCallback(text, data, style) {
 }
 
 const USER_KEYBOARD = Markup.keyboard([
-  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
-  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
-  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }]
-]).resize().oneTime().placeholder('Pilih menu…');
+  ['⌖ DETECT', '✧ BELI PREMIUM', '◈ STATUS'],
+  ['♛ LEADERBOARD', '♧ REFERRAL', '✉︎ HUBUNGI ADMIN']
+]).resize().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
-  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
-  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
-  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }],
-  [{ text: '♛ OWNER CONSOLE' }],
-  [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
-]).resize().oneTime().placeholder('Pilih fungsi owner…');
+  ['⌖ DETECT', '✧ BELI PREMIUM', '◈ STATUS'],
+  ['♛ LEADERBOARD', '♧ REFERRAL', '✉︎ HUBUNGI ADMIN'],
+  ['♛ OWNER CONSOLE', '✚ AKTIVASI PREMIUM', '▤ BROADCAST']
+]).resize().placeholder('Pilih fungsi owner…');
 
 const OWNER_ACTION_TTL = 300;
 async function setOwnerAction(userId, action) {
@@ -152,8 +149,10 @@ async function showPackage(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPackageDetailCard({ user, pkg });
   const keyboard = Markup.inlineKeyboard([
-    [styledCallback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success')],
-    [styledCallback('↶ KEMBALI', 'store:premium', 'danger')]
+    [
+      styledCallback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success'),
+      styledCallback('↶ KEMBALI', 'store:premium', 'danger')
+    ]
   ]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
@@ -224,14 +223,18 @@ async function showStatus(ctx) {
   return ctx.reply(require('./themes').renderStatus({ user, isVip: isOwner(ctx) || isUserVip(user), isOwner: isOwner(ctx), referralStats }), { parse_mode: 'HTML' });
 }
 async function showLeaderboard(ctx) {
-  return ctx.reply(require('./themes').renderLeaderboard(await getLeaderboard(10)), { parse_mode: 'HTML' });
+  const [rows, myRank] = await Promise.all([
+    getLeaderboard(10),
+    getUserRank(ctx.from.id)
+  ]);
+  return ctx.reply(require('./themes').renderLeaderboard(rows, myRank), { parse_mode: 'HTML' });
 }
 async function showReferral(ctx) {
   const me = await bot.telegram.getMe();
   const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
   const stats = await getReferralStats(ctx.from.id);
   const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
-  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl)], [styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]]) });
+  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl), styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]]) });
 }
 bot.hears('◈ STATUS', showStatus);
 bot.hears('♛ LEADERBOARD', showLeaderboard);
@@ -563,7 +566,7 @@ async function processDetection(ctx, numbers, detectOpts) {
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
       const dev = deviceLabel(r);
-      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' ' + dev, secs: secs });
+      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' ' + dev, secs: secs, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
     } else if (r.isReady) {
       const dev = deviceLabel(r);
       groups.ready.push({ line: num + ' ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
@@ -576,8 +579,14 @@ async function processDetection(ctx, numbers, detectOpts) {
     }
   }
 
+  // ON-DEVICE selalu di atas
   groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0));
-  groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
+  groups.cooldown.sort((a, b) => {
+    const ra = a.rank != null ? a.rank : 1;
+    const rb = b.rank != null ? b.rank : 1;
+    if (ra !== rb) return ra - rb;
+    return (a.secs || 0) - (b.secs || 0);
+  });
 
   const lines = [];
   lines.push('✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ');
@@ -628,8 +637,10 @@ async function processDetection(ctx, numbers, detectOpts) {
   return ctx.reply(lines.join('\n'), {
     parse_mode: 'HTML',
     ...Markup.inlineKeyboard([
-      [styledCallback('↻ UPDATE STATUS', 'detect:refresh:' + jobId, 'success')],
-      [styledCallback('ⓘ KETERANGAN HASIL', 'detect:info', 'primary')]
+      [
+        styledCallback('↻ UPDATE STATUS', 'detect:refresh:' + jobId, 'success'),
+        styledCallback('ⓘ KETERANGAN', 'detect:info', 'primary')
+      ]
     ])
   });
 }
@@ -639,8 +650,10 @@ bot.hears('♛ OWNER CONSOLE', async (ctx) => {
   return ctx.reply('♛ <b>ᴏᴡɴᴇʀ ᴄᴏɴsᴏʟᴇ</b>\n\nᴘɪʟɪʜ ᴀᴋsɪ ᴅɪ ʙᴀᴡᴀʜ.', {
     parse_mode: 'HTML',
     ...Markup.inlineKeyboard([
-      [styledCallback('✚ AKTIVASI PREMIUM', 'owner:activate', 'success')],
-      [styledCallback('▤ BROADCAST', 'owner:broadcast', 'primary')]
+      [
+        styledCallback('✚ AKTIVASI PREMIUM', 'owner:activate', 'success'),
+        styledCallback('▤ BROADCAST', 'owner:broadcast', 'primary')
+      ]
     ])
   });
 });
