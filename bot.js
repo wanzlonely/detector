@@ -95,7 +95,7 @@ async function handleCancel(ctx) {
       redis.del('owner:contact:target:' + uid)
     ]);
   }
-  return ctx.reply('<b>Dibatalkan</b>\n\nKembali ke menu utama.', {
+  return ctx.reply('✕ <b>ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\n\nᴋᴇᴍʙᴀʟɪ ᴋᴇ ᴍᴇɴᴜ ᴜᴛᴀᴍᴀ.', {
     parse_mode: 'HTML',
     ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
   });
@@ -185,10 +185,10 @@ bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
 
 async function startContact(ctx) {
   await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
-  return ctx.reply('<b>HUBUNGI ADMIN</b>\n\n<blockquote>Tulis pesan atau keluhan Anda. Admin akan membalas secepatnya.</blockquote>', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('Batalkan', 'contact:cancel', 'danger')]]) });
+  return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\n<blockquote>ᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ.\nᴀᴅᴍɪɴ ᴀᴋᴀɴ ᴍᴇᴍʙᴀʟᴀs sᴇᴄᴇᴘᴀᴛɴʏᴀ.</blockquote>', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('Batalkan', 'contact:cancel', 'danger')]]) });
 }
 bot.hears(/^HUBUNGI ADMIN$/i, startContact);
-bot.action('contact:cancel', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await redis.del('contact:state:' + ctx.from.id); return ctx.reply('<b>Pengiriman pesan dibatalkan</b>', { parse_mode: 'HTML' }); });
+bot.action('contact:cancel', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await redis.del('contact:state:' + ctx.from.id); return ctx.reply('✕ <b>ᴘᴇɴɢɪʀɪᴍᴀɴ ᴘᴇsᴀɴ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' }); });
 
 async function showStatus(ctx) {
   const user = await getEffectiveUser(ctx);
@@ -251,25 +251,24 @@ async function startDetect(ctx) {
   const remaining = isVip ? 999 : Math.max(0, 3 - Number(user.free_used_today || 0));
   if (!isVip && remaining <= 0) {
     return ctx.reply(
-      '<b>KUOTA HARIAN HABIS</b>\n\n<blockquote>Anda telah menggunakan 3 kuota gratis hari ini. Upgrade ke Premium untuk pemeriksaan tanpa batas.</blockquote>',
+      '✦ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\n\n<blockquote>ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴍᴇɴɢɢᴜɴᴀᴋᴀɴ 3 ᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs ʜᴀʀɪ ɪɴɪ.\nᴜᴘɢʀᴀᴅᴇ ᴋᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛᴀɴᴘᴀ ʙᴀᴛᴀs.</blockquote>',
       { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('Beli Premium', 'store:premium', 'success')]]) }
     );
   }
   await redis.set('detect:mode:' + ctx.from.id, 'waiting_numbers', { ex: 300 });
-  const limitHint = isVip ? 'Maksimal 30 nomor / kiriman' : '1 nomor (free)';
+  const limitHint = isVip ? 'ᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ / ᴋɪʀɪᴍᴀɴ' : '1 ɴᴏᴍᴏʀ (ғʀᴇᴇ)';
   return ctx.reply(
-    '<b>DETEKSI NOMOR WHATSAPP</b>\n' +
-    '━━━━━━━━━━━━━━━━━━━━\n\n' +
-    '<blockquote>Silakan kirim nomor yang ingin dicek ke chat ini.\n' +
-    '• Pengecekan massal pisahkan dengan baris baru atau koma.\n' +
-    '• Bot otomatis mengambil angka saja, label teks diabaikan.</blockquote>\n\n' +
-    '<b>Contoh</b>\n' +
+    '⌖ <b>ᴅᴇᴛᴇᴋsɪ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</b>\n\n' +
+    '<blockquote>sɪʟᴀᴋᴀɴ ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴄᴇᴋ.\n' +
+    '• ᴘᴇɴɢᴇᴄᴇᴋᴀɴ ᴍᴀssᴀʟ ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴀᴛᴀᴜ ᴋᴏᴍᴀ.\n' +
+    '• ʙᴏᴛ ᴏᴛᴏᴍᴀᴛɪs ᴍᴇɴɢᴀᴍʙɪʟ ᴀɴɢᴋᴀ sᴀᴊᴀ.</blockquote>\n\n' +
+    'ᴄᴏɴᴛᴏʜ ⦂\n' +
     '<code>+6281234567890</code>\n' +
     '<code>081234567890</code>\n' +
     '<code>+22956196321 (Low) · Jul 2024</code>\n\n' +
-    'Kuota  ·  <b>' + (isVip ? 'Tanpa batas' : remaining + ' / 3') + '</b>\n' +
-    'Limit  ·  <b>' + limitHint + '</b>\n\n' +
-    '<i>Ketik /cancel untuk membatalkan.</i>',
+    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3') + '</b>\n' +
+    '▸ ʟɪᴍɪᴛ ⦂ <b>' + limitHint + '</b>\n\n' +
+    'ᴋᴇᴛɪᴋ /cancel ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.',
     {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([
@@ -283,7 +282,7 @@ bot.command('detect', startDetect);
 bot.action('detect:cancel_prompt', async (ctx) => {
   await ctx.answerCbQuery('Dibatalkan').catch(() => {});
   await redis.del('detect:mode:' + ctx.from.id);
-  return ctx.reply('<b>Deteksi dibatalkan</b>', { parse_mode: 'HTML' });
+  return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 });
 
 function buildProgressBar(pct) {
@@ -295,12 +294,11 @@ function buildProgressText(processed, total, stageLabel) {
   const safeTotal = total > 0 ? total : 1;
   const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
   const pct = Math.round((safeProcessed / safeTotal) * 100);
-  const title = stageLabel || 'MEMPROSES TARGET';
+  const title = stageLabel || 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
   return (
-    '<b>' + title + '</b>\n' +
-    '━━━━━━━━━━━━━━━━━━━━\n\n' +
-    buildProgressBar(pct) + '  <b>' + pct + '%</b>\n' +
-    'Progres  ·  <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> nomor'
+    '⟳ <b>' + title + '</b>\n\n' +
+    buildProgressBar(pct) + '  ' + pct + '%\n' +
+    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ'
   );
 }
 
@@ -314,7 +312,7 @@ async function processDetection(ctx, numbers) {
   const results = new Array(total);
 
   let progressMsg;
-  let currentStageLabel = 'MEMPROSES TARGET';
+  let currentStageLabel = 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
   let stageProcessed = 0;
   let stageTotal = total;
 
@@ -419,7 +417,7 @@ async function processDetection(ctx, numbers) {
   const allIdx = Array.from({ length: total }, (_, i) => i);
 
   if (total >= 4) {
-    currentStageLabel = 'TAHAP 1/2 · SCAN CEPAT';
+    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · sᴄᴀɴ ᴄᴇᴘᴀᴛ';
     await runPool(allIdx, { wave: 'exist' });
 
     const needFull = [];
@@ -436,16 +434,16 @@ async function processDetection(ctx, numbers) {
     }
 
     if (needFull.length) {
-      currentStageLabel = 'TAHAP 2/2 · VERIFIKASI DALAM';
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴅᴀʟᴀᴍ';
       await runPool(needFull, { wave: 'full' });
     } else {
-      currentStageLabel = 'TAHAP 2/2 · SELESAI';
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · sᴇʟᴇsᴀɪ';
       stageProcessed = total;
       stageTotal = total;
       await updateProgress();
     }
   } else {
-    currentStageLabel = total > 1 ? 'TAHAP 1/1 · PEMERIKSAAN' : 'MEMPROSES TARGET';
+    currentStageLabel = total > 1 ? 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
     await runPool(allIdx, { wave: 'full' });
   }
 
@@ -455,7 +453,7 @@ async function processDetection(ctx, numbers) {
   await redis.del('detect:exit:' + userId + ':' + jobId);
 
   if (stopped) {
-    return ctx.reply('<b>Deteksi dibatalkan</b>', { parse_mode: 'HTML' });
+    return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
   }
 
   function pickCooldownDuration(r) {
@@ -492,30 +490,29 @@ async function processDetection(ctx, numbers) {
   }
 
   const lines = [];
-  lines.push('<b>PEMERIKSAAN SELESAI</b>');
-  lines.push('━━━━━━━━━━━━━━━━━━━━');
+  lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
   lines.push('');
-  lines.push(buildProgressBar(100) + ' <b>100%</b>');
-  lines.push('Progres  ·  <b>' + total + '</b> / <b>' + total + '</b> nomor');
+  lines.push(buildProgressBar(100) + ' 100%');
+  lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
   lines.push('');
-  lines.push('Siap diverifikasi     ·  <b>' + groups.ready.length + '</b>');
-  lines.push('Cooldown              ·  <b>' + groups.cooldown.length + '</b>');
-  lines.push('Tidak support clone  ·  <b>' + groups.clone.length + '</b>');
-  lines.push('Opsi SMS tidak ada   ·  <b>' + groups.smsUnavailable.length + '</b>');
-  lines.push('Dibatasi             ·  <b>' + groups.banned.length + '</b>');
+  lines.push('✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ ⦂ <b>' + groups.ready.length + '</b>');
+  lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
+  lines.push('△ ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
+  lines.push('⊘ ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ⦂ <b>' + groups.smsUnavailable.length + '</b>');
+  lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.banned.length + '</b>');
   lines.push('');
-  lines.push('Sukses  ·  <b>' + ok + '</b>  ·  Error  ·  <b>0</b>');
+  lines.push('sᴜᴋsᴇs ⦂ <b>' + ok + '</b> · ᴇʀʀᴏʀ ⦂ <b>0</b>');
   lines.push('');
-  lines.push('<b>HASIL DETEKSI</b>');
+  lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
 
   if (groups.ready.length) {
     lines.push('');
-    lines.push('<b>SIAP DIVERIFIKASI</b>');
+    lines.push('✓ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪғɪᴋᴀsɪ</b>');
     lines.push(...groups.ready.map((n) => '<code>' + n + '</code>'));
   }
   if (groups.cooldown.length) {
     lines.push('');
-    lines.push('<b>COOLDOWN WHATSAPP</b>');
+    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
     lines.push(...groups.cooldown.map((item) => {
       if (item.duration) return '<code>' + item.number + '</code> — ' + item.duration;
       return '<code>' + item.number + '</code>';
@@ -523,22 +520,22 @@ async function processDetection(ctx, numbers) {
   }
   if (groups.clone.length) {
     lines.push('');
-    lines.push('<b>TIDAK SUPPORT CLONE</b>');
+    lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
     lines.push(...groups.clone.map((n) => '<code>' + n + '</code>'));
   }
   if (groups.smsUnavailable.length) {
     lines.push('');
-    lines.push('<b>OPSI SMS TIDAK DITEMUKAN</b>');
+    lines.push('⊘ <b>ᴏᴘsɪ sᴍs ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>');
     lines.push(...groups.smsUnavailable.map((n) => '<code>' + n + '</code>'));
   }
   if (groups.banned.length) {
     lines.push('');
-    lines.push('<b>DIBATASI</b>');
+    lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
     lines.push(...groups.banned.map((n) => '<code>' + n + '</code>'));
   }
 
   lines.push('');
-  lines.push('Proses  ·  <b>' + total + 'd</b>');
+  lines.push('ᴘʀᴏsᴇs ⟿ <b>' + total + 'd</b>');
 
   const text = lines.join('\n');
   try {
@@ -573,7 +570,7 @@ bot.on('text', async (ctx, next) => {
 
   const phones = extractPhoneCandidates(text);
   if (!phones.length) {
-    return ctx.reply('<b>NOMOR TIDAK DITEMUKAN</b>\n\n<blockquote>Kirim nomor dengan format yang benar.\nContoh: +6281234567890</blockquote>', { parse_mode: 'HTML' });
+    return ctx.reply('✦ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ ⦂ +6281234567890</blockquote>', { parse_mode: 'HTML' });
   }
 
   const user = await getEffectiveUser(ctx);
@@ -582,7 +579,7 @@ bot.on('text', async (ctx, next) => {
   const list = phones.slice(0, max);
 
   if (!isVip && phones.length > 1) {
-    return ctx.reply('<b>LIMIT AKUN GRATIS</b>\n\n<blockquote>Akun gratis hanya bisa cek 1 nomor. Upgrade Premium untuk bulk hingga 30 nomor.</blockquote>', {
+    return ctx.reply('✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ 1 ɴᴏᴍᴏʀ.\nᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>', {
       parse_mode: 'HTML',
       ...Markup.inlineKeyboard([[styledCallback('Beli Premium', 'store:premium', 'success')]])
     });
