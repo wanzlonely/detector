@@ -311,40 +311,57 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   if (hasLiveSms) reasons.push('exist_sms_wait:' + liveSmsWait);
   else if (hasLiveVoice) reasons.push('voice_wait:' + timers.voice);
   else if (hasLiveWait) reasons.push('other_channel_wait');
+
+  if (isBanned && (timers.wa_old_eligible || hasLiveWait || timers.device_name)) {
+    isBanned = false;
+    reasons.push('ban_overridden_by_live_path');
+  }
+
+  const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
+  const hasDevicePath = Boolean(timers.wa_old_eligible || timers.device_name || engineState === 'REGISTERED_ON_DEVICE');
+
   const meaningfulCooldown =
-    !isBanned && !isCloneBlocked && !isSecurityBlock &&
+    !isBanned && !isCloneBlocked && !isSecurityBlock && !hasDevicePath &&
     (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT') ||
       engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN');
-  const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
+
   const hasOpenPath =
-    engineReady || smsAvailable === true || timers.wa_old_eligible || timers.is_code_sent ||
+    engineReady || smsAvailable === true || hasDevicePath || timers.is_code_sent ||
     patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG') ||
     patternHints.includes('METHOD_NOT_ALLOWED_SOFT') ||
     (smsAvailable !== false && !timers.exist_no_routes) ||
     (existSmsOpen && smsAvailable !== false);
-  let isReady =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && !hasLiveWait &&
-    (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY' || engineState === 'REGISTERED_ON_DEVICE');
-  if (!isBanned && !isCloneBlocked && !isSecurityBlock && existSmsOpen && !hasLiveWait && (engineReady || smsAvailable !== false)) {
-    isReady = true; reasons.push('exist_sms_open');
-  }
-  if (engineReady && !isBanned && !isCloneBlocked && !isSecurityBlock && !hasLiveWait) {
-    isReady = true; reasons.push('engine_ready');
-  }
-  if (!isBanned && !isCloneBlocked && !isSecurityBlock && !hasLiveWait) {
-    if (engineState === 'AVAILABLE_READY' || engineState === 'REGISTERED_ON_DEVICE') {
-      isReady = true; reasons.push('engine_state_ready');
+
+  let isReady = false;
+  if (!isBanned && !isCloneBlocked && !isSecurityBlock) {
+    if (hasDevicePath) {
+      isReady = true;
+      reasons.push('device_path_ready');
+    } else if (!hasLiveWait && (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY')) {
+      isReady = true;
+      reasons.push('open_path_ready');
+    } else if (existSmsOpen && !hasLiveWait && smsAvailable !== false) {
+      isReady = true;
+      reasons.push('exist_sms_open');
     }
   }
-  if (hasLiveWait) isReady = false;
-  const effectiveCooldown = isReady ? false : (meaningfulCooldown || hasLiveWait);
+  if (!hasDevicePath && hasLiveWait) isReady = false;
+
+  const effectiveCooldown = isReady ? false : (meaningfulCooldown || (!hasDevicePath && hasLiveWait));
+
+  const isPartial = Boolean(meta && (meta.partial || meta.existOnly));
   const smsOptionMissing =
     !isBanned && !isCloneBlocked && !isSecurityBlock && !effectiveCooldown && !isReady &&
-    (smsAvailable === false || engineState === 'NO_ROUTES' || patternHints.includes('NO_ROUTES')) &&
-    !timers.wa_old_eligible && !patternHints.includes('HIGH_REREG');
+    !hasDevicePath && !isPartial &&
+    (
+      (timers.exist_no_routes && smsAvailable === false) ||
+      (engineState === 'NO_ROUTES' && patternHints.includes('NO_ROUTES') && smsAvailable === false)
+    ) &&
+    !patternHints.includes('HIGH_REREG');
   if (smsOptionMissing) reasons.push('sms_option_missing');
   if (isReady) reasons.push('ready');
   if (effectiveCooldown) reasons.push('cooldown');
+
   let description = (parsed && parsed.description) || '';
   if (isBanned) description = 'Nomor dibatasi / diblokir oleh WhatsApp.';
   else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone).';
@@ -354,38 +371,44 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     const t = (ch && (ch.humanTime || ch.uiTimer)) || 'aktif';
     description = t.startsWith('Coba lagi') ? t : ('Cooldown aktif · ' + t);
   } else if (isReady) {
-    description = timers.wa_old_eligible && timers.device_name
+    description = hasDevicePath && timers.device_name
       ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
-      : 'Nomor siap menerima verifikasi.';
+      : (hasDevicePath ? 'Siap diverifikasi · perangkat terdaftar' : 'Nomor siap menerima verifikasi.');
   } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
+
   let accountStatus = 'UNKNOWN';
   if (isBanned) accountStatus = 'BANNED';
   else if (isCloneBlocked) accountStatus = 'CLONE_BLOCKED';
   else if (isSecurityBlock) accountStatus = 'SECURITY_BLOCK';
+  else if (isReady && (hasDevicePath || timers.wa_old_eligible)) accountStatus = 'REGISTERED_ON_DEVICE';
+  else if (isReady) accountStatus = 'READY';
   else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
-  else if (isReady) accountStatus = timers.wa_old_eligible ? 'REGISTERED_ON_DEVICE' : 'READY';
   else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
+
   let confidence = 0.55;
   if (isBanned && patternHints.includes('HARD_BAN')) confidence = 0.96;
   else if (isBanned) confidence = 0.9;
   else if (isCloneBlocked || isSecurityBlock) confidence = 0.88;
+  else if (isReady && hasDevicePath) confidence = 0.92;
   else if (effectiveCooldown && hasLiveSms) confidence = 0.93;
   else if (effectiveCooldown) confidence = 0.8;
-  else if (isReady && (timers.wa_old_eligible || timers.is_code_sent || engineReady)) confidence = 0.9;
+  else if (isReady && (timers.is_code_sent || engineReady)) confidence = 0.9;
   else if (isReady && existSmsOpen) confidence = 0.86;
   else if (isReady) confidence = 0.8;
   else if (smsOptionMissing) confidence = 0.75;
   if (meta && meta.partial) confidence = Math.max(0.4, confidence - 0.08);
   if (meta && meta.existOnly) confidence = Math.min(confidence, 0.88);
+
   const ordered = [channels.sms, channels.voice, channels.flash, channels.email].filter((t) => t && t.rawSeconds > 0);
   const primary = (hasLiveSms ? channels.sms : null) || ordered[0] || buildChannel(0);
   const existClear = Boolean(meta && meta.existOnly && (isReady || (effectiveCooldown && hasLiveSms) || isBanned || isCloneBlocked) && confidence >= EXIST_CLEAR_CONFIDENCE);
   const needsRecheck = Boolean(!existClear && (meta && meta.existOnly) && confidence < EXIST_CLEAR_CONFIDENCE);
+
   return {
     formattedNumber: normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone),
     region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country)) || null,
     accountStatus, isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
-    anyCooldown: effectiveCooldown, description, deviceName: timers.device_name || null, waOldEligible: timers.wa_old_eligible,
+    anyCooldown: effectiveCooldown, description, deviceName: timers.device_name || null, waOldEligible: Boolean(timers.wa_old_eligible || hasDevicePath),
     channels, primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
     proxyInfo: proxyMode + ' · ' + sessionTag, proxyTag: sessionTag, proxyCountry: countryIso2,
     confidence, existClear, needsRecheck, decisionReasons: reasons, patternHints,
@@ -423,15 +446,30 @@ function mergeConsensus(results) {
 function softFallback(rawNumber, payloads, countryIso2, lastError) {
   return {
     formattedNumber: normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null),
-    region: null, accountStatus: 'UNKNOWN', isBanned: false, isCloneBlocked: false, isSecurityBlock: false, isReady: false,
-    smsAvailable: null, smsOptionMissing: false, anyCooldown: false,
+    region: null,
+    accountStatus: 'UNKNOWN',
+    isBanned: false,
+    isCloneBlocked: false,
+    isSecurityBlock: false,
+    isReady: false,
+    smsAvailable: null,
+    smsOptionMissing: false,
+    anyCooldown: false,
     description: 'Respons tidak stabil — coba ulang sebentar.',
-    deviceName: null, waOldEligible: false,
-    channels: { sms: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0), email: buildChannel(0), wa_old: buildChannel(0) },
+    deviceName: null,
+    waOldEligible: false,
+    channels: {
+      sms: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0),
+      email: buildChannel(0), wa_old: buildChannel(0)
+    },
     primaryTimer: { rawSeconds: 0, uiTimer: '0s', humanTime: 'Ready' },
     proxyInfo: 'FALLBACK', proxyTag: 'FALLBACK', proxyCountry: countryIso2,
-    softFallback: true, confidence: 0.35, needsRecheck: false,
-    decisionReasons: ['soft_fallback'], patternHints: ['SOFT_FALLBACK'], error: false
+    softFallback: true,
+    confidence: 0.3,
+    needsRecheck: true,
+    decisionReasons: ['soft_fallback'],
+    patternHints: ['SOFT_FALLBACK'],
+    error: false
   };
 }
 
