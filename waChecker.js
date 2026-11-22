@@ -148,11 +148,12 @@ function extractChannelTimers(existRaw, codeRaw) {
   const isCodeSent = code.status === 'sent' || code.status === 'ok';
   const codeMethod = String(code.method || code.login_method || '').toLowerCase();
   const isWaOldMethod = codeMethod.includes('wa_old');
+  // Aligned with waEngine isWaOldTimerEcho (≤180s probe timer, not real SMS cooldown)
   const isWaOldEcho =
-    existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 300 &&
+    existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 180 &&
     (isCodeSent || isWaOldMethod ||
-      (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 8) ||
-      (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 8 && num(code.send_sms_wait) === 0));
+      (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 5) ||
+      (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 5 && num(code.send_sms_wait) === 0));
   let smsSeconds = 0;
   if (existSms > 0) smsSeconds = existSms;
   else if (!isWaOldEcho && codeSmsRaw > 0) {
@@ -325,13 +326,23 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     !isBanned && !isCloneBlocked && !isSecurityBlock && !meaningfulCooldown && !hasLiveWait &&
     (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY' || engineState === 'REGISTERED_ON_DEVICE');
   if (!isBanned && !isCloneBlocked && !isSecurityBlock && existSmsOpen && !hasLiveWait && (engineReady || smsAvailable !== false)) {
-    isReady = true; reasons.push('exist_sms_open');
+    isReady = true;
+    reasons.push('exist_sms_open');
   }
   if (engineReady && !isBanned && !isCloneBlocked && !isSecurityBlock && !hasLiveWait) {
-    isReady = true; reasons.push('engine_ready');
+    isReady = true;
+    reasons.push('engine_ready');
+  }
+  if (!isBanned && !isCloneBlocked && !isSecurityBlock && !hasLiveWait) {
+    if (engineState === 'AVAILABLE_READY' || engineState === 'REGISTERED_ON_DEVICE') {
+      isReady = true;
+      reasons.push('engine_state_ready');
+    }
   }
   if (hasLiveWait) isReady = false;
+
   const effectiveCooldown = isReady ? false : (meaningfulCooldown || hasLiveWait);
+
   const smsOptionMissing =
     !isBanned && !isCloneBlocked && !isSecurityBlock && !effectiveCooldown && !isReady &&
     (smsAvailable === false || engineState === 'NO_ROUTES' || patternHints.includes('NO_ROUTES')) &&
@@ -416,7 +427,7 @@ function softFallback(rawNumber, payloads, countryIso2, lastError) {
   return {
     formattedNumber: normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null),
     region: null, accountStatus: 'UNKNOWN', isBanned: false, isCloneBlocked: false, isSecurityBlock: false, isReady: false,
-    smsAvailable: null, smsOptionMissing: false, anyCooldown: true,
+    smsAvailable: null, smsOptionMissing: false, anyCooldown: false,
     description: 'Respons tidak stabil — coba ulang sebentar.',
     deviceName: null, waOldEligible: false,
     channels: { sms: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0), email: buildChannel(0), wa_old: buildChannel(0) },
