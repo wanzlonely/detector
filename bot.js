@@ -472,7 +472,7 @@ async function processDetection(ctx, numbers) {
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
-      groups.cooldown.push('· ' + num + ' ⦂ ' + dur);
+      groups.cooldown.push({ line: '· ' + num + ' ⦂ ' + dur, secs: secs });
     } else if (r.smsOptionMissing || r.accountStatus === 'SMS_UNAVAILABLE') {
       groups.restricted.push('· ' + num + ' ⦂ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴅᴀꜰᴛᴀʀᴋᴀɴ');
     } else {
@@ -480,6 +480,9 @@ async function processDetection(ctx, numbers) {
       groups.other.push('· ' + num + note);
     }
   }
+
+  // Cooldown: urut timer terkecil dulu
+  groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
 
   const lines = [];
   lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
@@ -502,7 +505,7 @@ async function processDetection(ctx, numbers) {
     lines.push('');
     lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
     lines.push('');
-    groups.cooldown.forEach((n) => lines.push(n));
+    groups.cooldown.forEach((n) => lines.push(n.line || n));
   }
   if (groups.clone.length) {
     lines.push('');
