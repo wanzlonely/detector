@@ -1,713 +1,779 @@
-const WADetector = require('./waEngine');
-const { executeWithProxyRotation, getHealth } = require('./proxyManager');
+require('dotenv').config();
+const { Telegraf, Markup } = require('telegraf');
+const {
+  redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
+  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, redeemReferralReward,
+  consumeQuota, addCheckLog, getCachedCheckResult, setCachedCheckResult, qualifyReferral,
+  incrementUserChecks
+} = require('./database');
+const {
+  escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
+  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary
+} = require('./themes');
+const { checkWhatsAppCooldown } = require('./waChecker');
 
-const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 8000);
-const INTERNAL_RETRIES = Math.min(4, Math.max(2, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 3)));
-const CONSENSUS_ENABLED = String(process.env.WA_CONSENSUS || '1') !== '0';
-const LOW_CONFIDENCE_THRESHOLD = Number(process.env.WA_LOW_CONFIDENCE || 0.72);
-const EXIST_CLEAR_CONFIDENCE = Number(process.env.WA_EXIST_CLEAR || 0.82);
-const STICKY_TTL_MS = Number(process.env.WA_STICKY_TTL_MS || 45000);
-const STICKY_CACHE = new Map();
+const bot = new Telegraf(process.env.BOT_TOKEN);
+const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
 
-function stickyGet(raw) {
-  const key = String(raw || '').replace(/\D/g, '');
-  if (!key) return null;
-  const hit = STICKY_CACHE.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.ts > STICKY_TTL_MS) {
-    STICKY_CACHE.delete(key);
-    return null;
-  }
-  return hit.result;
+async function stopActiveDetection(ctx) {
+  const userId = ctx.from && ctx.from.id;
+  if (!userId) return;
+  const jobId = await redis.get('detect:active:' + userId);
+  if (!jobId) return;
+  await redis.set('detect:stop:' + userId + ':' + jobId, '1', { ex: 3600 });
+  await redis.set('detect:exit:' + userId + ':' + jobId, 'navigation', { ex: 3600 });
 }
 
-function stickySet(raw, result) {
-  const key = String(raw || '').replace(/\D/g, '');
-  if (!key || !result || result.softFallback || result.error) return;
-  if ((Number(result.confidence) || 0) < 0.7) return;
-  if (STICKY_CACHE.size > 500) {
-    const first = STICKY_CACHE.keys().next().value;
-    STICKY_CACHE.delete(first);
-  }
-  STICKY_CACHE.set(key, { ts: Date.now(), result: { ...result, stickyHit: true } });
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-const LOCALE_BY_ISO = {
-  pk: 'ur-PK,ur;q=0.9,en-US;q=0.8,en;q=0.7',
-  id: 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-  in: 'hi-IN,hi;q=0.9,en-IN;q=0.8,en;q=0.7',
-  bd: 'bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7',
-  ng: 'en-NG,en;q=0.9',
-  eg: 'ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-  sa: 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-  tr: 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-  br: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-  mx: 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7',
-  ph: 'en-PH,en;q=0.9',
-  vn: 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-  th: 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
-  my: 'ms-MY,ms;q=0.9,en-US;q=0.8,en;q=0.7',
-  us: 'en-US,en;q=0.9',
-  gb: 'en-GB,en;q=0.9',
-  ru: 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
-};
-
-function buildHeaders(userAgent, countryIso2) {
-  const iso = String(countryIso2 || '').toLowerCase();
-  return {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'User-Agent': userAgent,
-    Accept: '*/*',
-    'Accept-Language': LOCALE_BY_ISO[iso] || 'en-US,en;q=0.9',
-    Connection: 'keep-alive'
-  };
-}
-
-function normalizeDisplayNumber(raw, phoneInfo, parsedPhone) {
-  const candidates = [parsedPhone, phoneInfo && phoneInfo.e164, phoneInfo && phoneInfo.full, phoneInfo && phoneInfo.phone, raw];
-  for (const c of candidates) {
-    const s = String(c || '').trim();
-    if (!s || s === 'undefined' || s === 'null') continue;
-    const digits = s.replace(/\D/g, '');
-    if (digits.length >= 8) return s.startsWith('+') ? s : ('+' + digits);
-  }
-  const fallback = String(raw || '').replace(/\D/g, '');
-  return fallback ? ('+' + fallback) : String(raw || '');
-}
-
-async function postWithTimeout(url, body, headers, dispatcher) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { method: 'POST', headers, body, dispatcher, signal: controller.signal });
-    const text = await res.text();
-    if (!res.ok) {
-      const err = new Error('WhatsApp HTTP ' + res.status + ': ' + text.slice(0, 180));
-      err.status = res.status;
-      throw err;
+bot.use(async (ctx, next) => {
+  const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
+  const callbackData = (ctx.callbackQuery && ctx.callbackQuery.data) || '';
+  const navigationText = /^(⌖\s*DETECT|✧\s*BELI\s*PREMIUM|◈\s*STATUS|♛\s*LEADERBOARD|♧\s*REFERRAL|✉︎?\s*HUBUNGI\s*ADMIN|♛\s*OWNER\s*CONSOLE|✚\s*AKTIVASI\s*PREMIUM|▤\s*BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
+  const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
+  if (navigationText || navigationCallback) {
+    try {
+      await stopActiveDetection(ctx);
+      if (ctx.from) {
+        await Promise.all([
+          redis.del('detect:mode:' + ctx.from.id),
+          redis.del('contact:state:' + ctx.from.id),
+          redis.del('owner:action:' + ctx.from.id),
+          redis.del('owner:contact:target:' + ctx.from.id)
+        ]);
+      }
+    } catch (err) {
+      console.error('[navigation cleanup]', err && err.message || err);
     }
-    if (!text || !String(text).trim()) throw new Error('WhatsApp mengembalikan respons kosong.');
-    return text;
+  }
+  return next();
+});
+
+const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
+
+function styledCallback(text, data, style) {
+  const btn = Markup.button.callback(text, data);
+  if (style) btn.style = style;
+  return btn;
+}
+
+const USER_KEYBOARD = Markup.keyboard([
+  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
+  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
+  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }]
+]).resize().oneTime().placeholder('Pilih menu…');
+
+const OWNER_KEYBOARD = Markup.keyboard([
+  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
+  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
+  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }],
+  [{ text: '♛ OWNER CONSOLE' }],
+  [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
+]).resize().oneTime().placeholder('Pilih fungsi owner…');
+
+const OWNER_ACTION_TTL = 300;
+async function setOwnerAction(userId, action) {
+  await redis.set('owner:action:' + userId, action, { ex: OWNER_ACTION_TTL });
+}
+async function getOwnerAction(userId) {
+  return redis.get('owner:action:' + userId);
+}
+async function clearOwnerAction(userId) {
+  await redis.del('owner:action:' + userId);
+}
+
+function isOwner(ctx) {
+  return Boolean(ADMIN_ID) && Number(ctx.from && ctx.from.id) === ADMIN_ID;
+}
+
+async function handleCancel(ctx) {
+  const uid = ctx.from && ctx.from.id;
+  if (uid) {
+    await stopActiveDetection(ctx);
+    await Promise.all([
+      redis.del('detect:mode:' + uid),
+      redis.del('contact:state:' + uid),
+      redis.del('owner:action:' + uid),
+      redis.del('owner:contact:target:' + uid)
+    ]);
+  }
+  return ctx.reply('✕ <b>ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\n\nᴋᴇᴍʙᴀʟɪ ᴋᴇ ᴍᴇɴᴜ ᴜᴛᴀᴍᴀ.', {
+    parse_mode: 'HTML',
+    ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
+  });
+}
+bot.command('cancel', handleCancel);
+bot.hears(/^\/?cancel$/i, handleCancel);
+bot.hears(/^batal$/i, handleCancel);
+
+bot.use((ctx, next) => next());
+
+async function getEffectiveUser(ctx) {
+  const user = await getOrCreateUser(ctx.from);
+  if (!isOwner(ctx)) return user;
+  return { ...user, vip_until: 4102444800, vip_tier: 'OWNER', vip_plan: 'OWNER ACCESS', bulk_limit: 30, free_used_today: 0 };
+}
+
+async function showHome(ctx) {
+  try {
+    const user = await getEffectiveUser(ctx);
+    return await ctx.reply(renderDashboard({
+      user,
+      isVip: isOwner(ctx) || isUserVip(user),
+      isOwner: isOwner(ctx),
+      brandName: BRAND_NAME
+    }), {
+      parse_mode: 'HTML',
+      ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
+    });
   } catch (err) {
-    const cause = err && err.cause;
-    const detail = cause && (cause.code || cause.message) ? ' [' + (cause.code || cause.message) + ']' : '';
-    const out = new Error(((err && err.message) || 'Permintaan jaringan gagal') + detail);
-    out.status = err && err.status;
-    throw out;
-  } finally {
-    clearTimeout(timer);
+    console.error('[showHome]', err && err.stack || err);
+    return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴜᴀᴛ ᴍᴇɴᴜ</b>\n\n<blockquote>ᴄᴏʙᴀ /start ʟᴀɢɪ</blockquote>', { parse_mode: 'HTML' }).catch(() => {});
   }
 }
 
-function safeJson(text) { try { return JSON.parse(text || '{}'); } catch (_) { return {}; } }
-function num(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; }
+function buildStoreKeyboard() {
+  const packages = getPackagesByTier('premium');
+  const rows = [];
+  for (let i = 0; i < packages.length; i += 2) {
+    rows.push(packages.slice(i, i + 2).map((pkg) =>
+      styledCallback(pkg.durationLabel + ' · ' + formatIDR(pkg.price), 'pkg:' + pkg.id, 'primary')
+    ));
+  }
+  return Markup.inlineKeyboard(rows);
+}
+async function showStore(ctx, edit) {
+  const user = await getEffectiveUser(ctx);
+  const packages = getPackagesByTier('premium');
+  const message = renderStoreCatalog({ user, packages });
+  const keyboard = buildStoreKeyboard();
+  if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+async function showPackage(ctx, pkg, edit) {
+  const user = await getEffectiveUser(ctx);
+  const message = renderPackageDetailCard({ user, pkg });
+  const keyboard = Markup.inlineKeyboard([
+    [styledCallback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success')],
+    [styledCallback('↶ KEMBALI', 'store:premium', 'danger')]
+  ]);
+  if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+async function showCheckout(ctx, pkg, edit) {
+  const user = await getEffectiveUser(ctx);
+  const message = renderPaymentMaintenanceCard({ user, pkg });
+  const keyboard = Markup.inlineKeyboard([[Markup.button.callback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier)]]);
+  if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
 
-function toShortTimer(seconds) {
+bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
+
+bot.catch((err, ctx) => {
+  console.error('[bot.catch]', err && err.stack || err);
+  try {
+    if (ctx && ctx.reply) {
+      ctx.reply('✕ <b>ᴛᴇʀᴊᴀᴅɪ ᴋᴇsᴀʟᴀʜᴀɴ</b>\n\n<blockquote>sɪʟᴀᴋᴀɴ ᴄᴏʙᴀ ʟᴀɢɪ /start</blockquote>', { parse_mode: 'HTML' }).catch(() => {});
+    }
+  } catch (_) {}
+});
+
+bot.start(async (ctx) => {
+  try {
+    const payload = String(ctx.startPayload || '');
+    if (payload.startsWith('ref_')) {
+      try {
+        const registered = await registerReferral(ctx.from.id, payload.slice(4));
+        if (registered) {
+          await ctx.reply('♧ Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh 5 koin referral.');
+        }
+      } catch (refErr) {
+        console.error('[start/ref]', refErr && refErr.message || refErr);
+      }
+    }
+    return await showHome(ctx);
+  } catch (err) {
+    console.error('[start]', err && err.stack || err);
+    return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴜᴀᴛ ᴅᴀsʜʙᴏᴀʀᴅ</b>\n\n<blockquote>ᴄᴏʙᴀ ᴋᴇᴍʙᴀʟɪ /start</blockquote>', { parse_mode: 'HTML' }).catch(() => {});
+  }
+});
+bot.command('store', (ctx) => showStore(ctx, false));
+bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showStore(ctx, true); });
+bot.action(/^pkg:([a-z0-9_]+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const pkg = getPackageById(ctx.match[1]);
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>');
+  return showPackage(ctx, pkg, true);
+});
+bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const pkg = getPackageById(ctx.match[1]);
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>');
+  return showCheckout(ctx, pkg, true);
+});
+
+async function startContact(ctx) {
+  await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
+  return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\nᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ.\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('× BATALKAN', 'contact:cancel')]]) });
+}
+bot.hears('✉︎ HUBUNGI ADMIN', startContact);
+bot.action('contact:cancel', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await redis.del('contact:state:' + ctx.from.id); return ctx.reply('✕ <b>ᴘᴇɴɢɪʀɪᴍᴀɴ ᴘᴇsᴀɴ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' }); });
+
+async function showStatus(ctx) {
+  const user = await getEffectiveUser(ctx);
+  const referralStats = await getReferralStats(ctx.from.id);
+  return ctx.reply(require('./themes').renderStatus({ user, isVip: isOwner(ctx) || isUserVip(user), isOwner: isOwner(ctx), referralStats }), { parse_mode: 'HTML' });
+}
+async function showLeaderboard(ctx) {
+  return ctx.reply(require('./themes').renderLeaderboard(await getLeaderboard(10)), { parse_mode: 'HTML' });
+}
+async function showReferral(ctx) {
+  const me = await bot.telegram.getMe();
+  const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
+  const stats = await getReferralStats(ctx.from.id);
+  const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
+  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl)], [styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]]) });
+}
+bot.hears('◈ STATUS', showStatus);
+bot.hears('♛ LEADERBOARD', showLeaderboard);
+bot.hears('♧ REFERRAL', showReferral);
+bot.hears('✧ BELI PREMIUM', (ctx) => showStore(ctx, false));
+
+function extractPhoneCandidates(text) {
+  if (!text) return [];
+  const raw = String(text);
+  const phones = [];
+  const seen = new Set();
+
+  function pushDigits(digits) {
+    if (!digits) return;
+    digits = String(digits).replace(/\D/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    // 08xxxxxxxxxx (ID local) -> 62xxxxxxxxxx
+    if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) {
+      digits = '62' + digits.slice(1);
+    }
+    if (digits.length < 8 || digits.length > 15) return;
+    if (/^(19|20)\d{2}$/.test(digits)) return;
+    if (seen.has(digits)) return;
+    seen.add(digits);
+    phones.push('+' + digits);
+  }
+
+  // 1) Prioritas: satu nomor per baris / koma / titik-koma (tidak campur antar baris)
+  const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    // Ambil deretan digit (+ opsional) di dalam baris
+    const m = line.match(/(?:\+|00)?\d[\d\s\-().]{6,18}\d/);
+    if (m) pushDigits(m[0]);
+    else pushDigits(line);
+  }
+
+  // 2) Fallback: scan seluruh teks jika belum ketemu
+  if (!phones.length) {
+    const pattern = /(?:\+|00)?\d(?:[\d\-().]{6,18})\d/g;
+    let match;
+    while ((match = pattern.exec(raw)) !== null) {
+      pushDigits(match[0]);
+    }
+  }
+
+  return phones;
+}
+
+async function startDetect(ctx) {
+  const user = await getEffectiveUser(ctx);
+  const isVip = isOwner(ctx) || isUserVip(user);
+  const remaining = isVip ? 999 : Math.max(0, 3 - Number(user.free_used_today || 0));
+  if (!isVip && remaining <= 0) {
+    return ctx.reply(
+      '✦ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\n\n<blockquote>ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴍᴇɴɢɢᴜɴᴀᴋᴀɴ 3 ᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs ʜᴀʀɪ ɪɴɪ.\nᴜᴘɢʀᴀᴅᴇ ᴋᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛᴀɴᴘᴀ ʙᴀᴛᴀs.</blockquote>',
+      { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]]) }
+    );
+  }
+  await redis.set('detect:mode:' + ctx.from.id, 'waiting_numbers', { ex: 300 });
+  const limitHint = isVip ? 'ᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ / ᴋɪʀɪᴍᴀɴ' : '1 ɴᴏᴍᴏʀ (ғʀᴇᴇ)';
+  return ctx.reply(
+    '⌖ <b>ᴅᴇᴛᴇᴋsɪ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</b>\n\n' +
+    'ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴘᴇʀɪᴋsᴀ.\n' +
+    '· ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴀᴛᴀᴜ ᴋᴏᴍᴀ\n' +
+    '· sɪsᴛᴇᴍ ᴏᴛᴏᴍᴀᴛɪs ᴍᴇɴɢᴇᴋsᴛʀᴀᴋ ᴀɴɢᴋᴀ\n\n' +
+    'ᴄᴏɴᴛᴏʜ ⦂\n' +
+    '<code>+6281234567890</code>\n' +
+    '<code>+6281234567890 (Low) · Jul 2024</code>\n\n' +
+    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3') + '</b>\n' +
+    '▸ ʟɪᴍɪᴛ ⦂ <b>' + limitHint + '</b>\n\n' +
+    'ᴋʟɪᴋ ᴅɪ ʙᴀᴡᴀʜ ɪɴɪ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.',
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [styledCallback('Batal', 'detect:cancel_prompt', 'danger')]
+      ])
+    }
+  );
+}
+bot.hears('⌖ DETECT', startDetect);
+bot.command('detect', startDetect);
+bot.action('detect:cancel_prompt', async (ctx) => {
+  await ctx.answerCbQuery('Dibatalkan').catch(() => {});
+  await redis.del('detect:mode:' + ctx.from.id);
+  return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+});
+
+bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery('Memperbarui status…').catch(() => {});
+  const userId = ctx.from && ctx.from.id;
+  const jobId = ctx.match[1];
+  if (!userId || !jobId) return;
+  const key = 'detect:refresh:' + userId + ':' + jobId;
+  let numbers = null;
+  try {
+    const raw = await redis.get(key);
+    if (raw) numbers = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (_) {}
+  if (!Array.isArray(numbers) || !numbers.length) {
+    return ctx.reply('✦ <b>ᴅᴀᴛᴀ ʀᴇғʀᴇsʜ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>sɪʟᴀᴋᴀɴ ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.</blockquote>', { parse_mode: 'HTML' });
+  }
+  return processDetection(ctx, numbers);
+});
+
+function buildProgressBar(pct) {
+  const filled = Math.round(pct / 10);
+  return '●'.repeat(filled) + '○'.repeat(10 - filled);
+}
+
+function formatCooldownSmallCaps(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (sec <= 0) return '0s';
+  if (sec <= 0) return '0ᴅ';
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
   const parts = [];
-  if (h) parts.push(h + 'h');
-  if (m) parts.push(m + 'm');
-  if (s || !parts.length) parts.push(s + 's');
+  if (h > 0) parts.push(h + 'ᴊ');
+  if (m > 0) parts.push(m + 'ᴍ');
+  if (s > 0 || parts.length === 0) parts.push(s + 'ᴅ');
   return parts.join(' ');
 }
 
-function toWaUiTimer(seconds) {
-  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (sec <= 0) return 'Ready';
-  if (sec >= 3600) return 'Coba lagi dalam ' + Math.ceil(sec / 3600) + ' jam';
-  const m = Math.floor(sec / 60);
-  const s = String(sec % 60).padStart(2, '0');
-  return 'Coba lagi dalam ' + m + '.' + s;
-}
-
-function resolveCountryIso2(phoneInfo) {
-  const candidates = [phoneInfo && phoneInfo.iso, phoneInfo && phoneInfo.country_iso, phoneInfo && phoneInfo.country_code_iso];
-  for (const c of candidates) {
-    const s = String(c || '').trim().toLowerCase();
-    if (/^[a-z]{2}$/.test(s)) return s;
-  }
-  const cc = String((phoneInfo && (phoneInfo.cc || phoneInfo.country_code)) || '').replace(/\D/g, '');
-  const DIAL_ISO = {
-    '1': 'us', '7': 'ru', '20': 'eg', '27': 'za', '30': 'gr', '31': 'nl', '32': 'be', '33': 'fr', '34': 'es',
-    '36': 'hu', '39': 'it', '40': 'ro', '41': 'ch', '43': 'at', '44': 'gb', '45': 'dk', '46': 'se', '47': 'no',
-    '48': 'pl', '49': 'de', '51': 'pe', '52': 'mx', '53': 'cu', '54': 'ar', '55': 'br', '56': 'cl', '57': 'co',
-    '58': 've', '60': 'my', '61': 'au', '62': 'id', '63': 'ph', '64': 'nz', '65': 'sg', '66': 'th', '81': 'jp',
-    '82': 'kr', '84': 'vn', '86': 'cn', '90': 'tr', '91': 'in', '92': 'pk', '93': 'af', '94': 'lk', '95': 'mm',
-    '98': 'ir', '880': 'bd', '966': 'sa', '971': 'ae', '234': 'ng', '254': 'ke', '255': 'tz', '256': 'ug',
-    '212': 'ma', '213': 'dz', '216': 'tn', '218': 'ly', '963': 'sy', '964': 'iq', '965': 'kw', '968': 'om',
-    '973': 'bh', '974': 'qa', '977': 'np', '992': 'tj', '993': 'tm', '994': 'az', '995': 'ge', '996': 'kg', '998': 'uz'
+function toSmallCapsDevice(name) {
+  if (!name) return 'ᴜɴᴋɴᴏᴡɴ';
+  const map = {
+    a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ', j: 'ᴊ',
+    k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'ǫ', r: 'ʀ', s: 's', t: 'ᴛ',
+    u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', x: 'x', y: 'ʏ', z: 'ᴢ'
   };
-  if (cc && DIAL_ISO[cc]) return DIAL_ISO[cc];
-  const fullDigits = String((phoneInfo && (phoneInfo.full || phoneInfo.phone || phoneInfo.e164)) || '').replace(/\D/g, '');
-  if (fullDigits) {
-    const keys = Object.keys(DIAL_ISO).sort((a, b) => b.length - a.length);
-    for (const k of keys) if (fullDigits.startsWith(k)) return DIAL_ISO[k];
-  }
-  return null;
+  return String(name).toLowerCase().replace(/[a-z]/g, (ch) => map[ch] || ch);
+}
+function deviceLabel(r) {
+  // Ada jalur perangkat terdaftar (wa_old) atau nama device dari API
+  if (r && (r.deviceName || r.waOldEligible)) return 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
+  return 'ᴛᴀɴᴘᴀ ᴘᴇʀᴀɴɢᴋᴀᴛ';
 }
 
-function extractChannelTimers(existRaw, codeRaw) {
-  const exist = existRaw || {};
-  const code = codeRaw || {};
-  const existNoRoutes = exist.reason === 'no_routes' || exist.reason === 'no_route';
-  const codeNoRoutes = code.reason === 'no_routes' || code.reason === 'no_route';
-  const existSms = existNoRoutes ? 0 : Math.max(num(exist.sms_wait), num(exist.send_sms_wait), num(exist.sms_cooldown));
-  const codeSmsRaw = codeNoRoutes ? 0 : Math.max(num(code.sms_wait), num(code.send_sms_wait), num(code.sms_cooldown));
-  const existVoice = Math.max(num(exist.voice_wait), num(exist.voice_cooldown));
-  const codeVoice = Math.max(num(code.voice_wait), num(code.voice_cooldown));
-  const existFlash = Math.max(num(exist.flash_wait), num(exist.flash_cooldown));
-  const codeFlash = Math.max(num(code.flash_wait), num(code.flash_cooldown));
-  const existEmail = Math.max(num(exist.email_wait), num(exist.email_cooldown));
-  const codeEmail = Math.max(num(code.email_wait), num(code.email_cooldown));
-  const waOldWait = Math.max(num(exist.wa_old_wait), num(exist.wa_old_cooldown), num(code.wa_old_wait), num(code.wa_old_cooldown));
-  const existRetry = existNoRoutes ? 0 : num(exist.retry_after);
-  const codeRetry = codeNoRoutes ? 0 : num(code.retry_after);
-  const isCodeSent = code.status === 'sent' || code.status === 'ok';
-  const codeMethod = String(code.method || code.login_method || '').toLowerCase();
-  const isWaOldMethod = codeMethod.includes('wa_old');
-  const isWaOldEcho =
-    existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 180 &&
-    (isCodeSent || isWaOldMethod ||
-      (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 5) ||
-      (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 5 && num(code.send_sms_wait) === 0));
-  let smsSeconds = 0;
-  if (existSms > 0) smsSeconds = existSms;
-  else if (!isWaOldEcho && codeSmsRaw > 0) {
-    if (codeSmsRaw >= 240 && existSms === 0 && !num(code.send_sms_wait)) smsSeconds = 0;
-    else smsSeconds = codeSmsRaw;
-  }
-  if (smsSeconds === 0 && !isWaOldEcho && existRetry > 30) smsSeconds = existRetry;
-  let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
-  let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
-  let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
-  if (voiceWait >= 240 && existVoice === 0 && isWaOldMethod) voiceWait = 0;
-  if (flashWait >= 240 && existFlash === 0 && isWaOldMethod) flashWait = 0;
-  const deviceName = pickDeviceName(exist, code);
-  const waOldEligible =
-    Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1 ||
-    Boolean(deviceName);
-  return {
-    sms: smsSeconds, voice: voiceWait, flash: flashWait, email: emailWait, wa_old: waOldWait,
-    retry_after: Math.max(existRetry, codeRetry),
-    wa_old_eligible: waOldEligible, device_name: deviceName, is_wa_old_echo: isWaOldEcho,
-    exist_no_routes: existNoRoutes, code_no_routes: codeNoRoutes, is_code_sent: isCodeSent,
-    exist_sms: existSms, code_sms: codeSmsRaw
-  };
-}
-
-function pickDeviceName(exist, code) {
-  const sources = [exist, code];
-  const keys = [
-    'wa_old_device_name', 'wa_old_device', 'device_name', 'old_device_name',
-    'wa_device_name', 'registered_device_name', 'phone_model',
-    'device_model', 'wa_old_model', 'last_device_name', 'device_os_name',
-    'os_name', 'device_board', 'marketing_name'
-  ];
-  for (const src of sources) {
-    if (!src || typeof src !== 'object') continue;
-    for (const k of keys) {
-      const v = src[k];
-      if (v == null) continue;
-      if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
-      if (typeof v === 'object') {
-        const nested = v.name || v.device_name || v.model || v.model_name || v.marketing_name || v.device || null;
-        if (nested && String(nested).trim()) return cleanDeviceName(nested);
-      }
-    }
-    for (const nestKey of ['account_security', 'security', 'device_info', 'wa_old', 'device', 'meta']) {
-      const nest = src[nestKey];
-      if (!nest || typeof nest !== 'object') continue;
-      for (const k of keys) {
-        const v = nest[k];
-        if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
-      }
-    }
-  }
-  try {
-    const blob = JSON.stringify({ exist, code });
-    const patterns = [
-      /"wa_old_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"old_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"wa_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"marketing_name"\s*:\s*"([^"]{2,80})"/i,
-      /"model_name"\s*:\s*"([^"]{2,80})"/i
-    ];
-    for (const re of patterns) {
-      const m = blob.match(re);
-      if (m && m[1] && m[1].trim() && m[1].toLowerCase() !== 'null') return cleanDeviceName(m[1]);
-    }
-  } catch (_) {}
-  return null;
-}
-
-function cleanDeviceName(name) {
-  let s = String(name || '').trim();
-  if (!s) return null;
-  // strip junk wrappers
-  s = s.replace(/^[\s"']+|[\s"']+$/g, '');
-  if (!s || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined' || s === '-') return null;
-  // keep readable length
-  if (s.length > 40) s = s.slice(0, 40).trim();
-  return s;
-}
-
-function buildChannel(seconds) {
-  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  return { isCooldown: sec > 0, rawSeconds: sec, uiTimer: toShortTimer(sec), humanTime: toWaUiTimer(sec), formatted: toShortTimer(sec) };
-}
-
-function applyPatternLibrary(exist, code, timers) {
-  const reason = String(exist.reason || code.reason || '').toLowerCase();
-  const status = String(exist.status || code.status || '').toLowerCase();
-  const hints = [];
-  if (timers.is_wa_old_echo) hints.push('WA_OLD_ECHO');
-  if (reason === 'temporarily_unavailable' || status === 'temporarily_unavailable') hints.push('TEMP_LOCK');
-  if (reason.includes('too_many') || reason === 'too_recent') hints.push('RATE_LIMIT');
-  if (exist.high_sms_rereg_user || code.high_sms_rereg_user) hints.push('HIGH_REREG');
-  if (reason === 'no_routes' || reason === 'no_route') hints.push('NO_ROUTES');
-  if (code.reason === 'method_not_allowed' && !timers.exist_no_routes && timers.sms === 0) hints.push('METHOD_NOT_ALLOWED_SOFT');
-  if (timers.is_code_sent && timers.sms === 0) hints.push('CODE_SENT_READY');
-  if (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal) hints.push('HARD_BAN');
-  return hints;
-}
-
-function detectBanSignals(exist, code, parsed, patternHints) {
-  if (patternHints.includes('HARD_BAN')) return true;
-  if (parsed && parsed.isBanned === true && (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal)) return true;
-  return Boolean(
-    exist.status === 'banned' || code.status === 'banned' ||
-    exist.reason === 'banned' || code.reason === 'banned' ||
-    exist.violation_type || code.violation_type ||
-    exist.in_app_ban_appeal || code.in_app_ban_appeal
+function buildProgressText(processed, total, stageLabel) {
+  const safeTotal = total > 0 ? total : 1;
+  const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
+  const pct = Math.round((safeProcessed / safeTotal) * 100);
+  const title = stageLabel || 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+  return (
+    '⟳ <b>' + title + '</b>\n\n' +
+    buildProgressBar(pct) + '  ' + pct + '%\n' +
+    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ'
   );
 }
 
-function detectCloneSignals(exist, code, parsed) {
-  if (parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) {
-    return { isCloneBlocked: true, isSecurityBlock: Boolean(parsed.isSecurityBlock) };
-  }
-  const blockScreen = String(exist.custom_block_screen || code.custom_block_screen || exist.block_screen || code.block_screen || '').toLowerCase();
-  const reason = String(exist.reason || code.reason || '').toLowerCase();
-  const status = String(exist.status || code.status || '').toLowerCase();
-  const textBlob = JSON.stringify({ exist, code }).toLowerCase();
-  const unofficial = blockScreen.includes('unofficial') || blockScreen.includes('clone') || reason.includes('unofficial');
-  const security =
-    blockScreen.includes('security') || reason.includes('security') || status.includes('security') ||
-    textBlob.includes('demi keamanan') || textBlob.includes('login not available right now') ||
-    textBlob.includes('tidak dapat masuk saat ini') || Boolean(parsed && parsed.isSecurityBlock);
-  return { isCloneBlocked: Boolean(unofficial), isSecurityBlock: Boolean(security) };
-}
-
-function resolveSmsAvailability(exist, code, timers, patternHints) {
-  const toBool = (v) => {
-    if (typeof v === 'boolean') return v;
-    if (v === 1 || v === '1') return true;
-    if (v === 0 || v === '0') return false;
-    return null;
-  };
-  const eB = toBool(exist.send_sms_eligible);
-  const cB = toBool(code.send_sms_eligible);
-  if (eB === true || cB === true) return true;
-  if (timers.wa_old_eligible || timers.sms > 0 || timers.is_code_sent) return true;
-  if (patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG')) return true;
-  if (patternHints.includes('NO_ROUTES') && eB === false) return false;
-  if (eB === false && cB === false && timers.exist_no_routes) return false;
-  if (eB === false && timers.exist_no_routes && cB === null) return false;
-  return null;
-}
-
-async function runExistOnlyProbe(payloads, headers, countryIso2) {
-  const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    const existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
-    return { existText, codeText: null, partial: true };
-  }, 2, countryIso2);
-  return { existText: data.existText || null, codeText: null, partial: true, proxyMode, sessionTag, existOnly: true };
-}
-
-async function runDualProbe(payloads, headers, countryIso2) {
-  const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    let existText = null;
-    let codeText = null;
+async function processDetection(ctx, numbers) {
+  const userId = ctx.from.id;
+  const jobId = Date.now().toString(36);
+  await redis.set('detect:active:' + userId, jobId, { ex: 600 });
+  await redis.del('detect:mode:' + userId);
+  const total = numbers.length;
+  const results = new Array(total);
+  let progressMsg;
+  let currentStageLabel = 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+  let stageProcessed = 0;
+  let stageTotal = total;
+  try {
+    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
+  } catch (_) {}
+  async function updateProgress() {
+    if (!progressMsg) return;
     try {
-      existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
-    } catch (_) {}
-    await sleep(60);
-    try {
-      codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
-    } catch (_) {}
-    if (!existText && !codeText) throw new Error('Dual probe gagal: jaringan');
-    return { existText, codeText, partial: !existText || !codeText };
-  }, undefined, countryIso2);
-  return { existText: data.existText || null, codeText: data.codeText || null, partial: Boolean(data.partial), proxyMode, sessionTag };
-}
-
-function classifyFromResponses(payloads, existText, codeText, proxyMode, sessionTag, countryIso2, meta) {
-  const existResponse = safeJson(existText);
-  const codeResponse = safeJson(codeText);
-  const parsed = WADetector.parseDualResponse(payloads.phoneInfo, existText || '{}', codeText || '{}');
-  const timers = extractChannelTimers(existResponse, codeResponse);
-  const engineState = String((parsed && parsed.state) || '').toUpperCase();
-  const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
-  const smsAvailable = resolveSmsAvailability(existResponse, codeResponse, timers, patternHints);
-  const channels = {
-    sms: buildChannel(timers.sms), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash),
-    email: buildChannel(timers.email), wa_old: buildChannel(timers.wa_old)
-  };
-  const engineReady = Boolean(parsed && parsed.isReady);
-  const engineCooldown = Boolean(parsed && parsed.isCooldown);
-  const engineClone = Boolean(parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock));
-  const engineSecurity = Boolean(parsed && parsed.isSecurityBlock);
-  const liveSmsWait = timers.exist_sms > 0 ? timers.exist_sms : timers.sms;
-  const hasLiveSms = liveSmsWait > 0;
-  const hasLiveVoice = timers.voice > 15;
-  const existSmsOpenEarly = timers.exist_sms === 0 && !timers.exist_no_routes;
-  const hasLiveWait = hasLiveSms || (!existSmsOpenEarly && (hasLiveVoice || timers.flash > 15 || timers.email > 15));
-  const reasons = [];
-  let isBanned = detectBanSignals(existResponse, codeResponse, parsed, patternHints);
-  if (isBanned && (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
-    if (!patternHints.includes('HARD_BAN')) {
-      const hard =
-        existResponse.status === 'banned' || codeResponse.status === 'banned' ||
-        existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
-        existResponse.reason === 'blocked' || codeResponse.reason === 'blocked';
-      if (!hard) isBanned = false;
-    }
-  }
-  if (engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN') isBanned = false;
-  if (isBanned) reasons.push('ban_signal');
-  const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
-  const isCloneBlocked = (cloneSig.isCloneBlocked || engineClone) && !isBanned;
-  const isSecurityBlock = (cloneSig.isSecurityBlock || engineSecurity) && !isBanned && !isCloneBlocked;
-  if (isCloneBlocked) reasons.push('clone_or_unofficial');
-  if (isSecurityBlock) reasons.push('security_block');
-  if (hasLiveSms) reasons.push('exist_sms_wait:' + liveSmsWait);
-  else if (hasLiveVoice) reasons.push('voice_wait:' + timers.voice);
-  else if (hasLiveWait) reasons.push('other_channel_wait');
-
-  if (isBanned && !patternHints.includes('HARD_BAN')) {
-    isBanned = false;
-    reasons.push('ban_soft_cleared');
-  }
-
-  const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
-  const hasDevicePath = Boolean(timers.wa_old_eligible || timers.device_name || engineState === 'REGISTERED_ON_DEVICE');
-
-  // SMS cooldown is ground truth for "siap diverifikasi".
-  // Device path alone is NOT enough if SMS still has a live wait.
-  const smsTrulyOpen = existSmsOpen && !hasLiveSms && timers.sms === 0;
-
-  const meaningfulCooldown =
-    !isBanned && !isCloneBlocked && !isSecurityBlock &&
-    (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT') ||
-      engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN' ||
-      (hasLiveSms && hasDevicePath));
-
-  const hasOpenPath =
-    engineReady || smsAvailable === true || hasDevicePath || timers.is_code_sent ||
-    patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG') ||
-    patternHints.includes('METHOD_NOT_ALLOWED_SOFT') ||
-    (smsAvailable !== false && !timers.exist_no_routes) ||
-    (existSmsOpen && smsAvailable !== false);
-
-  // isReady = benar-benar siap menerima SMS verifikasi (tidak ada SMS cooldown).
-  // Perangkat terdaftar + SMS open → ready. Perangkat + SMS CD → cooldown (bukan ready).
-  let isReady = false;
-  if (!isBanned && !isCloneBlocked && !isSecurityBlock && smsTrulyOpen) {
-    if (hasDevicePath) {
-      isReady = true;
-      reasons.push('device_path_sms_open');
-    } else if (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY' || smsAvailable === true) {
-      isReady = true;
-      reasons.push('open_path_ready');
-    } else if (existSmsOpen && smsAvailable !== false) {
-      isReady = true;
-      reasons.push('exist_sms_open');
-    }
-  }
-  if (hasLiveSms || timers.sms > 0) isReady = false;
-
-  const effectiveCooldown = isReady ? false : (meaningfulCooldown || hasLiveWait || (hasLiveSms && !isBanned && !isCloneBlocked && !isSecurityBlock));
-
-  const isPartial = Boolean(meta && (meta.partial || meta.existOnly));
-  const anyChannelSignal =
-    timers.sms > 0 || timers.voice > 0 || timers.flash > 0 || timers.email > 0 ||
-    timers.wa_old > 0 || timers.is_code_sent || hasDevicePath;
-  const smsOptionMissing =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !effectiveCooldown && !isReady &&
-    !hasDevicePath && !isPartial && !anyChannelSignal &&
-    (
-      (timers.exist_no_routes && smsAvailable === false) ||
-      (engineState === 'NO_ROUTES' && patternHints.includes('NO_ROUTES') && smsAvailable === false)
-    ) &&
-    !patternHints.includes('HIGH_REREG');
-  if (smsOptionMissing) reasons.push('sms_option_missing');
-  if (isReady) reasons.push('ready');
-  if (effectiveCooldown) reasons.push('cooldown');
-
-  let description = (parsed && parsed.description) || '';
-  if (isBanned) description = 'Nomor dibatasi / diblokir oleh WhatsApp.';
-  else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone).';
-  else if (isSecurityBlock) description = 'Demi keamanan: login sementara tidak tersedia.';
-  else if (effectiveCooldown) {
-    const ch = hasLiveSms ? channels.sms : (channels.voice.rawSeconds > 0 ? channels.voice : channels.flash);
-    const t = (ch && (ch.humanTime || ch.uiTimer)) || 'aktif';
-    const base = t.startsWith('Coba lagi') ? t : ('Cooldown aktif · ' + t);
-    description = hasDevicePath
-      ? (timers.device_name ? ('Perangkat terdaftar (' + timers.device_name + ') · ' + base) : ('Perangkat terdaftar · ' + base))
-      : base;
-  } else if (isReady) {
-    description = hasDevicePath && timers.device_name
-      ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
-      : (hasDevicePath ? 'Siap diverifikasi · perangkat terdaftar' : 'Nomor siap menerima verifikasi SMS.');
-  } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
-
-  let accountStatus = 'UNKNOWN';
-  if (isBanned) accountStatus = 'BANNED';
-  else if (isCloneBlocked) accountStatus = 'CLONE_BLOCKED';
-  else if (isSecurityBlock) accountStatus = 'SECURITY_BLOCK';
-  else if (isReady && (hasDevicePath || timers.wa_old_eligible)) accountStatus = 'REGISTERED_ON_DEVICE';
-  else if (isReady) accountStatus = 'READY';
-  else if (effectiveCooldown && hasDevicePath) accountStatus = 'IN_COOLDOWN';
-  else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
-  else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
-
-  let signalCount = 0;
-  if (hasDevicePath) signalCount += 1;
-  if (hasLiveSms) signalCount += 1;
-  if (timers.is_code_sent) signalCount += 1;
-  if (existSmsOpen && !hasLiveSms) signalCount += 1;
-  if (engineReady) signalCount += 1;
-  if (patternHints.includes('HARD_BAN')) signalCount += 2;
-
-  let confidence = 0.55;
-  if (isBanned && patternHints.includes('HARD_BAN')) confidence = 0.96;
-  else if (isBanned) confidence = 0.9;
-  else if (isCloneBlocked || isSecurityBlock) confidence = 0.88;
-  else if (isReady && hasDevicePath) confidence = 0.92;
-  else if (effectiveCooldown && hasLiveSms) confidence = 0.93;
-  else if (effectiveCooldown) confidence = 0.8;
-  else if (isReady && (timers.is_code_sent || engineReady)) confidence = 0.9;
-  else if (isReady && existSmsOpen) confidence = 0.86;
-  else if (isReady) confidence = 0.8;
-  else if (smsOptionMissing) confidence = 0.75;
-
-  if (signalCount >= 3) confidence = Math.min(0.98, confidence + 0.04);
-  else if (signalCount >= 2) confidence = Math.min(0.96, confidence + 0.02);
-
-  const proxyIso = String(countryIso2 || '').toLowerCase();
-  const tag = String(sessionTag || proxyMode || '').toLowerCase();
-  if (proxyIso && (tag.includes(proxyIso) || tag.includes('geo'))) {
-    confidence = Math.min(0.99, confidence + 0.03);
-    reasons.push('proxy_geo_match');
-  }
-
-  if (meta && meta.partial) confidence = Math.max(0.4, confidence - 0.08);
-  if (meta && meta.existOnly) confidence = Math.min(confidence, 0.88);
-
-  const ordered = [channels.sms, channels.voice, channels.flash, channels.email].filter((t) => t && t.rawSeconds > 0);
-  const primary = (hasLiveSms ? channels.sms : null) || ordered[0] || buildChannel(0);
-  const existClear = Boolean(meta && meta.existOnly && (isReady || (effectiveCooldown && hasLiveSms) || isBanned || isCloneBlocked) && confidence >= EXIST_CLEAR_CONFIDENCE);
-  const needsRecheck = Boolean(!existClear && (meta && meta.existOnly) && confidence < EXIST_CLEAR_CONFIDENCE);
-
-  let secondaryPath = null;
-  let secondarySeconds = 0;
-  // Prefer SMS cooldown when present, even if device is registered.
-  // Lets clone section show accurate "cooldown / siap / perangkat" labels.
-  if (hasLiveSms || (hasLiveWait && timers.sms > 0)) {
-    secondaryPath = 'cooldown';
-    secondarySeconds = liveSmsWait > 0 ? liveSmsWait : timers.sms;
-  } else if (hasDevicePath) {
-    secondaryPath = 'device';
-  } else if (hasLiveWait) {
-    secondaryPath = 'cooldown';
-    secondarySeconds = liveSmsWait > 0 ? liveSmsWait : (
-      timers.voice > 0 ? timers.voice : (timers.flash > 0 ? timers.flash : (timers.email > 0 ? timers.email : 0))
-    );
-  } else if (existSmsOpen || engineReady || hasOpenPath || smsTrulyOpen) {
-    secondaryPath = 'ready';
-  }
-
-  return {
-    formattedNumber: (function () {
-      const raw = payloads.rawNumber;
-      const rawDigits = String(raw || '').replace(/\D/g, '');
-      const safe = rawDigits ? ('+' + rawDigits) : String(raw || '');
-      const norm = normalizeDisplayNumber(raw, payloads.phoneInfo, parsed && parsed.phone);
-      const shown = String(norm || '').replace(/\D/g, '');
-      if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) return safe;
-      return norm || safe;
-    })(),
-    region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country)) || null,
-    accountStatus, isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
-    anyCooldown: effectiveCooldown, description, deviceName: timers.device_name || null, waOldEligible: Boolean(timers.wa_old_eligible || hasDevicePath),
-    channels, primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
-    proxyInfo: proxyMode + ' · ' + sessionTag, proxyTag: sessionTag, proxyCountry: countryIso2,
-    confidence, existClear, needsRecheck, decisionReasons: reasons, patternHints,
-    softFallback: false, error: false, partialResponse: Boolean(meta && meta.partial),
-    secondaryPath: secondaryPath,
-    secondarySeconds: secondarySeconds
-  };
-}
-
-function mergeConsensus(results) {
-  if (!results || !results.length) return softFallback('', {}, null, null);
-  const score = { ready: 0, cooldown: 0, clone: 0, ban: 0, sms: 0 };
-  for (const r of results) {
-    const w = Number(r.confidence) || 0.5;
-    if (r.isBanned) score.ban += w;
-    else if (r.isCloneBlocked || r.isSecurityBlock) score.clone += w;
-    else if (r.anyCooldown) score.cooldown += w;
-    else if (r.smsOptionMissing) score.sms += w;
-    else if (r.isReady) score.ready += w;
-    else score.cooldown += w * 0.5;
-  }
-  let best = 'cooldown'; let bestVal = -1;
-  for (const k of Object.keys(score)) {
-    if (score[k] > bestVal) { bestVal = score[k]; best = k; }
-  }
-  const base = results.filter((r) => {
-    if (best === 'ban') return r.isBanned;
-    if (best === 'clone') return r.isCloneBlocked || r.isSecurityBlock;
-    if (best === 'cooldown') return r.anyCooldown || r.softFallback;
-    if (best === 'sms') return r.smsOptionMissing;
-    if (best === 'ready') return r.isReady;
-    return false;
-  }).sort((a, b) => {
-    const ta = (a.primaryTimer && a.primaryTimer.rawSeconds) || 0;
-    const tb = (b.primaryTimer && b.primaryTimer.rawSeconds) || 0;
-    const stableA = ta > 0 ? 1 : 0;
-    const stableB = tb > 0 ? 1 : 0;
-    if (stableB !== stableA) return stableB - stableA;
-    return (b.confidence || 0) - (a.confidence || 0);
-  })[0] || results[0];
-  return { ...base, confidence: Math.min(0.99, (base.confidence || 0) + 0.05), consensusVotes: bestVal, consensusRounds: results.length, needsRecheck: false };
-}
-
-function softFallback(rawNumber, payloads, countryIso2, lastError) {
-  const rawDigits = String(rawNumber || '').replace(/\D/g, '');
-  const safeFmt = rawDigits ? ('+' + rawDigits) : String(rawNumber || '');
-  let formatted = normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null);
-  const shown = String(formatted || '').replace(/\D/g, '');
-  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) {
-    formatted = safeFmt;
-  }
-  return {
-    formattedNumber: formatted || safeFmt,
-    region: null,
-    accountStatus: 'UNKNOWN',
-    isBanned: false,
-    isCloneBlocked: false,
-    isSecurityBlock: false,
-    isReady: false,
-    smsAvailable: null,
-    smsOptionMissing: false,
-    anyCooldown: false,
-    description: 'Respons tidak stabil — coba ulang sebentar.',
-    deviceName: null,
-    waOldEligible: false,
-    channels: {
-      sms: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0),
-      email: buildChannel(0), wa_old: buildChannel(0)
-    },
-    primaryTimer: { rawSeconds: 0, uiTimer: '0s', humanTime: 'Ready' },
-    proxyInfo: 'FALLBACK', proxyTag: 'FALLBACK', proxyCountry: countryIso2,
-    softFallback: true,
-    confidence: 0.3,
-    needsRecheck: true,
-    decisionReasons: ['soft_fallback'],
-    patternHints: ['SOFT_FALLBACK'],
-    error: false,
-    secondaryPath: null,
-    secondarySeconds: 0
-  };
-}
-
-async function checkWhatsAppCooldown(rawNumber, options) {
-  const opts = options || {};
-  if (!opts.skipSticky && opts.wave !== 'exist') {
-    const cached = stickyGet(rawNumber);
-    if (cached) {
-      return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
-    }
-  }
-  const payloads = await WADetector.buildDualPayloads(String(rawNumber));
-  if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
-  payloads.rawNumber = String(rawNumber);
-  const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
-  const headers = buildHeaders(payloads.userAgent, countryIso2);
-  if (opts.wave === 'exist') {
-    try {
-      const probe = await runExistOnlyProbe(payloads, headers, countryIso2);
-      return classifyFromResponses(payloads, probe.existText, null, probe.proxyMode, probe.sessionTag, countryIso2, { partial: true, existOnly: true });
-    } catch (err) {
-      return softFallback(rawNumber, payloads, countryIso2, err);
-    }
-  }
-  if (!(opts.wave === 'full' || opts.wave === 'dual')) {
-    try {
-      const existProbe = await runExistOnlyProbe(payloads, headers, countryIso2);
-      const existResult = classifyFromResponses(payloads, existProbe.existText, null, existProbe.proxyMode, existProbe.sessionTag, countryIso2, { partial: true, existOnly: true });
-      if (existResult.existClear && !existResult.needsRecheck) {
-        const outClear = { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
-        stickySet(rawNumber, outClear);
-        return outClear;
-      }
+      await ctx.telegram.editMessageText(progressMsg.chat.id, progressMsg.message_id, undefined, buildProgressText(stageProcessed, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
     } catch (_) {}
   }
-  const rounds = [];
-  let lastError = null;
-  for (let attempt = 1; attempt <= INTERNAL_RETRIES; attempt++) {
+  function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+  function preserveNumber(raw, result) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    const fallback = digits ? ('+' + digits) : String(raw || '');
+    if (!result) return fallback;
+    const shown = String(result.formattedNumber || '').replace(/\D/g, '');
+    // If result lost country code (shorter/different than input), force original
+    if (!shown || (digits.length >= 10 && shown.length < digits.length - 1) || (digits.length >= 10 && !digits.endsWith(shown.slice(-8)))) {
+      result.formattedNumber = fallback;
+    } else if (!String(result.formattedNumber || '').startsWith('+') && digits) {
+      result.formattedNumber = '+' + shown;
+    }
+    return result.formattedNumber || fallback;
+  }
+  async function checkOne(raw, waveOpts) {
+    const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
+    if (stop) return { cancelled: true };
+    const digits = String(raw || '').replace(/\D/g, '');
+    const safeNumber = digits ? ('+' + digits) : String(raw || '');
     try {
-      const dual = await runDualProbe(payloads, headers, countryIso2);
-      const result = classifyFromResponses(payloads, dual.existText, dual.codeText, dual.proxyMode, dual.sessionTag, countryIso2, { partial: dual.partial, existOnly: false });
-      rounds.push(result);
-      if (!result.needsRecheck && result.accountStatus !== 'UNKNOWN') {
-        if (!CONSENSUS_ENABLED || result.confidence >= LOW_CONFIDENCE_THRESHOLD) {
-          if (result.isBanned && !(result.patternHints && result.patternHints.includes('HARD_BAN')) && attempt < INTERNAL_RETRIES) {
-            await sleep(100);
-            continue;
-          }
-          const out = { ...result, probeMode: 'dual', consensusRounds: rounds.length };
-          stickySet(rawNumber, out);
-          return out;
+      const opts = Object.assign({ skipSticky: true }, waveOpts || {});
+      let result = await checkWhatsAppCooldown(raw, opts);
+      if (result && !result.cancelled && (result.softFallback || result.needsRecheck || (Number(result.confidence) || 0) < 0.55)) {
+        if ((waveOpts && waveOpts.wave) !== 'full') {
+          try {
+            const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
+            if (retry && !retry.error && (Number(retry.confidence) || 0) >= (Number(result.confidence) || 0)) result = retry;
+          } catch (_) {}
         }
       }
-      if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) {
-        await sleep(120 + Math.floor(Math.random() * 180));
-        continue;
+      if (result && !result.error) {
+        preserveNumber(raw, result);
+        await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
+        return result;
       }
-      if (rounds.length >= 2) {
-        const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
-        stickySet(rawNumber, mc);
-        return mc;
+      if (result) {
+        preserveNumber(raw, result);
+        return result;
       }
-      return { ...result, probeMode: 'dual', consensusRounds: rounds.length };
     } catch (err) {
-      lastError = err;
-      if (attempt < INTERNAL_RETRIES) {
-        await sleep(150 + Math.floor(Math.random() * 220));
-        continue;
+      try {
+        const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
+        if (retry && !retry.error) {
+          preserveNumber(raw, retry);
+          await addCheckLog(userId, retry.formattedNumber || safeNumber, retry.accountStatus || '-', retry.proxyTag || '-');
+          return retry;
+        }
+      } catch (_) {}
+      return { formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
+    }
+    return { formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
+  }
+  async function runPool(indexes, waveOpts) {
+    let cursor = 0;
+    stageProcessed = 0;
+    stageTotal = indexes.length || 1;
+    let conc;
+    if (indexes.length >= 20) conc = 5;
+    else if (indexes.length >= 12) conc = 6;
+    else if (indexes.length >= 6) conc = 7;
+    else conc = Math.min(8, indexes.length || 1);
+    const CONCURRENCY_SAFE = Math.max(1, conc);
+    async function worker(workerId) {
+      if (workerId > 0) await sleep(workerId * 70);
+      while (cursor < indexes.length) {
+        const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
+        if (stop) return;
+        const pos = cursor++;
+        if (pos >= indexes.length) return;
+        const i = indexes[pos];
+        results[i] = await checkOne(numbers[i], waveOpts);
+        stageProcessed += 1;
+        if (stageProcessed === 1 || stageProcessed === stageTotal || stageProcessed % 2 === 0) await updateProgress();
       }
     }
+    await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
+    stageProcessed = stageTotal;
+    await updateProgress();
   }
-  if (rounds.length >= 2) {
-    const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
-    stickySet(rawNumber, mc);
-    return mc;
+  const allIdx = Array.from({ length: total }, (_, i) => i);
+  if (total >= 4) {
+    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · sᴄᴀɴ ᴄᴇᴘᴀᴛ';
+    await runPool(allIdx, { wave: 'exist' });
+    const needFull = [];
+    for (let i = 0; i < total; i++) {
+      const r = results[i];
+      if (!r || r.cancelled) continue;
+      const conf = Number(r.confidence) || 0;
+      const clearLiveCooldown = r.anyCooldown && r.primaryTimer && r.primaryTimer.rawSeconds > 0 && conf >= 0.82;
+      const clearBan = r.isBanned && conf >= 0.88;
+      const clearReady = r.isReady && (r.existClear || conf >= 0.84) && !r.anyCooldown;
+      const clearClone = (r.isCloneBlocked || r.isSecurityBlock) && conf >= 0.85;
+      if (clearLiveCooldown || clearBan || clearReady || clearClone) continue;
+      needFull.push(i);
+    }
+    if (needFull.length) {
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴅᴀʟᴀᴍ';
+      await runPool(needFull, { wave: 'full' });
+    } else {
+      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · sᴇʟᴇsᴀɪ';
+      stageProcessed = total;
+      stageTotal = total;
+      await updateProgress();
+    }
+  } else {
+    currentStageLabel = total > 1 ? 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+    await runPool(allIdx, { wave: 'full' });
   }
-  if (rounds.length === 1 && rounds[0].accountStatus !== 'UNKNOWN') {
-    return { ...rounds[0], consensusRounds: 1, probeMode: 'dual' };
+  const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
+  await redis.del('detect:active:' + userId);
+  await redis.del('detect:stop:' + userId + ':' + jobId);
+  if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+
+  const groups = { ready: [], cooldown: [], clone: [], restricted: [], other: [] };
+  for (let gi = 0; gi < results.length; gi++) {
+    const r = results[gi];
+    if (!r || r.cancelled) continue;
+    // Always prefer original input number for display
+    const origDigits = String(numbers[gi] || '').replace(/\D/g, '');
+    const origNum = origDigits ? ('+' + origDigits) : null;
+    let num = origNum || r.formattedNumber || '-';
+    const shownDigits = String(num).replace(/\D/g, '');
+    if (origDigits && shownDigits && shownDigits !== origDigits) {
+      num = origNum;
+    }
+    r.formattedNumber = num;
+    if (r.isBanned === true || r.accountStatus === 'BANNED') {
+      groups.restricted.push(num);
+    } else if (r.isCloneBlocked || r.isSecurityBlock) {
+      let secs = Number(r.secondarySeconds) || 0;
+      if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
+      if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
+      const dev = deviceLabel(r);
+      let label;
+      if (secs > 0) label = formatCooldownSmallCaps(secs) + ' · ' + dev;
+      else label = dev;
+      groups.clone.push({ line: num + ' ⦂ ' + label, secs: secs || 0 });
+    } else if (r.isReady && !r.anyCooldown) {
+      const dev = deviceLabel(r);
+      groups.ready.push({ line: num + ' ⦂ ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
+    } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
+      let secs = 0;
+      if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
+      else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
+      else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
+      const dur = formatCooldownSmallCaps(secs);
+      const dev = deviceLabel(r);
+      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' · ' + dev, secs: secs });
+    } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
+      const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
+      groups.other.push(num + note);
+    } else {
+      const note = r.description ? (' · ' + r.description) : '';
+      groups.other.push(num + note);
+    }
   }
-  return softFallback(rawNumber, payloads, countryIso2, lastError);
+
+  groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0));
+  groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
+  groups.clone.sort((a, b) => {
+    const sa = typeof a === 'object' ? (a.secs ?? 0) : 0;
+    const sb = typeof b === 'object' ? (b.secs ?? 0) : 0;
+    return sa - sb;
+  });
+
+  const lines = [];
+  lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
+  lines.push(buildProgressBar(100) + ' 100%');
+  lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
+  lines.push('✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ ⦂ <b>' + groups.ready.length + '</b>');
+  lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
+  lines.push('△ ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
+  lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.restricted.length + '</b>');
+  if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
+  lines.push('');
+  lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
+  if (groups.ready.length) {
+    lines.push('');
+    lines.push('✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
+    lines.push('');
+    groups.ready.forEach((n) => lines.push(n.line || n));
+  }
+  if (groups.cooldown.length) {
+    lines.push('');
+    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
+    lines.push('');
+    groups.cooldown.forEach((n) => lines.push(n.line || n));
+  }
+  if (groups.clone.length) {
+    lines.push('');
+    lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
+    lines.push('');
+    groups.clone.forEach((n) => lines.push(typeof n === 'object' ? (n.line || n) : n));
+  }
+  if (groups.restricted.length) {
+    lines.push('');
+    lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
+    lines.push('');
+    groups.restricted.forEach((n) => lines.push(n));
+  }
+  if (groups.other.length) {
+    lines.push('');
+    lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
+    lines.push('');
+    groups.other.forEach((n) => lines.push(n));
+  }
+  try {
+    const user = await getEffectiveUser(ctx);
+    const checkedCount = results.filter((r) => r && !r.cancelled).length || total;
+    if (!isOwner(ctx) && !isUserVip(user)) {
+      await consumeQuota(ctx.from.id, Math.min(checkedCount, 1));
+    } else {
+      await incrementUserChecks(ctx.from.id, checkedCount);
+    }
+  } catch (e) { console.error('[quota/leaderboard]', e && e.message || e); }
+  const refreshKey = 'detect:refresh:' + userId + ':' + jobId;
+  try {
+    await redis.set(refreshKey, JSON.stringify(numbers), { ex: 3600 });
+  } catch (_) {}
+  return ctx.reply(lines.join('\n'), {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([
+      [styledCallback('↻ UPDATE STATUS', 'detect:refresh:' + jobId, 'success')]
+    ])
+  });
 }
 
-module.exports = { checkWhatsAppCooldown, getHealth };
+bot.hears('♛ OWNER CONSOLE', async (ctx) => {
+  if (!isOwner(ctx)) return ctx.reply('✕ ᴀᴋsᴇs ᴅɪᴛᴏʟᴀᴋ', { parse_mode: 'HTML' });
+  return ctx.reply('♛ <b>ᴏᴡɴᴇʀ ᴄᴏɴsᴏʟᴇ</b>\n\nᴘɪʟɪʜ ᴀᴋsɪ ᴅɪ ʙᴀᴡᴀʜ.', {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([
+      [styledCallback('✚ AKTIVASI PREMIUM', 'owner:activate', 'success')],
+      [styledCallback('▤ BROADCAST', 'owner:broadcast', 'primary')]
+    ])
+  });
+});
+bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'activate_vip');
+  return ctx.reply('✚ <b>ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ</b>\n\nᴋɪʀɪᴍ ғᴏʀᴍᴀᴛ:\n<code>user_id hari</code>\nᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+});
+bot.hears('▤ BROADCAST', async (ctx) => {
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'broadcast');
+  return ctx.reply('▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴇʙᴀʀ ᴋᴇ sᴇᴍᴜᴀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+});
+bot.action('owner:activate', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'activate_vip');
+  return ctx.reply('✚ <b>ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ</b>\n\nᴋɪʀɪᴍ ғᴏʀᴍᴀᴛ:\n<code>user_id hari</code>\nᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+});
+bot.action('owner:broadcast', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'broadcast');
+  return ctx.reply('▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴇʙᴀʀ ᴋᴇ sᴇᴍᴜᴀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+});
+bot.action(/^contact:reply:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  const targetId = ctx.match[1];
+  await redis.set('owner:contact:target:' + ctx.from.id, targetId, { ex: 600 });
+  return ctx.reply('✉︎ <b>ʙᴀʟᴀs ᴘᴇsᴀɴ</b>\n\nᴋɪʀɪᴍ ʙᴀʟᴀsᴀɴ ᴜɴᴛᴜᴋ ᴜsᴇʀ <code>' + targetId + '</code>.', { parse_mode: 'HTML' });
+});
+bot.action('referral:menu', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return ctx.reply(require('./themes').renderReferralExchange(), { parse_mode: 'HTML' });
+});
+
+bot.on('text', async (ctx, next) => {
+  const text = (ctx.message && ctx.message.text) || '';
+  if (/^(⌖\s*DETECT|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
+
+  // Owner reply to user contact
+  if (isOwner(ctx)) {
+    const replyTarget = await redis.get('owner:contact:target:' + ctx.from.id);
+    if (replyTarget) {
+      await redis.del('owner:contact:target:' + ctx.from.id);
+      try {
+        await ctx.telegram.sendMessage(Number(replyTarget), '✉︎ <b>ʙᴀʟᴀsᴀɴ ᴀᴅᴍɪɴ</b>\n\n' + escapeHtml(text), { parse_mode: 'HTML' });
+        return ctx.reply('✓ ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ᴋᴇ ᴜsᴇʀ <code>' + replyTarget + '</code>.', { parse_mode: 'HTML' });
+      } catch (err) {
+        return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ: ' + String(err.message || err).slice(0, 120));
+      }
+    }
+    const ownerAction = await getOwnerAction(ctx.from.id);
+    if (ownerAction === 'activate_vip') {
+      await clearOwnerAction(ctx.from.id);
+      const parts = text.trim().split(/\s+/);
+      const targetId = Number(parts[0]);
+      const days = Number(parts[1] || 30);
+      if (!targetId || !days) {
+        return ctx.reply('✕ ғᴏʀᴍᴀᴛ sᴀʟᴀʜ. ᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+      }
+      try {
+        await activateVip(targetId, days, 'OWNER');
+        try { await ctx.telegram.sendMessage(targetId, '✧ <b>ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ</b>\n\nᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ ᴋᴀᴍᴜ ᴛᴇʟᴀʜ ᴅɪᴀᴋᴛɪғᴋᴀɴ sᴇʟᴀᴍᴀ <b>' + days + '</b> ʜᴀʀɪ.', { parse_mode: 'HTML' }); } catch (_) {}
+        return ctx.reply('✓ ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + targetId + '</code> · ' + days + ' ʜᴀʀɪ.', { parse_mode: 'HTML' });
+      } catch (err) {
+        return ctx.reply('✕ ɢᴀɢᴀʟ: ' + String(err.message || err).slice(0, 120));
+      }
+    }
+    if (ownerAction === 'broadcast') {
+      await clearOwnerAction(ctx.from.id);
+      return ctx.reply('▤ ʙʀᴏᴀᴅᴄᴀsᴛ ᴅɪᴛᴇʀɪᴍᴀ. (ғɪᴛᴜʀ sᴇᴘᴇɴᴜʜɴʏᴀ ᴍᴇᴍᴇʀʟᴜᴋᴀɴ ᴅᴀғᴛᴀʀ ᴜsᴇʀ ɪᴅ ᴅɪ ʀᴇᴅɪs)', { parse_mode: 'HTML' });
+    }
+  }
+
+  // User contact admin — forward message to owner
+  const contactState = await redis.get('contact:state:' + ctx.from.id);
+  if (contactState === 'waiting') {
+    await redis.del('contact:state:' + ctx.from.id);
+    const uname = ctx.from.username ? '@' + ctx.from.username : '-';
+    const fullName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Pengguna';
+    if (!ADMIN_ID) {
+      return ctx.reply('✕ <b>ᴀᴅᴍɪɴ ʙᴇʟᴜᴍ ᴅɪᴋᴏɴғɪɢᴜʀᴀsɪ</b>\n\n<blockquote>sᴇᴛ ᴇɴᴠ ADMIN_ID ᴅɪ ᴠᴇʀᴄᴇʟ.</blockquote>', { parse_mode: 'HTML' });
+    }
+    try {
+      await ctx.telegram.sendMessage(
+        ADMIN_ID,
+        '✉︎ <b>ᴘᴇsᴀɴ ᴅᴀʀɪ ᴜsᴇʀ</b>\n\n' +
+        '▸ ɴᴀᴍᴀ ⦂ <b>' + escapeHtml(fullName) + '</b>\n' +
+        '▸ ᴜsᴇʀ ⦂ <b>' + escapeHtml(uname) + '</b>\n' +
+        '▸ ɪᴅ ⦂ <code>' + ctx.from.id + '</code>\n\n' +
+        '<blockquote>' + escapeHtml(text) + '</blockquote>',
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [styledCallback('↩ BALAS', 'contact:reply:' + ctx.from.id, 'primary')]
+          ])
+        }
+      );
+      return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴀᴅᴍɪɴ ᴀᴋᴀɴ ᴍᴇᴍʙᴀʟᴀs sᴇʙᴇɢᴀɪᴍᴀɴᴀ ᴍᴜɴɢᴋɪɴ.', { parse_mode: 'HTML' });
+    } catch (err) {
+      console.error('[contact forward]', err && err.message || err);
+      return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ ᴘᴇsᴀɴ</b>\n\n<blockquote>' + escapeHtml(String(err.message || err).slice(0, 120)) + '</blockquote>', { parse_mode: 'HTML' });
+    }
+  }
+
+  const mode = await redis.get('detect:mode:' + ctx.from.id);
+  if (mode !== 'waiting_numbers') return next();
+  const phones = extractPhoneCandidates(text);
+  if (!phones.length) {
+    return ctx.reply('✦ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ ⦂ +6281234567890</blockquote>', { parse_mode: 'HTML' });
+  }
+  const user = await getEffectiveUser(ctx);
+  const isVip = isOwner(ctx) || isUserVip(user);
+  const max = isVip ? 30 : 1;
+  const list = phones.slice(0, max);
+  if (!isVip && phones.length > 1) {
+    return ctx.reply(
+      '✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n' +
+      '<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ <b>1 ɴᴏᴍᴏʀ</b> ᴘᴇʀ ᴋɪʀɪᴍᴀɴ.\n' +
+      'ᴋᴀᴍᴜ ᴋɪʀɪᴍ <b>' + phones.length + '</b> ɴᴏᴍᴏʀ — ʜᴀɴʏᴀ ʏᴀɴɢ ᴘᴇʀᴛᴀᴍᴀ ʏᴀɴɢ ᴅɪᴘʀᴏsᴇs.\n' +
+      'ᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>',
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
+      }
+    );
+  }
+  return processDetection(ctx, list);
+});
+
+if (require.main === module) {
+  process.on('unhandledRejection', (err) => { console.error('[unhandledRejection]', err && err.stack || err); });
+  process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err && err.stack || err); });
+  bot.launch({ dropPendingUpdates: true })
+    .then(() => console.log('[bot] launched successfully'))
+    .catch((err) => { console.error('[launch]', err && err.stack || err); process.exitCode = 1; });
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}
+module.exports = bot;
