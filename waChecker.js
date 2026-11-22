@@ -661,7 +661,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
         }
       }
       if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) {
-        await sleep(80 + Math.floor(Math.random() * 100));
+        await sleep(200 + Math.floor(Math.random() * 300));
         continue;
       }
       if (rounds.length >= 2) {
@@ -673,7 +673,11 @@ async function checkWhatsAppCooldown(rawNumber, options) {
     } catch (err) {
       lastError = err;
       if (attempt < INTERNAL_RETRIES) {
-        await sleep(100 + Math.floor(Math.random() * 120));
+        const msg = String((err && err.message) || '');
+        const wait = /too_many|rate|timeout|network|transport/i.test(msg)
+          ? (800 * attempt + Math.floor(Math.random() * 700))
+          : (300 + Math.floor(Math.random() * 400));
+        await sleep(wait);
         continue;
       }
     }
