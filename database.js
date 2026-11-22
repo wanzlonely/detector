@@ -332,6 +332,17 @@ async function getLeaderboard(limit = 10) {
   return rows;
 }
 
+
+async function getUserRank(telegramId) {
+  try {
+    const rank = await redis.zrevrank('leaderboard:checks', String(telegramId));
+    if (rank === null || rank === undefined) return 0;
+    return Number(rank) + 1;
+  } catch (_) {
+    return 0;
+  }
+}
+
 async function incrementUserChecks(telegramId, count = 1) {
   const key = `user:${telegramId}`;
   const user = await redis.get(key);
@@ -364,5 +375,6 @@ module.exports = {
   qualifyReferral,
   getReferralStats,
   redeemReferralReward,
-  getLeaderboard
+  getLeaderboard,
+  getUserRank
 };
