@@ -65,7 +65,7 @@ const OWNER_KEYBOARD = Markup.keyboard([
   [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
   [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }],
   [{ text: '♛ OWNER CONSOLE' }],
-  [{ text: '✚ AKTIVASI PRE PREMIUM' }, { text: '▤ BROADCAST' }]
+  [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
 ]).resize().oneTime().placeholder('Pilih fungsi owner…');
 
 const OWNER_ACTION_TTL = 300;
