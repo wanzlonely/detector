@@ -21,3 +21,5 @@ jobs:
         run: npm install --ignore-scripts
       - name: Check JavaScript syntax
         run: npm run check
+      - name: Run status classifier regression tests
+        run: npm run test:status
