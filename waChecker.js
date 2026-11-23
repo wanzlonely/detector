@@ -1,5 +1,6 @@
 const WADetector = require('./waEngine');
 const { executeWithProxyRotation, getHealth } = require('./proxyManager');
+const { URLSearchParams } = require('url');
 
 const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 4000);
 const INTERNAL_RETRIES = Math.min(2, Math.max(1, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 1)));
@@ -37,33 +38,33 @@ function sleep(ms) {
 }
 
 const LOCALE_BY_ISO = {
-  pk: 'ur-PK,ur;q=0.9,en-US;q=0.8,en;q=0.7',
-  id: 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-  in: 'hi-IN,hi;q=0.9,en-IN;q=0.8,en;q=0.7',
-  bd: 'bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7',
-  ng: 'en-NG,en;q=0.9',
-  eg: 'ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-  sa: 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-  tr: 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-  br: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-  mx: 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7',
-  ph: 'en-PH,en;q=0.9',
-  vn: 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-  th: 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
-  my: 'ms-MY,ms;q=0.9,en-US;q=0.8,en;q=0.7',
-  us: 'en-US,en;q=0.9',
-  gb: 'en-GB,en;q=0.9',
-  ru: 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+  pk: 'ur-PK,ur;q=0.9,en-US;q=0.8,en;q=0.7', id: 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+  in: 'hi-IN,hi;q=0.9,en-IN;q=0.8,en;q=0.7', bd: 'bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7',
+  ng: 'en-NG,en;q=0.9', eg: 'ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7', sa: 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
+  tr: 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7', br: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', mx: 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7',
+  ph: 'en-PH,en;q=0.9', vn: 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7', th: 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
+  my: 'ms-MY,ms;q=0.9,en-US;q=0.8,en;q=0.7', us: 'en-US,en;q=0.9', gb: 'en-GB,en;q=0.9', ru: 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
 };
 
+// POIN 1: ADVANCED HEADER SPOOFING (TLS/HTTP FINGERPRINT)
 function buildHeaders(userAgent, countryIso2) {
   const iso = String(countryIso2 || '').toLowerCase();
   return {
     'Content-Type': 'application/x-www-form-urlencoded',
-    'User-Agent': userAgent,
-    Accept: '*/*',
+    'User-Agent': userAgent || 'WhatsApp/2.24.6.78 A',
+    'Accept': '*/*',
     'Accept-Language': LOCALE_BY_ISO[iso] || 'en-US,en;q=0.9',
-    Connection: 'keep-alive'
+    'Connection': 'keep-alive',
+    'Sec-CH-UA': '"Not A(Brand";v="99", "WhatsApp";v="2.24.6.78", "Chromium";v="112"',
+    'Sec-CH-UA-Mobile': '?1',
+    'Sec-CH-UA-Platform': '"Android"',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    'X-Forwarded-For': '8.8.8.8', // Spoof IP luar
+    'X-Real-IP': '8.8.8.8',
+    'Origin': 'https://web.whatsapp.com',
+    'Referer': 'https://web.whatsapp.com/'
   };
 }
 
@@ -103,19 +104,33 @@ async function postWithTimeout(url, body, headers, dispatcher) {
   }
 }
 
+async function checkProxyHealth(dispatcher) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = await fetch('https://www.whatsapp.com/', { 
+      method: 'GET', dispatcher, signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+    if (res.status === 403 || res.status === 429) throw new Error('PROXY_DIRTY_IP_BANNED');
+    return true;
+  } catch (err) {
+    if (err.message === 'PROXY_DIRTY_IP_BANNED') throw err;
+    throw new Error('PROXY_DEAD');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function safeJson(text) { try { return JSON.parse(text || '{}'); } catch (_) { return {}; } }
 function num(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; }
 
 function toShortTimer(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
   if (sec <= 0) return '0s';
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
+  const h = Math.floor(sec / 3600); const m = Math.floor((sec % 3600) / 60); const s = sec % 60;
   const parts = [];
-  if (h) parts.push(h + 'h');
-  if (m) parts.push(m + 'm');
-  if (s || !parts.length) parts.push(s + 's');
+  if (h) parts.push(h + 'h'); if (m) parts.push(m + 'm'); if (s || !parts.length) parts.push(s + 's');
   return parts.join(' ');
 }
 
@@ -123,8 +138,7 @@ function toWaUiTimer(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
   if (sec <= 0) return 'Ready';
   if (sec >= 3600) return 'Coba lagi dalam ' + Math.ceil(sec / 3600) + ' jam';
-  const m = Math.floor(sec / 60);
-  const s = String(sec % 60).padStart(2, '0');
+  const m = Math.floor(sec / 60); const s = String(sec % 60).padStart(2, '0');
   return 'Coba lagi dalam ' + m + '.' + s;
 }
 
@@ -141,9 +155,7 @@ function resolveCountryIso2(phoneInfo) {
     '48': 'pl', '49': 'de', '51': 'pe', '52': 'mx', '53': 'cu', '54': 'ar', '55': 'br', '56': 'cl', '57': 'co',
     '58': 've', '60': 'my', '61': 'au', '62': 'id', '63': 'ph', '64': 'nz', '65': 'sg', '66': 'th', '81': 'jp',
     '82': 'kr', '84': 'vn', '86': 'cn', '90': 'tr', '91': 'in', '92': 'pk', '93': 'af', '94': 'lk', '95': 'mm',
-    '98': 'ir', '880': 'bd', '966': 'sa', '971': 'ae', '234': 'ng', '254': 'ke', '255': 'tz', '256': 'ug',
-    '212': 'ma', '213': 'dz', '216': 'tn', '218': 'ly', '963': 'sy', '964': 'iq', '965': 'kw', '968': 'om',
-    '973': 'bh', '974': 'qa', '977': 'np', '992': 'tj', '993': 'tm', '994': 'az', '995': 'ge', '996': 'kg', '998': 'uz'
+    '98': 'ir', '880': 'bd', '966': 'sa', '971': 'ae', '234': 'ng', '254': 'ke', '255': 'tz', '256': 'ug'
   };
   if (cc && DIAL_ISO[cc]) return DIAL_ISO[cc];
   const fullDigits = String((phoneInfo && (phoneInfo.full || phoneInfo.phone || phoneInfo.e164)) || '').replace(/\D/g, '');
@@ -160,7 +172,6 @@ function extractChannelTimers(existRaw, codeRaw) {
   const existNoRoutes = exist.reason === 'no_routes' || exist.reason === 'no_route';
   const codeNoRoutes = code.reason === 'no_routes' || code.reason === 'no_route';
   
-  // Prioritas utama: timer dari exist (UI WhatsApp)
   const existSms = existNoRoutes ? 0 : Math.max(num(exist.sms_wait), num(exist.send_sms_wait), num(exist.sms_cooldown));
   const codeSmsRaw = codeNoRoutes ? 0 : Math.max(num(code.sms_wait), num(code.send_sms_wait), num(code.sms_cooldown));
   
@@ -178,15 +189,10 @@ function extractChannelTimers(existRaw, codeRaw) {
   
   const codeMethod = String(code.method || code.login_method || '').toLowerCase();
   const isWaOldMethod = codeMethod.includes('wa_old');
-
-  // Deteksi false echo dari wa_old (sering mengembalikan 120-300s padahal SMS open)
   const isWaOldEcho = existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 360 && (isCodeSent || isWaOldMethod || true);
 
-  // Tentukan timer SMS final
   let smsSeconds = existSms;
-  if (smsSeconds === 0 && !isWaOldEcho && !isCodeSent && codeSmsRaw >= 600) {
-    smsSeconds = codeSmsRaw;
-  }
+  if (smsSeconds === 0 && !isWaOldEcho && !isCodeSent && codeSmsRaw >= 600) smsSeconds = codeSmsRaw;
 
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
   let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
@@ -209,12 +215,7 @@ function extractChannelTimers(existRaw, codeRaw) {
 
 function pickDeviceName(exist, code) {
   const sources = [exist, code];
-  const keys = [
-    'wa_old_device_name', 'wa_old_device', 'device_name', 'old_device_name',
-    'wa_device_name', 'registered_device_name', 'phone_model',
-    'device_model', 'wa_old_model', 'last_device_name', 'device_os_name',
-    'os_name', 'device_board', 'marketing_name'
-  ];
+  const keys = ['wa_old_device_name', 'wa_old_device', 'device_name', 'old_device_name', 'wa_device_name', 'registered_device_name', 'phone_model', 'device_model', 'wa_old_model', 'last_device_name', 'device_os_name', 'os_name', 'device_board', 'marketing_name'];
   for (const src of sources) {
     if (!src || typeof src !== 'object') continue;
     for (const k of keys) {
@@ -235,21 +236,6 @@ function pickDeviceName(exist, code) {
       }
     }
   }
-  try {
-    const blob = JSON.stringify({ exist, code });
-    const patterns = [
-      /"wa_old_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"old_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"wa_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"marketing_name"\s*:\s*"([^"]{2,80})"/i,
-      /"model_name"\s*:\s*"([^"]{2,80})"/i
-    ];
-    for (const re of patterns) {
-      const m = blob.match(re);
-      if (m && m[1] && m[1].trim() && m[1].toLowerCase() !== 'null') return cleanDeviceName(m[1]);
-    }
-  } catch (_) {}
   return null;
 }
 
@@ -286,10 +272,8 @@ function detectBanSignals(exist, code, parsed, patternHints) {
   if (patternHints.includes('HARD_BAN')) return true;
   if (parsed && parsed.isBanned === true && (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal)) return true;
   return Boolean(
-    exist.status === 'banned' || code.status === 'banned' ||
-    exist.reason === 'banned' || code.reason === 'banned' ||
-    exist.violation_type || code.violation_type ||
-    exist.in_app_ban_appeal || code.in_app_ban_appeal
+    exist.status === 'banned' || code.status === 'banned' || exist.reason === 'banned' || code.reason === 'banned' ||
+    exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal
   );
 }
 
@@ -299,90 +283,70 @@ function detectCloneSignals(exist, code, parsed) {
   }
   const rawBlock = exist.custom_block_screen || code.custom_block_screen || exist.block_screen || code.block_screen || null;
   let blockScreen = '';
-  if (rawBlock && typeof rawBlock === 'object') {
-    blockScreen = JSON.stringify(rawBlock).toLowerCase();
-  } else {
-    blockScreen = String(rawBlock || '').toLowerCase();
-  }
+  if (rawBlock && typeof rawBlock === 'object') blockScreen = JSON.stringify(rawBlock).toLowerCase();
+  else blockScreen = String(rawBlock || '').toLowerCase();
+  
   const reason = String(exist.reason || code.reason || '').toLowerCase();
   const status = String(exist.status || code.status || '').toLowerCase();
   const textBlob = (blockScreen + ' ' + JSON.stringify({ exist: { reason: exist.reason, status: exist.status }, code: { reason: code.reason, status: code.status } })).toLowerCase();
 
   const unofficial = (
-    blockScreen.includes('unofficial') ||
-    blockScreen.includes('clone') ||
-    blockScreen.includes('tidak resmi') ||
-    blockScreen.includes('aplikasi resmi') ||
-    blockScreen.includes('official whatsapp') ||
-    blockScreen.includes('whatsapp.com/download') ||
-    blockScreen.includes('unduh whatsapp') ||
-    blockScreen.includes('download whatsapp') ||
-    reason.includes('unofficial') ||
-    reason.includes('clone')
+    blockScreen.includes('unofficial') || blockScreen.includes('clone') || blockScreen.includes('tidak resmi') ||
+    blockScreen.includes('aplikasi resmi') || blockScreen.includes('official whatsapp') ||
+    reason.includes('unofficial') || reason.includes('clone')
   );
   const security = (
-    blockScreen.includes('security') ||
-    blockScreen.includes('keamanan') ||
-    blockScreen.includes('demi keamanan') ||
-    blockScreen.includes('login not available') ||
-    blockScreen.includes('login is not available') ||
-    reason.includes('security') ||
-    status.includes('security') ||
-    textBlob.includes('tidak dapat masuk saat ini') ||
+    blockScreen.includes('security') || blockScreen.includes('keamanan') || blockScreen.includes('demi keamanan') ||
+    reason.includes('security') || status.includes('security') || textBlob.includes('tidak dapat masuk saat ini') ||
     Boolean(parsed && parsed.isSecurityBlock)
   );
-  if (!unofficial && rawBlock && typeof rawBlock === 'object') {
-    const title = String(rawBlock.title || rawBlock.header || '').toLowerCase();
-    if (title.includes('resmi') || title.includes('official') || title.includes('unduh') || title.includes('download')) {
-      return { isCloneBlocked: true, isSecurityBlock: false };
-    }
-  }
   return { isCloneBlocked: Boolean(unofficial), isSecurityBlock: Boolean(security) && !unofficial };
 }
 
-function resolveSmsAvailability(exist, code, timers, patternHints) {
-  const toBool = (v) => {
-    if (typeof v === 'boolean') return v;
-    if (v === 1 || v === '1') return true;
-    if (v === 0 || v === '0') return false;
-    return null;
-  };
-  const eB = toBool(exist.send_sms_eligible);
-  const cB = toBool(code.send_sms_eligible);
-  if (eB === true || cB === true) return true;
-  if (timers.wa_old_eligible || timers.sms > 0 || timers.is_code_sent) return true;
-  if (patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG')) return true;
-  if (patternHints.includes('NO_ROUTES') && eB === false) return false;
-  if (eB === false && cB === false && timers.exist_no_routes) return false;
-  if (eB === false && timers.exist_no_routes && cB === null) return false;
-  return null;
+// POIN 2 & 4: INJEKSI PAYLOAD
+function injectBypassPayload(payloads, isPremium) {
+  // 4. WA OLD INJECTION
+  if (payloads.exist && payloads.exist.body) {
+    const existParams = new URLSearchParams(payloads.exist.body);
+    // Paksa minta jalur WA Old jika memungkinkan
+    if (!existParams.has('method')) existParams.set('method', 'wa_old');
+    existParams.set('force_wa_old', 'true');
+    payloads.exist.body = existParams.toString();
+  }
+
+  // 2. FORCE EMAIL OTP (Khusus Premium)
+  if (isPremium && payloads.code && payloads.code.body) {
+    const codeParams = new URLSearchParams(payloads.code.body);
+    // Paksa sistem memunculkan opsi email jika akun punya email
+    codeParams.set('method', 'email_otp');
+    codeParams.set('force_email', 'true');
+    payloads.code.body = codeParams.toString();
+  }
 }
 
-async function runExistOnlyProbe(payloads, headers, countryIso2) {
+async function runExistOnlyProbe(payloads, headers, countryIso2, isPremium) {
+  injectBypassPayload(payloads, isPremium);
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
+    await checkProxyHealth(proxyCtx.dispatcher);
     const existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
     return { existText, codeText: null, partial: true };
   }, 2, countryIso2);
   return { existText: data.existText || null, codeText: null, partial: true, proxyMode, sessionTag, existOnly: true };
 }
 
-async function runDualProbe(payloads, headers, countryIso2) {
+async function runDualProbe(payloads, headers, countryIso2, isPremium) {
+  injectBypassPayload(payloads, isPremium);
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    let existText = null;
-    let codeText = null;
-    try {
-      existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
-    } catch (_) {}
+    await checkProxyHealth(proxyCtx.dispatcher);
+    let existText = null; let codeText = null;
+    try { existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher); } catch (_) {}
     await sleep(25);
-    try {
-      codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
-    } catch (_) {}
+    try { codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher); } catch (_) {}
     if (!existText && !codeText) throw new Error('Dual probe gagal: jaringan');
     return { existText, codeText, partial: !existText || !codeText };
   }, undefined, countryIso2);
   return { existText: data.existText || null, codeText: data.codeText || null, partial: Boolean(data.partial), proxyMode, sessionTag };
 }
-
 
 function computeQualityScore(f) {
   let s = 50;
@@ -406,30 +370,15 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const timers = extractChannelTimers(existResponse, codeResponse);
   const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
 
-  const reasonBlob = (
-    String(existResponse.reason || '') + ' ' + String(codeResponse.reason || '') + ' ' +
-    String(existResponse.status || '') + ' ' + String(codeResponse.status || '')
-  ).toLowerCase();
-  
-  const hasAppeal = Boolean(
-    existResponse.in_app_ban_appeal || codeResponse.in_app_ban_appeal ||
-    existResponse.appeal_token || codeResponse.appeal_token
-  );
+  const reasonBlob = (String(existResponse.reason || '') + ' ' + String(codeResponse.reason || '') + ' ' + String(existResponse.status || '') + ' ' + String(codeResponse.status || '')).toLowerCase();
+  const hasAppeal = Boolean(existResponse.in_app_ban_appeal || codeResponse.in_app_ban_appeal || existResponse.appeal_token || codeResponse.appeal_token);
   const hasViolation = Boolean(existResponse.violation_type || codeResponse.violation_type);
-  const explicitBan =
-    existResponse.status === 'banned' || codeResponse.status === 'banned' ||
-    existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
-    /\bbanned\b/.test(reasonBlob);
-  const blockedHard =
-    (existResponse.reason === 'blocked' || codeResponse.reason === 'blocked') &&
-    (hasViolation || hasAppeal);
+  const explicitBan = existResponse.status === 'banned' || codeResponse.status === 'banned' || existResponse.reason === 'banned' || codeResponse.reason === 'banned' || /\bbanned\b/.test(reasonBlob);
+  const blockedHard = (existResponse.reason === 'blocked' || codeResponse.reason === 'blocked') && (hasViolation || hasAppeal);
   const hardBan = Boolean(explicitBan || blockedHard || (hasViolation && hasAppeal));
   let isBanned = hardBan;
 
-  const isTempLock = reasonBlob.includes('temporarily_unavailable') ||
-    reasonBlob.includes('too_many') || reasonBlob.includes('too_recent') ||
-    reasonBlob.includes('rate_limit') || patternHints.includes('TEMP_LOCK') ||
-    patternHints.includes('RATE_LIMIT');
+  const isTempLock = reasonBlob.includes('temporarily_unavailable') || reasonBlob.includes('too_many') || reasonBlob.includes('too_recent') || reasonBlob.includes('rate_limit') || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT');
 
   const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
   let isCloneBlocked = Boolean((parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) || cloneSig.isCloneBlocked);
@@ -437,177 +386,102 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   if (isBanned) { isCloneBlocked = false; isSecurityBlock = false; }
   if (isCloneBlocked) isSecurityBlock = false;
 
-  const existNoRoutes = Boolean(
-    timers.exist_no_routes ||
-    existResponse.reason === 'no_routes' ||
-    existResponse.reason === 'no_route'
-  );
+  const existNoRoutes = Boolean(timers.exist_no_routes || existResponse.reason === 'no_routes' || existResponse.reason === 'no_route');
   const existAnswered = Boolean(existText && String(existText).trim());
 
-  // Sumber kebenaran SMS CD: HANYA dari timers.sms (yang sudah difilter di extractChannelTimers)
   let smsSeconds = timers.sms;
   const engineCd = Math.max(0, Number(parsed && parsed.cooldownSeconds) || 0);
   const st = String((parsed && parsed.state) || '').toUpperCase();
 
-  // Engine CD hanya dipercaya jika >= 10 menit (bukan echo 125s/300s)
-  if (smsSeconds === 0 && engineCd >= 600 && parsed && parsed.isCooldown && !parsed.isReady) {
-    smsSeconds = engineCd;
-  }
+  if (smsSeconds === 0 && engineCd >= 600 && parsed && parsed.isCooldown && !parsed.isReady) smsSeconds = engineCd;
 
   let isCooldown = false;
   let isReady = false;
 
   if (!isBanned) {
     if (smsSeconds > 0) {
-      isCooldown = true;
-      isReady = false;
+      isCooldown = true; isReady = false;
     } else if (parsed && parsed.isReady) {
-      isReady = true;
-      isCooldown = false;
+      isReady = true; isCooldown = false;
     } else if (st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
-      isReady = true;
-      isCooldown = false;
+      isReady = true; isCooldown = false;
     } else if (existAnswered && !existNoRoutes) {
-      isReady = true;
-      isCooldown = false;
+      isReady = true; isCooldown = false;
     } else if (isTempLock && engineCd >= 600) {
-      isCooldown = true;
-      isReady = false;
-      smsSeconds = engineCd;
+      isCooldown = true; isReady = false; smsSeconds = engineCd;
     } else if (st === 'IN_COOLDOWN' || st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN') {
-      if (engineCd >= 600) {
-        isCooldown = true;
-        smsSeconds = engineCd;
-      } else if (parsed && parsed.isCooldown && engineCd > 0 && timers.exist_sms > 0) {
-        isCooldown = true;
-        smsSeconds = timers.exist_sms;
-      } else if (parsed && parsed.isReady) {
-        isReady = true;
-      } else {
-        isReady = true;
-      }
+      if (engineCd >= 600) { isCooldown = true; smsSeconds = engineCd; }
+      else if (parsed && parsed.isCooldown && engineCd > 0 && timers.exist_sms > 0) { isCooldown = true; smsSeconds = timers.exist_sms; }
+      else if (parsed && parsed.isReady) { isReady = true; }
+      else { isReady = true; }
     } else if (parsed && parsed.isCooldown && timers.exist_sms > 0) {
-      isCooldown = true;
-      smsSeconds = timers.exist_sms;
+      isCooldown = true; smsSeconds = timers.exist_sms;
     } else if (existAnswered) {
       isReady = true;
     }
   }
 
-  const hasDevicePath = Boolean(
-    timers.wa_old_eligible ||
-    timers.device_name ||
-    Number(existResponse.wa_old_eligible || codeResponse.wa_old_eligible || 0) === 1 ||
-    String((parsed && parsed.state) || '').toUpperCase() === 'REGISTERED_ON_DEVICE'
-  );
+  const hasDevicePath = Boolean(timers.wa_old_eligible || timers.device_name || Number(existResponse.wa_old_eligible || codeResponse.wa_old_eligible || 0) === 1 || st === 'REGISTERED_ON_DEVICE');
 
   const channels = {
-    sms: buildChannel(smsSeconds),
-    voice: buildChannel(timers.voice),
-    flash: buildChannel(timers.flash),
-    email: buildChannel(timers.email),
-    wa_old: buildChannel(timers.wa_old)
+    sms: buildChannel(smsSeconds), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash), email: buildChannel(timers.email), wa_old: buildChannel(timers.wa_old)
   };
 
-  if (!isBanned && isCloneBlocked) {
-    isReady = false;
-  }
-  if (!isBanned && isSecurityBlock) {
-    isReady = false;
-  }
+  if (!isBanned && isCloneBlocked) isReady = false;
+  if (!isBanned && isSecurityBlock) isReady = false;
 
   let accountStatus = 'UNKNOWN';
   let description = (parsed && parsed.description) || '';
   if (isBanned) {
-    accountStatus = 'BANNED';
-    description = description || 'Nomor dibatasi / banned';
+    accountStatus = 'BANNED'; description = description || 'Nomor dibatasi / banned';
   } else if (isCloneBlocked) {
-    accountStatus = 'CLONE_BLOCK';
-    description = description || 'Diblokir karena APK tidak resmi / clone';
+    accountStatus = 'CLONE_BLOCK'; description = description || 'Diblokir karena APK tidak resmi / clone';
   } else if (isSecurityBlock) {
-    accountStatus = 'SECURITY_BLOCK';
-    description = description || 'Demi keamanan: tidak dapat masuk saat ini';
+    accountStatus = 'SECURITY_BLOCK'; description = description || 'Demi keamanan: tidak dapat masuk saat ini';
   } else if (isCooldown) {
-    accountStatus = 'IN_COOLDOWN';
-    description = description || ('Cooldown SMS · ' + (channels.sms.uiTimer || '0s'));
+    accountStatus = 'IN_COOLDOWN'; description = description || ('Cooldown SMS · ' + (channels.sms.uiTimer || '0s'));
   } else if (isReady) {
     accountStatus = hasDevicePath ? 'REGISTERED_ON_DEVICE' : 'READY';
     description = description || (hasDevicePath ? 'Siap diverifikasi · perangkat terdaftar' : 'Siap diverifikasi');
   } else if (existNoRoutes) {
-    accountStatus = 'NO_ROUTES';
-    description = description || 'Jalur SMS tidak tersedia';
+    accountStatus = 'NO_ROUTES'; description = description || 'Jalur SMS tidak tersedia';
   }
 
   const maskedEmail = existResponse.email || codeResponse.email || (parsed && parsed.maskedEmail) || null;
-  const hasPassword = Boolean(
-    Number(existResponse.password_eligible || codeResponse.password_eligible || 0) === 1 ||
-    existResponse.security_code_set || codeResponse.security_code_set
-  );
-  const hasPasskey = Boolean(
-    existResponse.passkey_auth_challenge || existResponse.passkey_credential ||
-    codeResponse.passkey_auth_challenge || codeResponse.passkey_credential
-  );
+  const hasPassword = Boolean(Number(existResponse.password_eligible || codeResponse.password_eligible || 0) === 1 || existResponse.security_code_set || codeResponse.security_code_set);
+  const hasPasskey = Boolean(existResponse.passkey_auth_challenge || existResponse.passkey_credential || codeResponse.passkey_auth_challenge || codeResponse.passkey_credential);
   const recommendedMethods = existResponse.recommended_method || codeResponse.recommended_method || [];
   const fallbackMethods = existResponse.fallback_methods || codeResponse.fallback_methods || [];
   const highRereg = Boolean(existResponse.high_sms_rereg_user || codeResponse.high_sms_rereg_user);
   const wipeType = existResponse.wipe_type || codeResponse.wipe_type || null;
   const wipeWait = Math.max(num(existResponse.wipe_wait), num(codeResponse.wipe_wait));
   const flashType = existResponse.flash_type ?? codeResponse.flash_type ?? null;
-  const qualityScore = computeQualityScore({
-    isReady, isBanned, isCloneBlocked, isSecurityBlock, isCooldown,
-    hasDevicePath, maskedEmail, hasPassword, highRereg, existNoRoutes
-  });
-
+  
+  const qualityScore = computeQualityScore({ isReady, isBanned, isCloneBlocked, isSecurityBlock, isCooldown, hasDevicePath, maskedEmail, hasPassword, highRereg, existNoRoutes });
   const confidence = isBanned || isReady || isCooldown ? 0.94 : (existAnswered ? 0.5 : 0.3);
 
   const rawDigits = String(payloads.rawNumber || '').replace(/\D/g, '');
   const safeFmt = rawDigits ? ('+' + rawDigits) : String(payloads.rawNumber || '');
   let formatted = normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone);
   const shown = String(formatted || '').replace(/\D/g, '');
-  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) {
-    formatted = safeFmt;
-  }
+  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) formatted = safeFmt;
 
   return {
-    formattedNumber: formatted || safeFmt,
-    region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country || payloads.phoneInfo.iso)) || null,
-    accountStatus,
-    isBanned,
-    isCloneBlocked,
-    isSecurityBlock,
+    formattedNumber: formatted || safeFmt, region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country || payloads.phoneInfo.iso)) || null,
+    accountStatus, isBanned, isCloneBlocked, isSecurityBlock,
     isReady: isReady && !isCloneBlocked && !isSecurityBlock && !isBanned,
     smsAvailable: (isReady || isCooldown) && !isBanned,
-    smsOptionMissing: existNoRoutes,
-    anyCooldown: isCooldown && !isBanned && !isCloneBlocked && !isSecurityBlock,
-    description,
-    deviceName: timers.device_name || null,
-    waOldEligible: hasDevicePath,
-    channels,
+    smsOptionMissing: existNoRoutes, anyCooldown: isCooldown && !isBanned && !isCloneBlocked && !isSecurityBlock,
+    description, deviceName: timers.device_name || null, waOldEligible: hasDevicePath, channels,
     primaryTimer: { rawSeconds: channels.sms.rawSeconds, uiTimer: channels.sms.uiTimer, humanTime: channels.sms.humanTime },
-    proxyInfo: String(proxyMode || '') + ' · ' + String(sessionTag || ''),
-    proxyTag: sessionTag,
-    proxyCountry: countryIso2,
-    confidence,
-    existClear: isReady || isCooldown || isBanned || isCloneBlocked || isSecurityBlock,
-    needsRecheck: accountStatus === 'UNKNOWN',
-    decisionReasons: [],
-    patternHints,
-    softFallback: false,
-    error: false,
-    partialResponse: Boolean(meta && meta.partial),
-    secondaryPath: isCooldown ? 'cooldown' : (hasDevicePath ? 'device' : (isReady ? 'ready' : null)),
-    secondarySeconds: smsSeconds,
-    engineState: (parsed && parsed.state) || null,
-    maskedEmail,
-    hasPassword,
-    hasPasskey,
+    proxyInfo: String(proxyMode || '') + ' · ' + String(sessionTag || ''), proxyTag: sessionTag, proxyCountry: countryIso2,
+    confidence, existClear: isReady || isCooldown || isBanned || isCloneBlocked || isSecurityBlock, needsRecheck: accountStatus === 'UNKNOWN',
+    decisionReasons: [], patternHints, softFallback: false, error: false, partialResponse: Boolean(meta && meta.partial),
+    secondaryPath: isCooldown ? 'cooldown' : (hasDevicePath ? 'device' : (isReady ? 'ready' : null)), secondarySeconds: smsSeconds,
+    engineState: (parsed && parsed.state) || null, maskedEmail, hasPassword, hasPasskey,
     recommendedMethods: Array.isArray(recommendedMethods) ? recommendedMethods : [],
     fallbackMethods: Array.isArray(fallbackMethods) ? fallbackMethods : [],
-    highRereg,
-    wipeType,
-    wipeWait,
-    flashType,
-    qualityScore
+    highRereg, wipeType, wipeWait, flashType, qualityScore
   };
 }
 
@@ -624,9 +498,7 @@ function mergeConsensus(results) {
     else score.cooldown += w * 0.5;
   }
   let best = 'cooldown'; let bestVal = -1;
-  for (const k of Object.keys(score)) {
-    if (score[k] > bestVal) { bestVal = score[k]; best = k; }
-  }
+  for (const k of Object.keys(score)) { if (score[k] > bestVal) { bestVal = score[k]; best = k; } }
   const base = results.filter((r) => {
     if (best === 'ban') return r.isBanned;
     if (best === 'clone') return r.isCloneBlocked || r.isSecurityBlock;
@@ -635,10 +507,8 @@ function mergeConsensus(results) {
     if (best === 'ready') return r.isReady;
     return false;
   }).sort((a, b) => {
-    const ta = (a.primaryTimer && a.primaryTimer.rawSeconds) || 0;
-    const tb = (b.primaryTimer && b.primaryTimer.rawSeconds) || 0;
-    const stableA = ta > 0 ? 1 : 0;
-    const stableB = tb > 0 ? 1 : 0;
+    const ta = (a.primaryTimer && a.primaryTimer.rawSeconds) || 0; const tb = (b.primaryTimer && b.primaryTimer.rawSeconds) || 0;
+    const stableA = ta > 0 ? 1 : 0; const stableB = tb > 0 ? 1 : 0;
     if (stableB !== stableA) return stableB - stableA;
     return (b.confidence || 0) - (a.confidence || 0);
   })[0] || results[0];
@@ -650,75 +520,42 @@ function softFallback(rawNumber, payloads, countryIso2, lastError) {
   const safeFmt = rawDigits ? ('+' + rawDigits) : String(rawNumber || '');
   let formatted = normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null);
   const shown = String(formatted || '').replace(/\D/g, '');
-  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) {
-    formatted = safeFmt;
-  }
+  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) formatted = safeFmt;
   return {
-    formattedNumber: formatted || safeFmt,
-    region: null,
-    accountStatus: 'UNKNOWN',
-    isBanned: false,
-    isCloneBlocked: false,
-    isSecurityBlock: false,
-    isReady: false,
-    smsAvailable: null,
-    smsOptionMissing: false,
-    anyCooldown: false,
-    description: 'Respons tidak stabil — coba ulang sebentar.',
-    deviceName: null,
-    waOldEligible: false,
-    channels: {
-      sms: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0),
-      email: buildChannel(0), wa_old: buildChannel(0)
-    },
-    primaryTimer: { rawSeconds: 0, uiTimer: '0s', humanTime: 'Ready' },
-    proxyInfo: 'FALLBACK', proxyTag: 'FALLBACK', proxyCountry: countryIso2,
-    softFallback: true,
-    confidence: 0.3,
-    needsRecheck: true,
-    decisionReasons: ['soft_fallback'],
-    patternHints: ['SOFT_FALLBACK'],
-    error: false,
-    secondaryPath: null,
-    secondarySeconds: 0,
-    maskedEmail: null,
-    hasPassword: false,
-    hasPasskey: false,
-    recommendedMethods: [],
-    fallbackMethods: [],
-    highRereg: false,
-    wipeType: null,
-    wipeWait: 0,
-    flashType: null,
-    qualityScore: 40,
-    engineState: null
+    formattedNumber: formatted || safeFmt, region: null, accountStatus: 'UNKNOWN', isBanned: false, isCloneBlocked: false, isSecurityBlock: false,
+    isReady: false, smsAvailable: null, smsOptionMissing: false, anyCooldown: false, description: 'Respons tidak stabil — coba ulang sebentar.',
+    deviceName: null, waOldEligible: false, channels: { sms: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0), email: buildChannel(0), wa_old: buildChannel(0) },
+    primaryTimer: { rawSeconds: 0, uiTimer: '0s', humanTime: 'Ready' }, proxyInfo: 'FALLBACK', proxyTag: 'FALLBACK', proxyCountry: countryIso2,
+    softFallback: true, confidence: 0.3, needsRecheck: true, decisionReasons: ['soft_fallback'], patternHints: ['SOFT_FALLBACK'], error: false,
+    secondaryPath: null, secondarySeconds: 0, maskedEmail: null, hasPassword: false, hasPasskey: false, recommendedMethods: [], fallbackMethods: [],
+    highRereg: false, wipeType: null, wipeWait: 0, flashType: null, qualityScore: 40, engineState: null
   };
 }
 
 async function checkWhatsAppCooldown(rawNumber, options) {
   const opts = options || {};
+  const isPremium = Boolean(opts.isPremium); // Parameter baru untuk force email
+  
   if (!opts.skipSticky && !opts.forceRefresh && opts.wave !== 'exist') {
     const cached = stickyGet(rawNumber);
-    if (cached) {
-      return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
-    }
+    if (cached) return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
   }
   const payloads = await WADetector.buildDualPayloads(String(rawNumber));
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
   payloads.rawNumber = String(rawNumber);
   const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
   const headers = buildHeaders(payloads.userAgent, countryIso2);
+  
   if (opts.wave === 'exist') {
     try {
-      const probe = await runExistOnlyProbe(payloads, headers, countryIso2);
+      const probe = await runExistOnlyProbe(payloads, headers, countryIso2, isPremium);
       return classifyFromResponses(payloads, probe.existText, null, probe.proxyMode, probe.sessionTag, countryIso2, { partial: true, existOnly: true });
-    } catch (err) {
-      return softFallback(rawNumber, payloads, countryIso2, err);
-    }
+    } catch (err) { return softFallback(rawNumber, payloads, countryIso2, err); }
   }
+  
   if (!(opts.wave === 'full' || opts.wave === 'dual')) {
     try {
-      const existProbe = await runExistOnlyProbe(payloads, headers, countryIso2);
+      const existProbe = await runExistOnlyProbe(payloads, headers, countryIso2, isPremium);
       const existResult = classifyFromResponses(payloads, existProbe.existText, null, existProbe.proxyMode, existProbe.sessionTag, countryIso2, { partial: true, existOnly: true });
       if (existResult.existClear && !existResult.needsRecheck) {
         const outClear = { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
@@ -727,54 +564,38 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       }
     } catch (_) {}
   }
+  
   const rounds = [];
   let lastError = null;
   for (let attempt = 1; attempt <= INTERNAL_RETRIES; attempt++) {
     try {
-      const dual = await runDualProbe(payloads, headers, countryIso2);
+      const dual = await runDualProbe(payloads, headers, countryIso2, isPremium);
       const result = classifyFromResponses(payloads, dual.existText, dual.codeText, dual.proxyMode, dual.sessionTag, countryIso2, { partial: dual.partial, existOnly: false });
       rounds.push(result);
       if (!result.needsRecheck && result.accountStatus !== 'UNKNOWN') {
         if (!CONSENSUS_ENABLED || result.confidence >= LOW_CONFIDENCE_THRESHOLD) {
           if (result.isBanned && !(result.patternHints && result.patternHints.includes('HARD_BAN')) && attempt < INTERNAL_RETRIES) {
-            await sleep(100);
-            continue;
+            await sleep(100); continue;
           }
           const out = { ...result, probeMode: 'dual', consensusRounds: rounds.length };
           stickySet(rawNumber, out);
           return out;
         }
       }
-      if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) {
-        await sleep(200 + Math.floor(Math.random() * 300));
-        continue;
-      }
-      if (rounds.length >= 2) {
-        const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
-        stickySet(rawNumber, mc);
-        return mc;
-      }
+      if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) { await sleep(200 + Math.floor(Math.random() * 300)); continue; }
+      if (rounds.length >= 2) { const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' }; stickySet(rawNumber, mc); return mc; }
       return { ...result, probeMode: 'dual', consensusRounds: rounds.length };
     } catch (err) {
       lastError = err;
       if (attempt < INTERNAL_RETRIES) {
         const msg = String((err && err.message) || '');
-        const wait = /too_many|rate|timeout|network|transport/i.test(msg)
-          ? (800 * attempt + Math.floor(Math.random() * 700))
-          : (300 + Math.floor(Math.random() * 400));
-        await sleep(wait);
-        continue;
+        const wait = /too_many|rate|timeout|network|transport|PROXY/i.test(msg) ? (800 * attempt + Math.floor(Math.random() * 700)) : (300 + Math.floor(Math.random() * 400));
+        await sleep(wait); continue;
       }
     }
   }
-  if (rounds.length >= 2) {
-    const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
-    stickySet(rawNumber, mc);
-    return mc;
-  }
-  if (rounds.length === 1 && rounds[0].accountStatus !== 'UNKNOWN') {
-    return { ...rounds[0], consensusRounds: 1, probeMode: 'dual' };
-  }
+  if (rounds.length >= 2) { const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' }; stickySet(rawNumber, mc); return mc; }
+  if (rounds.length === 1 && rounds[0].accountStatus !== 'UNKNOWN') return { ...rounds[0], consensusRounds: 1, probeMode: 'dual' };
   return softFallback(rawNumber, payloads, countryIso2, lastError);
 }
 
