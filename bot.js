@@ -3,10 +3,10 @@ const { Telegraf, Markup } = require('telegraf');
 const {
   redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
   getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, getUserRank, redeemReferralReward
-} = require('./database');} = require('./database');
+} = require('./database');
 const {
-  escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
-  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary, renderExportDetail
+  escapeHtml, formatIDR, renderDashboard, renderStoreCatalog,
+  renderPackageDetailCard, renderPaymentMaintenanceCard
 } = require('./themes');
 
 const { parseDetectionInput } = require('./detectInput');
@@ -168,8 +168,6 @@ async function showCheckout(ctx, pkg, edit) {
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
 }
-
-bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
 
 bot.catch((err, ctx) => {
   console.error('[bot.catch]', err && err.stack || err);
