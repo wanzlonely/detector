@@ -2,14 +2,16 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const {
   redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
-  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, redeemReferralReward,
-  consumeQuota, addCheckLog, getCachedCheckResult, setCachedCheckResult, qualifyReferral
+  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, getUserRank, redeemReferralReward,
+  consumeQuota, addCheckLog, getCachedCheckResult, setCachedCheckResult, qualifyReferral,
+  incrementUserChecks
 } = require('./database');
 const {
   escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
-  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary
+  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary, renderExportDetail
 } = require('./themes');
-const { checkWhatsAppCooldown } = require('./waChecker');
+const waChecker = require('./waChecker');
+const checkWhatsAppCooldown = waChecker.checkWhatsAppCooldown;
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
@@ -55,18 +57,20 @@ function styledCallback(text, data, style) {
 }
 
 const USER_KEYBOARD = Markup.keyboard([
-  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
-  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
-  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }]
-]).resize().oneTime().placeholder('Pilih menu…');
+  ['⌖ DETECT'],
+  ['✧ BELI PREMIUM', '◈ STATUS'],
+  ['♛ LEADERBOARD', '♧ REFERRAL'],
+  ['✉︎ HUBUNGI ADMIN']
+]).resize().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
-  [{ text: '⌖ DETECT' }, { text: '✧ BELI PREMIUM' }],
-  [{ text: '◈ STATUS' }, { text: '♛ LEADERBOARD' }],
-  [{ text: '♧ REFERRAL' }, { text: '✉︎ HUBUNGI ADMIN' }],
-  [{ text: '♛ OWNER CONSOLE' }],
-  [{ text: '✚ AKTIVASI PREMIUM' }, { text: '▤ BROADCAST' }]
-]).resize().oneTime().placeholder('Pilih fungsi owner…');
+  ['⌖ DETECT'],
+  ['✧ BELI PREMIUM', '◈ STATUS'],
+  ['♛ LEADERBOARD', '♧ REFERRAL'],
+  ['✉︎ HUBUNGI ADMIN'],
+  ['♛ OWNER CONSOLE'],
+  ['✚ AKTIVASI PREMIUM', '▤ BROADCAST']
+]).resize().placeholder('Pilih fungsi owner…');
 
 const OWNER_ACTION_TTL = 300;
 async function setOwnerAction(userId, action) {
@@ -151,8 +155,10 @@ async function showPackage(ctx, pkg, edit) {
   const user = await getEffectiveUser(ctx);
   const message = renderPackageDetailCard({ user, pkg });
   const keyboard = Markup.inlineKeyboard([
-    [styledCallback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success')],
-    [styledCallback('↶ KEMBALI', 'store:premium', 'danger')]
+    [
+      styledCallback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success'),
+      styledCallback('↶ KEMBALI', 'store:premium', 'danger')
+    ]
   ]);
   if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
   return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
@@ -223,14 +229,18 @@ async function showStatus(ctx) {
   return ctx.reply(require('./themes').renderStatus({ user, isVip: isOwner(ctx) || isUserVip(user), isOwner: isOwner(ctx), referralStats }), { parse_mode: 'HTML' });
 }
 async function showLeaderboard(ctx) {
-  return ctx.reply(require('./themes').renderLeaderboard(await getLeaderboard(10)), { parse_mode: 'HTML' });
+  const [rows, myRank] = await Promise.all([
+    getLeaderboard(10),
+    getUserRank(ctx.from.id)
+  ]);
+  return ctx.reply(require('./themes').renderLeaderboard(rows, myRank), { parse_mode: 'HTML' });
 }
 async function showReferral(ctx) {
   const me = await bot.telegram.getMe();
   const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
   const stats = await getReferralStats(ctx.from.id);
   const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
-  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl)], [styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]]) });
+  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl), styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]]) });
 }
 bot.hears('◈ STATUS', showStatus);
 bot.hears('♛ LEADERBOARD', showLeaderboard);
@@ -242,31 +252,36 @@ function extractPhoneCandidates(text) {
   const raw = String(text);
   const phones = [];
   const seen = new Set();
-  const pattern = /(?:\+|00)?[\d][\d\s\-().]{6,20}\d/g;
-  let match;
-  while ((match = pattern.exec(raw)) !== null) {
-    let token = match[0].trim();
-    token = token.replace(/[^\d+]+$/g, '').replace(/^[^\d+]+/g, '');
-    const hasPlus = token.startsWith('+') || token.startsWith('00');
-    let digits = token.replace(/\D/g, '');
+
+  function pushDigits(digits) {
+    if (!digits) return;
+    digits = String(digits).replace(/\D/g, '');
     if (digits.startsWith('00')) digits = digits.slice(2);
-    if (digits.length < 8 || digits.length > 15) continue;
-    if (digits.length <= 4) continue;
-    if (/^(19|20)\d{2}$/.test(digits)) continue;
-    if (seen.has(digits)) continue;
+    if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) {
+      digits = '62' + digits.slice(1);
+    }
+    if (digits.length < 8 || digits.length > 15) return;
+    if (/^(19|20)\d{2}$/.test(digits)) return;
+    if (seen.has(digits)) return;
     seen.add(digits);
-    phones.push(hasPlus || digits.length >= 10 ? ('+' + digits) : digits);
+    phones.push('+' + digits);
   }
+
+  const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const m = line.match(/(?:\+|00)?\d[\d\s\-().]{6,18}\d/);
+    if (m) pushDigits(m[0]);
+    else pushDigits(line);
+  }
+
   if (!phones.length) {
-    const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
-    for (const line of lines) {
-      const digits = line.replace(/\D/g, '');
-      if (digits.length < 8 || digits.length > 15) continue;
-      if (seen.has(digits)) continue;
-      seen.add(digits);
-      phones.push(line.includes('+') ? ('+' + digits) : digits);
+    const pattern = /(?:\+|00)?\d(?:[\d\-().]{6,18})\d/g;
+    let match;
+    while ((match = pattern.exec(raw)) !== null) {
+      pushDigits(match[0]);
     }
   }
+
   return phones;
 }
 
@@ -309,43 +324,149 @@ bot.action('detect:cancel_prompt', async (ctx) => {
   return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 });
 
+bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery('Memperbarui status real-time…').catch(() => {});
+  const userId = ctx.from && ctx.from.id;
+  const jobId = ctx.match[1];
+  if (!userId || !jobId) return;
+  const key = 'detect:refresh:' + userId + ':' + jobId;
+  let numbers = null;
+  try {
+    const raw = await redis.get(key);
+    if (raw) numbers = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (_) {}
+  if (!Array.isArray(numbers) || !numbers.length) {
+    return ctx.reply('✦ <b>ᴅᴀᴛᴀ ʀᴇғʀᴇsʜ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>sɪʟᴀᴋᴀɴ ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.</blockquote>', { parse_mode: 'HTML' });
+  }
+  return processDetection(ctx, numbers, { forceRefresh: true });
+});
+
+bot.action('detect:info', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const infoText = [
+    'ⓘ ᴋᴇᴛᴇʀᴀɴɢᴀɴ ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ',
+    '──────────────────────────────',
+    '',
+    '✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ',
+    '  └ ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ᴛᴇʀɪᴍᴀ ᴋᴏᴅᴇ ᴏᴛᴘ.',
+    '',
+    '◐ ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ',
+    '  └ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ sᴍs, ᴛᴜɴɢɢᴜ ᴛɪᴍᴇʀ sᴇʟᴇsᴀɪ.',
+    '',
+    '◈ sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ',
+    '  └ ᴅɪᴛᴀʜᴀɴ sɪsᴛᴇᴍ ("ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴀsᴜᴋ sᴀᴀᴛ ɪɴɪ").',
+    '',
+    '△ ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ',
+    '  └ ᴡᴀᴊɪʙ ʟᴏɢɪɴ ᴍᴇɴɢɢᴜɴᴀᴋᴀɴ ᴡʜᴀᴛsᴀᴘᴘ ʀᴇsᴍɪ.',
+    '',
+    '✕ ᴅɪʙᴀɴ',
+    '  └ ɴᴏᴍᴏʀ ᴛᴇʀʙʟᴏᴋɪʀ ᴀᴋɪʙᴀᴛ ᴘᴇʟᴀɴɢɢᴀʀᴀɴ.',
+    '',
+    '⊘ ɴᴏ ʀᴏᴜᴛᴇs',
+    '  └ ᴊᴀʟᴜʀ ᴏᴛᴘ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.',
+    '',
+    '──────────────────────────────',
+    '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ  ⦂ ᴋᴏᴅᴇ ᴍᴀsᴜᴋ ᴋᴇ ᴀᴘʟɪᴋᴀsɪ ᴡᴀ ʟᴀᴍᴀ.',
+    '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʙɪsᴀ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴛᴇʟᴇᴘᴏɴ.',
+    '──────────────────────────────',
+    '⇩ ᴇxᴘᴏʀᴛ ᴅᴇᴛᴀɪʟ ⦂ ᴜɴᴅᴜʜ sᴇᴍᴜᴀ ʜᴀsɪʟ (.ᴛxᴛ)'
+  ].join('\n');
+  return ctx.reply(infoText, { parse_mode: 'HTML' });
+});
+
+bot.action(/^detect:export_detail:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery('Menyiapkan file…').catch(() => {});
+  const jobId = ctx.match[1];
+  const userId = ctx.from && ctx.from.id;
+  const resultKey = 'detect:results:' + userId + ':' + jobId;
+  let payload = null;
+  try {
+    const raw = await redis.get(resultKey);
+    payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (_) {}
+  
+  if (!payload || !payload.detailMap || Object.keys(payload.detailMap).length === 0) {
+    return ctx.reply('✕ ᴛɪᴅᴀᴋ ᴀᴅᴀ ᴅᴀᴛᴀ ᴜɴᴛᴜᴋ ᴅɪᴇxᴘᴏʀᴛ.', { parse_mode: 'HTML' });
+  }
+  
+  const textContent = renderExportDetail(payload.detailMap);
+  const filename = 'detail_detect_' + jobId + '.txt';
+  
+  try {
+    await ctx.replyWithDocument(
+      { source: Buffer.from(textContent, 'utf8'), filename: filename },
+      { caption: '⇩ <b>ᴇxᴘᴏʀᴛ ᴅᴇᴛᴀɪʟ</b>\n▸ ᴊᴜᴍʟᴀʜ ⦂ <b>' + Object.keys(payload.detailMap).length + '</b> ɴᴏᴍᴏʀ', parse_mode: 'HTML' }
+    );
+  } catch (err) {
+    return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ ғɪʟᴇ ᴅᴇᴛᴀɪʟ.', { parse_mode: 'HTML' });
+  }
+});
+
 function buildProgressBar(pct) {
   const filled = Math.round(pct / 10);
   return '●'.repeat(filled) + '○'.repeat(10 - filled);
 }
 
 function formatCooldownSmallCaps(seconds) {
-  const sec = Math.max(0, Math.ceil(Number(seconds) || 0));
+  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
   if (sec <= 0) return '0ᴅ';
-
-  // Show exact seconds below one minute. At one minute or more,
-  // round upward so the displayed wait never understates the remaining time.
-  if (sec < 60) return sec + 'ᴅ';
-
-  // Keep longer waits at their displayed whole-minute value (5m20s -> 5m),
-  // but round a near-immediate wait up (1m10s -> 2m).
-  const totalMinutes = sec < 120 ? Math.ceil(sec / 60) : Math.floor(sec / 60);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
   const parts = [];
   if (h > 0) parts.push(h + 'ᴊ');
   if (m > 0) parts.push(m + 'ᴍ');
-  return parts.join(' ') || '1ᴍ';
+  if (s > 0 || parts.length === 0) parts.push(s + 'ᴅ');
+  return parts.join(' ');
 }
 
-function buildProgressText(processed, total, stageLabel) {
+function toSmallCapsDevice(name) {
+  if (!name) return 'ᴜɴᴋɴᴏᴡɴ';
+  const map = {
+    a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ', j: 'ᴊ',
+    k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'ǫ', r: 'ʀ', s: 's', t: 'ᴛ',
+    u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', x: 'x', y: 'ʏ', z: 'ᴢ'
+  };
+  return String(name).toLowerCase().replace(/[a-z]/g, (ch) => map[ch] || ch);
+}
+function deviceLabel(r) {
+  if (r && (r.deviceName || r.waOldEligible)) return '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ';
+  return '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ';
+}
+
+const PROGRESS_SPINNERS = ['◐', '◓', '◑', '◒'];
+let progressSpinIdx = 0;
+
+function buildProgressText(processed, total, stageLabel, currentNumber) {
   const safeTotal = total > 0 ? total : 1;
   const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
   const pct = Math.round((safeProcessed / safeTotal) * 100);
-  const title = stageLabel || 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+  const isDone = safeProcessed >= safeTotal;
+  const title = isDone
+    ? '✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ'
+    : '◔  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ʙᴇʀᴊᴀʟᴀɴ';
+  let currentLine;
+  if (isDone) {
+    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ <b>sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ</b>';
+  } else {
+    const spin = PROGRESS_SPINNERS[Math.floor(safeProcessed) % PROGRESS_SPINNERS.length];
+    const num = currentNumber || '-';
+    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ ' + spin + ' <code>' + num + '</code>';
+  }
   return (
-    '⟳ <b>' + title + '</b>\n\n' +
-    buildProgressBar(pct) + '  ' + pct + '%\n' +
-    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ'
+    title + '\n\n' +
+    buildProgressBar(pct) + '  <b>' + pct + '%</b>\n' +
+    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ\n' +
+    currentLine + '\n' +
+    '──────────────────────'
   );
 }
 
-async function processDetection(ctx, numbers) {
+async function processDetection(ctx, numbers, detectOpts) {
+  if (typeof checkWhatsAppCooldown !== 'function') {
+    return ctx.reply('✕ <b>ᴋᴇsᴀʟᴀʜᴀɴ sɪsᴛᴇᴍ</b>\n\n<blockquote>Fungsi detektor tidak ditemukan. Pastikan file waChecker.js sudah benar dan di-restart.</blockquote>', { parse_mode: 'HTML' });
+  }
+  detectOpts = detectOpts || {};
   const userId = ctx.from.id;
   const jobId = Date.now().toString(36);
   await redis.set('detect:active:' + userId, jobId, { ex: 600 });
@@ -356,69 +477,144 @@ async function processDetection(ctx, numbers) {
   let currentStageLabel = 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
   let stageProcessed = 0;
   let stageTotal = total;
+  let currentNumber = '-';
+  const inFlight = new Set();
+  let lastProgressEdit = 0;
+  let progressTimer = null;
   try {
-    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
+    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel, currentNumber), { parse_mode: 'HTML' });
   } catch (_) {}
-  async function updateProgress() {
+  function pickCurrentNumber() {
+    if (inFlight.size === 0) return currentNumber || '-';
+    return inFlight.values().next().value || currentNumber || '-';
+  }
+  async function updateProgress(force) {
     if (!progressMsg) return;
+    const now = Date.now();
+    if (!force && now - lastProgressEdit < 450) {
+      if (!progressTimer) {
+        progressTimer = setTimeout(() => {
+          progressTimer = null;
+          updateProgress(true).catch(() => {});
+        }, 450 - (now - lastProgressEdit));
+      }
+      return;
+    }
+    lastProgressEdit = now;
+    currentNumber = pickCurrentNumber();
     try {
-      await ctx.telegram.editMessageText(progressMsg.chat.id, progressMsg.message_id, undefined, buildProgressText(stageProcessed, stageTotal, currentStageLabel), { parse_mode: 'HTML' });
+      await ctx.telegram.editMessageText(
+        progressMsg.chat.id,
+        progressMsg.message_id,
+        undefined,
+        buildProgressText(stageProcessed, stageTotal, currentStageLabel, currentNumber),
+        { parse_mode: 'HTML' }
+      );
     } catch (_) {}
   }
   function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+  function preserveNumber(raw, result) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    const fallback = digits ? ('+' + digits) : String(raw || '');
+    if (!result) return fallback;
+    const shown = String(result.formattedNumber || '').replace(/\D/g, '');
+    if (!shown || (digits.length >= 10 && shown.length < digits.length - 1) || (digits.length >= 10 && !digits.endsWith(shown.slice(-8)))) {
+      result.formattedNumber = fallback;
+    } else if (!String(result.formattedNumber || '').startsWith('+') && digits) {
+      result.formattedNumber = '+' + shown;
+    }
+    return result.formattedNumber || fallback;
+  }
   async function checkOne(raw, waveOpts) {
     const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
     if (stop) return { cancelled: true };
-    try {
-      const opts = Object.assign({ skipSticky: true }, waveOpts || {});
-      let result = await checkWhatsAppCooldown(raw, opts);
-      if (result && !result.cancelled && (result.softFallback || result.needsRecheck || (Number(result.confidence) || 0) < 0.55)) {
-        if ((waveOpts && waveOpts.wave) !== 'full') {
-          try {
-            const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
-            if (retry && !retry.error && (Number(retry.confidence) || 0) >= (Number(result.confidence) || 0)) result = retry;
-          } catch (_) {}
-        }
-      }
-      if (result && !result.error) {
-        await addCheckLog(userId, result.formattedNumber || raw, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-');
-        return result;
-      }
-    } catch (err) {
-      try {
-        const retry = await checkWhatsAppCooldown(raw, { wave: 'full', skipSticky: true });
-        if (retry && !retry.error) {
-          await addCheckLog(userId, retry.formattedNumber || raw, retry.accountStatus || '-', retry.proxyTag || '-');
-          return retry;
-        }
-      } catch (_) {}
-      const digits = String(raw || '').replace(/\D/g, '');
-      return { formattedNumber: digits ? ('+' + digits) : String(raw || ''), isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, needsRecheck: true, description: 'Respons tidak stabil · coba ulang' };
-    }
     const digits = String(raw || '').replace(/\D/g, '');
-    return { formattedNumber: digits ? ('+' + digits) : String(raw || ''), isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.3, description: 'Respons tidak stabil · coba ulang' };
+    const safeNumber = digits ? ('+' + digits) : String(raw || '');
+    const opts = Object.assign({ skipSticky: true, forceRefresh: Boolean(detectOpts.forceRefresh) }, waveOpts || {});
+    let last = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const stop2 = await redis.get('detect:stop:' + userId + ':' + jobId);
+      if (stop2) return { cancelled: true };
+      try {
+        let result = await checkWhatsAppCooldown(raw, opts);
+        if (result && !result.cancelled) {
+          preserveNumber(raw, result);
+          const isNetFail = result.softFallback || result.needsRecheck ||
+            (result.description && /transport|network|too_many|timeout|ECONN|unstable/i.test(String(result.description)));
+          if (isNetFail && attempt < 2) {
+            last = result;
+            await sleep(250 * attempt + Math.floor(Math.random() * 200));
+            continue;
+          }
+          if (result.softFallback && (result.isReady || result.anyCooldown) && !result.isBanned) {
+            result.softFallback = false;
+            result.needsRecheck = false;
+          }
+          if (result.isBanned && (result.softFallback || result.needsRecheck || (result.confidence || 0) < 0.8)) {
+            result.isBanned = false;
+            result.accountStatus = 'UNKNOWN';
+            result.needsRecheck = true;
+            result.softFallback = true;
+          }
+          if (!result.error && !result.softFallback) {
+            await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-').catch(() => {});
+          }
+          return result;
+        }
+      } catch (err) {
+        const errMsg = String((err && err.message) || 'network');
+        last = {
+          formattedNumber: safeNumber,
+          isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false,
+          accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.2,
+          needsRecheck: true,
+          description: errMsg.includes('not a function') ? 'Kesalahan sistem detektor' : errMsg.slice(0, 120)
+        };
+        await sleep(300 * attempt + Math.floor(Math.random() * 250));
+      }
+    }
+    if (last) {
+      preserveNumber(raw, last);
+      return last;
+    }
+    return {
+      formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false,
+      anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true,
+      confidence: 0.2, needsRecheck: true, description: 'Respons tidak stabil · coba ulang'
+    };
   }
   async function runPool(indexes, waveOpts) {
     let cursor = 0;
     stageProcessed = 0;
     stageTotal = indexes.length || 1;
     let conc;
-    if (indexes.length >= 20) conc = 5;
-    else if (indexes.length >= 12) conc = 6;
-    else if (indexes.length >= 6) conc = 7;
-    else conc = Math.min(8, indexes.length || 1);
+    if (indexes.length >= 20) conc = 6;
+    else if (indexes.length >= 12) conc = 5;
+    else if (indexes.length >= 6) conc = 4;
+    else conc = Math.min(3, indexes.length || 1);
     const CONCURRENCY_SAFE = Math.max(1, conc);
     async function worker(workerId) {
-      if (workerId > 0) await sleep(workerId * 70);
+      if (workerId > 0) await sleep(workerId * 40);
       while (cursor < indexes.length) {
         const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
         if (stop) return;
         const pos = cursor++;
         if (pos >= indexes.length) return;
         const i = indexes[pos];
-        results[i] = await checkOne(numbers[i], waveOpts);
+        const rawNum = numbers[i];
+        const digs = String(rawNum || '').replace(/\D/g, '');
+        const displayNum = digs ? ('+' + digs) : String(rawNum || '-');
+        inFlight.add(displayNum);
+        currentNumber = pickCurrentNumber();
+        await updateProgress(false);
+        try {
+          results[i] = await checkOne(numbers[i], waveOpts);
+        } finally {
+          inFlight.delete(displayNum);
+        }
         stageProcessed += 1;
-        if (stageProcessed === 1 || stageProcessed === stageTotal || stageProcessed % 2 === 0) await updateProgress();
+        currentNumber = pickCurrentNumber();
+        await updateProgress(stageProcessed === stageTotal);
       }
     }
     await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
@@ -426,171 +622,388 @@ async function processDetection(ctx, numbers) {
     await updateProgress();
   }
   const allIdx = Array.from({ length: total }, (_, i) => i);
-  if (total >= 4) {
-    currentStageLabel = 'ᴛᴀʜᴀᴘ 1/2 · sᴄᴀɴ ᴄᴇᴘᴀᴛ';
-    await runPool(allIdx, { wave: 'exist' });
-    const needFull = [];
-    for (let i = 0; i < total; i++) {
-      const r = results[i];
-      if (!r || r.cancelled) continue;
-      const conf = Number(r.confidence) || 0;
-      const clearLiveCooldown = r.anyCooldown && r.primaryTimer && r.primaryTimer.rawSeconds > 0 && conf >= 0.82;
-      const clearBan = r.isBanned && conf >= 0.88;
-      const clearReady = r.isReady && (r.existClear || conf >= 0.84) && !r.anyCooldown;
-      const clearClone = (r.isCloneBlocked || r.isSecurityBlock) && conf >= 0.85;
-      if (clearLiveCooldown || clearBan || clearReady || clearClone) continue;
-      needFull.push(i);
-    }
-    if (needFull.length) {
-      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · ᴠᴇʀɪғɪᴋᴀsɪ ᴅᴀʟᴀᴍ';
-      await runPool(needFull, { wave: 'full' });
-    } else {
-      currentStageLabel = 'ᴛᴀʜᴀᴘ 2/2 · sᴇʟᴇsᴀɪ';
-      stageProcessed = total;
-      stageTotal = total;
-      await updateProgress();
-    }
-  } else {
-    currentStageLabel = total > 1 ? 'ᴛᴀʜᴀᴘ 1/1 · ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
-    await runPool(allIdx, { wave: 'full' });
-  }
+  currentStageLabel = total > 1 ? 'ᴍᴇᴍᴘʀᴏsᴇs ' + total + ' ɴᴏᴍᴏʀ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+  await runPool(allIdx, { wave: 'full' });
   const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
   await redis.del('detect:active:' + userId);
   await redis.del('detect:stop:' + userId + ':' + jobId);
   if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 
-  const groups = { ready: [], cooldown: [], clone: [], restricted: [], notRegistered: [], noRoutes: [], other: [] };
-  for (const r of results) {
+  const groups = { ready: [], cooldown: [], security: [], clone: [], restricted: [], noroutes: [], other: [] };
+  const detailMap = {};
+  for (let gi = 0; gi < results.length; gi++) {
+    const r = results[gi];
     if (!r || r.cancelled) continue;
-    const num = r.formattedNumber || '-';
-    const deviceTag = r.deviceStatus === 'ON_DEVICE'
-      ? ' · ᴏɴ-ᴅᴇᴠɪᴄᴇ' + (r.deviceName ? ' (' + r.deviceName + ')' : '')
-      : (r.deviceStatus === 'OFF_DEVICE' ? ' · ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ' : '');
+    const origDigits = String(numbers[gi] || '').replace(/\D/g, '');
+    const origNum = origDigits ? ('+' + origDigits) : null;
+    let num = origNum || r.formattedNumber || '-';
+    const shownDigits = String(num).replace(/\D/g, '');
+    if (origDigits && shownDigits && shownDigits !== origDigits) num = origNum;
+    r.formattedNumber = num;
+    detailMap[num] = r;
+
+    const dev = deviceLabel(r);
+
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
-      groups.restricted.push('· ' + num + ' ⦂ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴅᴀꜰᴛᴀʀᴋᴀɴ');
-    } else if (r.isCloneBlocked || r.isSecurityBlock) {
-      const sec = r.secondaryPath || (
-        r.deviceStatus === 'ON_DEVICE' || r.deviceStatus === 'DEVICE_PATH' ? 'device' :
-        ((Number(r.secondarySeconds) || (r.primaryTimer && r.primaryTimer.rawSeconds) || 0) > 0 ? 'cooldown' :
-        (r.isReady ? 'ready' : null))
-      );
-      let label = 'sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs';
-      let sortSecs = 0;
-      if (sec === 'device') {
-        label = 'ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ';
-        sortSecs = -1;
-      } else if (sec === 'cooldown') {
-        let secs = Number(r.secondarySeconds) || 0;
-        if (!secs && r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
-        if (!secs && r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-        label = secs > 0 ? formatCooldownSmallCaps(secs) : 'ᴄᴏᴏʟᴅᴏᴡɴ';
-        sortSecs = secs > 0 ? secs : 999999;
-      } else if (sec === 'ready') {
-        label = 'sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs';
-        sortSecs = 0;
-      }
-      groups.clone.push({ line: '· ' + num + ' ⦂ ' + label + deviceTag, secs: sortSecs });
-    } else if (r.registrationStatus === 'NOT_REGISTERED' || r.accountStatus === 'NOT_REGISTERED') {
-      groups.notRegistered.push('· ' + num + ' ⦂ ɴᴏᴛ ʀᴇɢɪsᴛᴇʀᴇᴅ');
-    } else if (r.routeStatus === 'NO_ROUTES' || r.accountStatus === 'NO_ROUTES') {
-      groups.noRoutes.push('· ' + num + ' ⦂ ɴᴏ ʀᴏᴜᴛᴇs' + deviceTag);
-    } else if (r.isReady && !r.anyCooldown) {
-      if (r.deviceStatus === 'ON_DEVICE') {
-        groups.ready.push({ line: '· ' + num + ' ⦂ ᴏɴ-ᴅᴇᴠɪᴄᴇ' + (r.deviceName ? ' (' + r.deviceName + ')' : ''), rank: 0 });
-      } else if (r.deviceStatus === 'OFF_DEVICE') {
-        groups.ready.push({ line: '· ' + num + ' ⦂ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ · sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs', rank: 1 });
-      } else {
-        groups.ready.push({ line: '· ' + num + ' ⦂ sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs', rank: 2 });
-      }
+      groups.restricted.push(num);
+    } else if (r.isCloneBlocked || r.accountStatus === 'CLONE_BLOCK') {
+      groups.clone.push(num + ' ' + dev);
+    } else if (r.isSecurityBlock || r.accountStatus === 'SECURITY_BLOCK') {
+      groups.security.push(num + ' ' + dev);
+    } else if (r.accountStatus === 'NO_ROUTES') {
+      groups.noroutes.push(num);
+    } else if (r.isReady && !r.isBanned) {
+      groups.ready.push({ line: num + ' ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num, score: r.qualityScore || 0 });
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
       if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-      else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
+      else if (r.secondarySeconds > 0) secs = Number(r.secondarySeconds) || 0;
+      if (secs > 0 && secs <= 360 && (Number(r.confidence) || 0) < 0.9 && r.isReady) secs = 0;
       const dur = formatCooldownSmallCaps(secs);
-      groups.cooldown.push({ line: '· ' + num + ' ⦂ ' + dur + deviceTag, secs: secs });
+      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' ' + dev, secs: secs, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
-      groups.other.push('· ' + num + note + deviceTag);
+      groups.other.push(num + note);
     } else {
       const note = r.description ? (' · ' + r.description) : '';
-      groups.other.push('· ' + num + note + deviceTag);
+      groups.other.push(num + note);
     }
   }
 
-  groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0));
-  groups.cooldown.sort((a, b) => (a.secs || 0) - (b.secs || 0));
-  groups.clone.sort((a, b) => {
-    const sa = typeof a === 'object' ? (a.secs ?? 0) : 0;
-    const sb = typeof b === 'object' ? (b.secs ?? 0) : 0;
-    return sa - sb;
+  groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0) || (b.score || 0) - (a.score || 0));
+  groups.cooldown.sort((a, b) => {
+    const ra = a.rank != null ? a.rank : 1;
+    const rb = b.rank != null ? b.rank : 1;
+    if (ra !== rb) return ra - rb;
+    return (a.secs || 0) - (b.secs || 0);
   });
 
   const lines = [];
-  lines.push('✦ <b>ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ</b>');
-  lines.push(buildProgressBar(100) + ' 100%');
-  lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
-  lines.push('✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ ⦂ <b>' + groups.ready.length + '</b>');
-  lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
-  lines.push('△ ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
-  lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.restricted.length + '</b>');
-  lines.push('⊘ ɴᴏᴛ ʀᴇɢɪsᴛᴇʀᴇᴅ ⦂ <b>' + groups.notRegistered.length + '</b>');
-  lines.push('⊘ ɴᴏ ʀᴏᴜᴛᴇs ⦂ <b>' + groups.noRoutes.length + '</b>');
-  if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
+  lines.push('✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ');
   lines.push('');
+  lines.push(buildProgressBar(100) + '  100%');
+  lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
+  lines.push('sᴀᴀᴛ ɪɴɪ ⦂ sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ');
+  lines.push('──────────────────────');
+  lines.push('✧ sɪᴀᴘ ⦂ <b>' + groups.ready.length + '</b>');
+  lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
+  lines.push('◈ sᴇᴄᴜʀɪᴛʏ ⦂ <b>' + groups.security.length + '</b>');
+  lines.push('△ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
+  lines.push('✕ ʙᴀɴ ⦂ <b>' + groups.restricted.length + '</b>');
+  if (groups.noroutes.length) lines.push('⊘ ɴᴏ ʀᴏᴜᴛᴇs ⦂ <b>' + groups.noroutes.length + '</b>');
+  if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
+  lines.push('──────────────────────');
   lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
   if (groups.ready.length) {
     lines.push('');
     lines.push('✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
-    lines.push('');
     groups.ready.forEach((n) => lines.push(n.line || n));
   }
   if (groups.cooldown.length) {
     lines.push('');
     lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
-    lines.push('');
     groups.cooldown.forEach((n) => lines.push(n.line || n));
+  }
+  if (groups.security.length) {
+    lines.push('');
+    lines.push('◈ <b>sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ</b>');
+    groups.security.forEach((n) => lines.push(n));
   }
   if (groups.clone.length) {
     lines.push('');
-    lines.push('△ <b>ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ</b>');
-    lines.push('');
-    groups.clone.forEach((n) => lines.push(typeof n === 'object' ? (n.line || n) : n));
+    lines.push('△ <b>ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ</b>');
+    groups.clone.forEach((n) => lines.push(n));
   }
   if (groups.restricted.length) {
     lines.push('');
-    lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
-    lines.push('');
+    lines.push('✕ <b>ᴅɪʙᴀɴ</b>');
     groups.restricted.forEach((n) => lines.push(n));
   }
-  if (groups.notRegistered.length) {
-    lines.push('');
-    lines.push('⊘ <b>ɴᴏᴛ ʀᴇɢɪsᴛᴇʀᴇᴅ</b>');
-    lines.push('');
-    groups.notRegistered.forEach((n) => lines.push(n));
-  }
-  if (groups.noRoutes.length) {
+  if (groups.noroutes.length) {
     lines.push('');
     lines.push('⊘ <b>ɴᴏ ʀᴏᴜᴛᴇs</b>');
-    lines.push('');
-    groups.noRoutes.forEach((n) => lines.push(n));
+    groups.noroutes.forEach((n) => lines.push(n));
   }
   if (groups.other.length) {
     lines.push('');
     lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
-    lines.push('');
     groups.other.forEach((n) => lines.push(n));
   }
   try {
     const user = await getEffectiveUser(ctx);
-    if (!isOwner(ctx) && !isUserVip(user)) await consumeQuota(ctx.from.id, Math.min(total, 1));
-  } catch (e) { console.error('[quota]', e && e.message || e); }
-  return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
+    const checkedCount = results.filter((r) => r && !r.cancelled).length || total;
+    if (!isOwner(ctx) && !isUserVip(user)) {
+      await consumeQuota(ctx.from.id, Math.min(checkedCount, 1));
+    } else {
+      await incrementUserChecks(ctx.from.id, checkedCount);
+    }
+  } catch (e) { console.error('[quota/leaderboard]', e && e.message || e); }
+
+  const resultKey = 'detect:results:' + userId + ':' + jobId;
+  const siapList = groups.ready.map((x) => x.num || String(x.line || '').split(' ')[0]).filter(Boolean);
+  try {
+    const refreshKey = 'detect:refresh:' + userId + ':' + jobId;
+    await redis.set(refreshKey, JSON.stringify(numbers), { ex: 3600 });
+    await redis.set(resultKey, JSON.stringify({ results: results.filter(Boolean), siapList, detailMap }), { ex: 3600 });
+  } catch (_) {}
+
+  const keyboardRows = [
+    [
+      styledCallback('↻ UPDATE', 'detect:refresh:' + jobId, 'success'),
+      styledCallback('ⓘ INFO', 'detect:info', 'primary')
+    ]
+  ];
+  if (Object.keys(detailMap).length > 0) {
+    keyboardRows.push([styledCallback('⇩ EXPORT DETAIL', 'detect:export_detail:' + jobId, 'success')]);
+  }
+
+  return ctx.reply(lines.join('\n'), {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard(keyboardRows)
+  });
 }
+
+bot.hears('♛ OWNER CONSOLE', async (ctx) => {
+  if (!isOwner(ctx)) return ctx.reply('✕ ᴀᴋsᴇs ᴅɪᴛᴏʟᴀᴋ', { parse_mode: 'HTML' });
+  return ctx.reply('♛ <b>ᴏᴡɴᴇʀ ᴄᴏɴsᴏʟᴇ</b>\n\nᴘɪʟɪʜ ᴀᴋsɪ ᴅɪ ʙᴀᴡᴀʜ.', {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([
+      [
+        styledCallback('✚ AKTIVASI PREMIUM', 'owner:activate', 'success'),
+        styledCallback('▤ BROADCAST', 'owner:broadcast', 'primary')
+      ]
+    ])
+  });
+});
+bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'activate_vip');
+  return ctx.reply('✚ <b>ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ</b>\n\nᴋɪʀɪᴍ ғᴏʀᴍᴀᴛ:\n<code>user_id hari</code>\nᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+});
+bot.hears('▤ BROADCAST', async (ctx) => {
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'broadcast');
+  return ctx.reply('▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴇʙᴀʀ ᴋᴇ sᴇᴍᴜᴀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+});
+bot.action('owner:activate', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'activate_vip');
+  return ctx.reply('✚ <b>ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ</b>\n\nᴋɪʀɪᴍ ғᴏʀᴍᴀᴛ:\n<code>user_id hari</code>\nᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+});
+bot.action('owner:broadcast', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'broadcast');
+  return ctx.reply('▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴇʙᴀʀ ᴋᴇ sᴇᴍᴜᴀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+});
+bot.action(/^contact:reply:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  const targetId = ctx.match[1];
+  await redis.set('owner:contact:target:' + ctx.from.id, targetId, { ex: 600 });
+  return ctx.reply('✉︎ <b>ʙᴀʟᴀs ᴘᴇsᴀɴ</b>\n\nᴋɪʀɪᴍ ʙᴀʟᴀsᴀɴ ᴜɴᴛᴜᴋ ᴜsᴇʀ <code>' + targetId + '</code>.', { parse_mode: 'HTML' });
+});
+const REFERRAL_OFFERS = {
+  'quota_3': { type: 'quota', amount: 3, cost: 10, label: '3 ᴋᴜᴏᴛᴀ ᴄᴇᴋ' },
+  'vip_1': { type: 'vip', amount: 1, cost: 25, label: '1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ' },
+  'vip_3': { type: 'vip', amount: 3, cost: 50, label: '3 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ' },
+  'vip_7': { type: 'vip', amount: 7, cost: 100, label: '7 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ' }
+};
+
+async function showReferralExchange(ctx, edit) {
+  const stats = await getReferralStats(ctx.from.id);
+  const message = require('./themes').renderReferralExchange(stats);
+  const keyboard = Markup.inlineKeyboard([
+    [styledCallback('✧ 3 ᴋᴜᴏᴛᴀ · 10 ᴋᴏɪɴ', 'referral:redeem:quota_3', 'primary')],
+    [styledCallback('✧ 1 ʜᴀʀɪ · 25 ᴋᴏɪɴ', 'referral:redeem:vip_1', 'success')],
+    [styledCallback('✧ 3 ʜᴀʀɪ · 50 ᴋᴏɪɴ', 'referral:redeem:vip_3', 'success')],
+    [styledCallback('✧ 7 ʜᴀʀɪ · 100 ᴋᴏɪɴ', 'referral:redeem:vip_7', 'success')],
+    [styledCallback('↶ KEMBALI', 'referral:back', 'danger')]
+  ]);
+  if (edit && ctx.editMessageText) {
+    return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard }).catch(() =>
+      ctx.reply(message, { parse_mode: 'HTML', ...keyboard })
+    );
+  }
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+
+bot.action('referral:menu', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return showReferralExchange(ctx, false);
+});
+
+bot.action('referral:back', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const me = await bot.telegram.getMe();
+  const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
+  const stats = await getReferralStats(ctx.from.id);
+  const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
+  return ctx.editMessageText(require('./themes').renderReferral({ link, stats }), {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl), styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]])
+  }).catch(async () => {
+    return ctx.reply(require('./themes').renderReferral({ link, stats }), {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl), styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]])
+    });
+  });
+});
+
+bot.action(/^referral:redeem:(quota_3|vip_1|vip_3|vip_7)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const offerKey = ctx.match[1];
+  const offer = REFERRAL_OFFERS[offerKey];
+  if (!offer) return ctx.reply('✕ ᴘᴀᴋᴇᴛ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ', { parse_mode: 'HTML' });
+  try {
+    const result = await redeemReferralReward(ctx.from.id, offer);
+    if (!result.ok) {
+      return ctx.reply(
+        '✕ <b>ᴋᴏɪɴ ᴛɪᴅᴀᴋ ᴄᴜᴋᴜᴘ</b>\n\n' +
+        '▸ sᴀʟᴅᴏ ⦂ <b>' + result.balance + '</b> ᴋᴏɪɴ\n' +
+        '▸ ᴅɪʙᴜᴛᴜʜᴋᴀɴ ⦂ <b>' + offer.cost + '</b> ᴋᴏɪɴ\n\n' +
+        '<blockquote>ᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ ʟᴇʙɪʜ ʙᴀɴʏᴀᴋ ᴜɴᴛᴜᴋ ᴍᴇɴᴅᴀᴘᴀᴛᴋᴀɴ ᴋᴏɪɴ.</blockquote>',
+        { parse_mode: 'HTML' }
+      );
+    }
+    const successMsg = offer.type === 'quota'
+      ? ('✓ <b>ᴘᴇɴᴜᴋᴀʀᴀɴ ʙᴇʀʜᴀsɪʟ</b>\n\n' +
+         '▸ ᴘᴀᴋᴇᴛ ⦂ <b>' + offer.label + '</b>\n' +
+         '▸ sɪsᴀ ᴋᴏɪɴ ⦂ <b>' + result.balance + '</b>\n\n' +
+         '<blockquote>ᴋᴜᴏᴛᴀ ᴛᴀᴍʙᴀʜᴀɴ sᴜᴅᴀʜ ᴀᴋᴛɪғ ᴅᴀɴ ʙɪsᴀ ʟᴀɴɢsᴜɴɢ ᴅɪᴘᴀᴋᴀɪ.</blockquote>')
+      : ('✓ <b>ᴘᴇɴᴜᴋᴀʀᴀɴ ʙᴇʀʜᴀsɪʟ</b>\n\n' +
+         '▸ ᴘᴀᴋᴇᴛ ⦂ <b>' + offer.label + '</b>\n' +
+         '▸ sɪsᴀ ᴋᴏɪɴ ⦂ <b>' + result.balance + '</b>\n\n' +
+         '<blockquote>ᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ sᴜᴅᴀʜ ᴀᴋᴛɪғ. sᴇʟᴀᴍᴀᴛ ᴍᴇɴᴄᴏʙᴀ!</blockquote>');
+    return ctx.reply(successMsg, { parse_mode: 'HTML' });
+  } catch (err) {
+    console.error('[referral redeem]', err && err.message || err);
+    return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴᴜᴋᴀʀ. ᴄᴏʙᴀ ʟᴀɢɪ.', { parse_mode: 'HTML' });
+  }
+});
 
 bot.on('text', async (ctx, next) => {
   const text = (ctx.message && ctx.message.text) || '';
   if (/^(⌖\s*DETECT|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
+
+  if (isOwner(ctx)) {
+    const replyTarget = await redis.get('owner:contact:target:' + ctx.from.id);
+    if (replyTarget) {
+      await redis.del('owner:contact:target:' + ctx.from.id);
+      try {
+        await ctx.telegram.sendMessage(Number(replyTarget), '✉︎ <b>ʙᴀʟᴀsᴀɴ ᴀᴅᴍɪɴ</b>\n\n' + escapeHtml(text), { parse_mode: 'HTML' });
+        return ctx.reply('✓ ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ᴋᴇ ᴜsᴇʀ <code>' + replyTarget + '</code>.', { parse_mode: 'HTML' });
+      } catch (err) {
+        return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ: ' + String(err.message || err).slice(0, 120));
+      }
+    }
+    const ownerAction = await getOwnerAction(ctx.from.id);
+    if (ownerAction === 'activate_vip') {
+      await clearOwnerAction(ctx.from.id);
+      const parts = text.trim().split(/\s+/);
+      const targetId = Number(parts[0]);
+      const days = Number(parts[1] || 30);
+      if (!targetId || !days) {
+        return ctx.reply('✕ ғᴏʀᴍᴀᴛ sᴀʟᴀʜ. ᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+      }
+      try {
+        await activateVip(targetId, days, 'OWNER');
+        try { await ctx.telegram.sendMessage(targetId, '✧ <b>ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ</b>\n\nᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ ᴋᴀᴍᴜ ᴛᴇʟᴀʜ ᴅɪᴀᴋᴛɪғᴋᴀɴ sᴇʟᴀᴍᴀ <b>' + days + '</b> ʜᴀʀɪ.', { parse_mode: 'HTML' }); } catch (_) {}
+        return ctx.reply('✓ ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + targetId + '</code> · ' + days + ' ʜᴀʀɪ.', { parse_mode: 'HTML' });
+      } catch (err) {
+        return ctx.reply('✕ ɢᴀɢᴀʟ: ' + String(err.message || err).slice(0, 120));
+      }
+    }
+    if (ownerAction === 'broadcast') {
+      await clearOwnerAction(ctx.from.id);
+      const broadcastText = text.trim();
+      if (!broadcastText) {
+        return ctx.reply('✕ ᴘᴇsᴀɴ ʙʀᴏᴀᴅᴄᴀsᴛ ᴋᴏsᴏɴɢ.', { parse_mode: 'HTML' });
+      }
+      let userIds = [];
+      try {
+        userIds = await redis.smembers('users:all') || [];
+      } catch (err) {
+        console.error('[broadcast list]', err && err.message || err);
+        return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇᴍʙᴀᴄᴀ ᴅᴀғᴛᴀʀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+      }
+      if (!userIds.length) {
+        return ctx.reply('✕ ʙᴇʟᴜᴍ ᴀᴅᴀ ᴜsᴇʀ ᴛᴇʀᴅᴀғᴛᴀʀ ᴅɪ sɪsᴛᴇᴍ.', { parse_mode: 'HTML' });
+      }
+      const statusMsg = await ctx.reply(
+        '▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ ᴅɪᴍᴜʟᴀɪ</b>\n\n' +
+        '▸ ᴛᴏᴛᴀʟ ᴛᴀʀɢᴇᴛ ⦂ <b>' + userIds.length + '</b> ᴜsᴇʀ\n' +
+        '▸ sᴛᴀᴛᴜs ⦂ ᴍᴇɴɢɪʀɪᴍ…',
+        { parse_mode: 'HTML' }
+      );
+      let ok = 0;
+      let fail = 0;
+      const payload =
+        '▤ <b>ᴘᴇɴɢᴜᴍᴜᴍᴀɴ</b>\n\n' +
+        escapeHtml(broadcastText) + '\n\n' +
+        '<i>— MetaDetect</i>';
+      for (let bi = 0; bi < userIds.length; bi++) {
+        const uid = Number(userIds[bi]);
+        if (!uid) { fail += 1; continue; }
+        try {
+          await ctx.telegram.sendMessage(uid, payload, { parse_mode: 'HTML' });
+          ok += 1;
+        } catch (_) {
+          fail += 1;
+        }
+        if (bi % 20 === 19) await new Promise((r) => setTimeout(r, 1200));
+        else await new Promise((r) => setTimeout(r, 50));
+      }
+      const doneText =
+        '▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b>\n\n' +
+        '▸ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + ok + '</b>\n' +
+        '▸ ɢᴀɢᴀʟ ⦂ <b>' + fail + '</b>\n' +
+        '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + userIds.length + '</b>';
+      try {
+        if (statusMsg) {
+          await ctx.telegram.editMessageText(statusMsg.chat.id, statusMsg.message_id, undefined, doneText, { parse_mode: 'HTML' });
+        } else {
+          await ctx.reply(doneText, { parse_mode: 'HTML' });
+        }
+      } catch (_) {
+        await ctx.reply(doneText, { parse_mode: 'HTML' });
+      }
+      return;
+    }
+  }
+
+  const contactState = await redis.get('contact:state:' + ctx.from.id);
+  if (contactState === 'waiting') {
+    await redis.del('contact:state:' + ctx.from.id);
+    const uname = ctx.from.username ? '@' + ctx.from.username : '-';
+    const fullName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Pengguna';
+    if (!ADMIN_ID) {
+      return ctx.reply('✕ <b>ᴀᴅᴍɪɴ ʙᴇʟᴜᴍ ᴅɪᴋᴏɴғɪɢᴜʀᴀsɪ</b>\n\n<blockquote>sᴇᴛ ᴇɴᴠ ADMIN_ID ᴅɪ ᴠᴇʀᴄᴇʟ.</blockquote>', { parse_mode: 'HTML' });
+    }
+    try {
+      await ctx.telegram.sendMessage(
+        ADMIN_ID,
+        '✉︎ <b>ᴘᴇsᴀɴ ᴅᴀʀɪ ᴜsᴇʀ</b>\n\n' +
+        '▸ ɴᴀᴍᴀ ⦂ <b>' + escapeHtml(fullName) + '</b>\n' +
+        '▸ ᴜsᴇʀ ⦂ <b>' + escapeHtml(uname) + '</b>\n' +
+        '▸ ɪᴅ ⦂ <code>' + ctx.from.id + '</code>\n\n' +
+        '<blockquote>' + escapeHtml(text) + '</blockquote>',
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [styledCallback('↩ BALAS', 'contact:reply:' + ctx.from.id, 'primary')]
+          ])
+        }
+      );
+      return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴀᴅᴍɪɴ ᴀᴋᴀɴ ᴍᴇᴍʙᴀʟᴀs sᴇʙᴀɢᴀɪᴍᴀɴᴀ ᴍᴜɴɢᴋɪɴ.', { parse_mode: 'HTML' });
+    } catch (err) {
+      console.error('[contact forward]', err && err.message || err);
+      return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ ᴘᴇsᴀɴ</b>\n\n<blockquote>' + escapeHtml(String(err.message || err).slice(0, 120)) + '</blockquote>', { parse_mode: 'HTML' });
+    }
+  }
+
   const mode = await redis.get('detect:mode:' + ctx.from.id);
   if (mode !== 'waiting_numbers') return next();
   const phones = extractPhoneCandidates(text);
@@ -602,10 +1015,16 @@ bot.on('text', async (ctx, next) => {
   const max = isVip ? 30 : 1;
   const list = phones.slice(0, max);
   if (!isVip && phones.length > 1) {
-    return ctx.reply('✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ 1 ɴᴏᴍᴏʀ.\nᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>', {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
-    });
+    return ctx.reply(
+      '✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n' +
+      '<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ <b>1 ɴᴏᴍᴏʀ</b> ᴘᴇʀ ᴋɪʀɪᴍᴀɴ.\n' +
+      'ᴋᴀᴍᴜ ᴋɪʀɪᴍ <b>' + phones.length + '</b> ɴᴏᴍᴏʀ — ʜᴀɴʏᴀ ʏᴀɴɢ ᴘᴇʀᴛᴀᴍᴀ ʏᴀɴɢ ᴅɪᴘʀᴏsᴇs.\n' +
+      'ᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>',
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
+      }
+    );
   }
   return processDetection(ctx, list);
 });
