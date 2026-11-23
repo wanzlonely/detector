@@ -28,7 +28,7 @@ Set these environment variables in Vercel for the environments you use:
 - `BRAND_NAME`
 - `UPSTASH_REDIS_REST_URL`
 - `UPSTASH_REDIS_REST_TOKEN`
-- `WEBHOOK_SECRET` — required; 1–256 characters containing only letters, digits, underscores, or hyphens.
+- `WEBHOOK_SECRET` — required; generate a unique 32+ character random value using only letters, digits, underscores, or hyphens.
 
 Do not commit real tokens, passwords, or Redis credentials.
 
@@ -59,7 +59,7 @@ After deploying to Vercel, run:
 node scripts/set-webhook.js https://your-project.vercel.app
 ```
 
-The script configures Telegram's webhook secret token using `WEBHOOK_SECRET`.
+The script configures Telegram's webhook secret token using `WEBHOOK_SECRET`, validates the HTTPS deployment origin, and restores the bot command menu.
 
 ## Health endpoint
 
