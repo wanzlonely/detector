@@ -1,732 +1,1107 @@
-const WADetector = require('./waEngine');
-const { executeWithProxyRotation, getHealth } = require('./proxyManager');
+require('dotenv').config();
+const { Telegraf, Markup } = require('telegraf');
+const {
+  redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
+  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, getUserRank, redeemReferralReward,
+  consumeQuota, addCheckLog, getCachedCheckResult, setCachedCheckResult, qualifyReferral,
+  incrementUserChecks
+} = require('./database');
+const {
+  escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
+  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary
+} = require('./themes');
+const { checkWhatsAppCooldown } = require('./waChecker');
 
-const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 4000);
-const INTERNAL_RETRIES = Math.min(2, Math.max(1, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 1)));
-const CONSENSUS_ENABLED = String(process.env.WA_CONSENSUS || '0') === '1';
-const LOW_CONFIDENCE_THRESHOLD = Number(process.env.WA_LOW_CONFIDENCE || 0.72);
-const EXIST_CLEAR_CONFIDENCE = Number(process.env.WA_EXIST_CLEAR || 0.82);
-const STICKY_TTL_MS = Number(process.env.WA_STICKY_TTL_MS || 45000);
-const STICKY_CACHE = new Map();
+const bot = new Telegraf(process.env.BOT_TOKEN);
+const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
 
-function stickyGet(raw) {
-  const key = String(raw || '').replace(/\D/g, '');
-  if (!key) return null;
-  const hit = STICKY_CACHE.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.ts > STICKY_TTL_MS) {
-    STICKY_CACHE.delete(key);
-    return null;
-  }
-  return hit.result;
+async function stopActiveDetection(ctx) {
+  const userId = ctx.from && ctx.from.id;
+  if (!userId) return;
+  const jobId = await redis.get('detect:active:' + userId);
+  if (!jobId) return;
+  await redis.set('detect:stop:' + userId + ':' + jobId, '1', { ex: 3600 });
+  await redis.set('detect:exit:' + userId + ':' + jobId, 'navigation', { ex: 3600 });
 }
 
-function stickySet(raw, result) {
-  const key = String(raw || '').replace(/\D/g, '');
-  if (!key || !result || result.softFallback || result.error) return;
-  if ((Number(result.confidence) || 0) < 0.7) return;
-  if (STICKY_CACHE.size > 500) {
-    const first = STICKY_CACHE.keys().next().value;
-    STICKY_CACHE.delete(first);
-  }
-  STICKY_CACHE.set(key, { ts: Date.now(), result: { ...result, stickyHit: true } });
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-const LOCALE_BY_ISO = {
-  pk: 'ur-PK,ur;q=0.9,en-US;q=0.8,en;q=0.7',
-  id: 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-  in: 'hi-IN,hi;q=0.9,en-IN;q=0.8,en;q=0.7',
-  bd: 'bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7',
-  ng: 'en-NG,en;q=0.9',
-  eg: 'ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-  sa: 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-  tr: 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-  br: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-  mx: 'es-MX,es;q=0.9,en-US;q=0.8,en;q=0.7',
-  ph: 'en-PH,en;q=0.9',
-  vn: 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-  th: 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
-  my: 'ms-MY,ms;q=0.9,en-US;q=0.8,en;q=0.7',
-  us: 'en-US,en;q=0.9',
-  gb: 'en-GB,en;q=0.9',
-  ru: 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
-};
-
-function buildHeaders(userAgent, countryIso2) {
-  const iso = String(countryIso2 || '').toLowerCase();
-  return {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'User-Agent': userAgent,
-    Accept: '*/*',
-    'Accept-Language': LOCALE_BY_ISO[iso] || 'en-US,en;q=0.9',
-    Connection: 'keep-alive'
-  };
-}
-
-function normalizeDisplayNumber(raw, phoneInfo, parsedPhone) {
-  const candidates = [parsedPhone, phoneInfo && phoneInfo.e164, phoneInfo && phoneInfo.full, phoneInfo && phoneInfo.phone, raw];
-  for (const c of candidates) {
-    const s = String(c || '').trim();
-    if (!s || s === 'undefined' || s === 'null') continue;
-    const digits = s.replace(/\D/g, '');
-    if (digits.length >= 8) return s.startsWith('+') ? s : ('+' + digits);
-  }
-  const fallback = String(raw || '').replace(/\D/g, '');
-  return fallback ? ('+' + fallback) : String(raw || '');
-}
-
-async function postWithTimeout(url, body, headers, dispatcher) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { method: 'POST', headers, body, dispatcher, signal: controller.signal });
-    const text = await res.text();
-    if (!res.ok) {
-      const err = new Error('WhatsApp HTTP ' + res.status + ': ' + text.slice(0, 180));
-      err.status = res.status;
-      throw err;
+bot.use(async (ctx, next) => {
+  const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
+  const callbackData = (ctx.callbackQuery && ctx.callbackQuery.data) || '';
+  const navigationText = /^(⌖\s*DETECT|✧\s*BELI\s*PREMIUM|◈\s*STATUS|♛\s*LEADERBOARD|♧\s*REFERRAL|✉︎?\s*HUBUNGI\s*ADMIN|♛\s*OWNER\s*CONSOLE|✚\s*AKTIVASI\s*PREMIUM|▤\s*BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
+  const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
+  if (navigationText || navigationCallback) {
+    try {
+      await stopActiveDetection(ctx);
+      if (ctx.from) {
+        await Promise.all([
+          redis.del('detect:mode:' + ctx.from.id),
+          redis.del('contact:state:' + ctx.from.id),
+          redis.del('owner:action:' + ctx.from.id),
+          redis.del('owner:contact:target:' + ctx.from.id)
+        ]);
+      }
+    } catch (err) {
+      console.error('[navigation cleanup]', err && err.message || err);
     }
-    if (!text || !String(text).trim()) throw new Error('WhatsApp mengembalikan respons kosong.');
-    return text;
+  }
+  return next();
+});
+
+const BRAND_NAME = process.env.BRAND_NAME || 'META DETECT';
+
+function styledCallback(text, data, style) {
+  const btn = Markup.button.callback(text, data);
+  if (style) btn.style = style;
+  return btn;
+}
+
+const USER_KEYBOARD = Markup.keyboard([
+  ['⌖ DETECT'],
+  ['✧ BELI PREMIUM', '◈ STATUS'],
+  ['♛ LEADERBOARD', '♧ REFERRAL'],
+  ['✉︎ HUBUNGI ADMIN']
+]).resize().placeholder('Pilih menu…');
+
+const OWNER_KEYBOARD = Markup.keyboard([
+  ['⌖ DETECT'],
+  ['✧ BELI PREMIUM', '◈ STATUS'],
+  ['♛ LEADERBOARD', '♧ REFERRAL'],
+  ['✉︎ HUBUNGI ADMIN'],
+  ['♛ OWNER CONSOLE'],
+  ['✚ AKTIVASI PREMIUM', '▤ BROADCAST']
+]).resize().placeholder('Pilih fungsi owner…');
+
+const OWNER_ACTION_TTL = 300;
+async function setOwnerAction(userId, action) {
+  await redis.set('owner:action:' + userId, action, { ex: OWNER_ACTION_TTL });
+}
+async function getOwnerAction(userId) {
+  return redis.get('owner:action:' + userId);
+}
+async function clearOwnerAction(userId) {
+  await redis.del('owner:action:' + userId);
+}
+
+function isOwner(ctx) {
+  return Boolean(ADMIN_ID) && Number(ctx.from && ctx.from.id) === ADMIN_ID;
+}
+
+async function handleCancel(ctx) {
+  const uid = ctx.from && ctx.from.id;
+  if (uid) {
+    await stopActiveDetection(ctx);
+    await Promise.all([
+      redis.del('detect:mode:' + uid),
+      redis.del('contact:state:' + uid),
+      redis.del('owner:action:' + uid),
+      redis.del('owner:contact:target:' + uid)
+    ]);
+  }
+  return ctx.reply('✕ <b>ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>\n\nᴋᴇᴍʙᴀʟɪ ᴋᴇ ᴍᴇɴᴜ ᴜᴛᴀᴍᴀ.', {
+    parse_mode: 'HTML',
+    ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
+  });
+}
+bot.command('cancel', handleCancel);
+bot.hears(/^\/?cancel$/i, handleCancel);
+bot.hears(/^batal$/i, handleCancel);
+
+bot.use((ctx, next) => next());
+
+async function getEffectiveUser(ctx) {
+  const user = await getOrCreateUser(ctx.from);
+  if (!isOwner(ctx)) return user;
+  return { ...user, vip_until: 4102444800, vip_tier: 'OWNER', vip_plan: 'OWNER ACCESS', bulk_limit: 30, free_used_today: 0 };
+}
+
+async function showHome(ctx) {
+  try {
+    const user = await getEffectiveUser(ctx);
+    return await ctx.reply(renderDashboard({
+      user,
+      isVip: isOwner(ctx) || isUserVip(user),
+      isOwner: isOwner(ctx),
+      brandName: BRAND_NAME
+    }), {
+      parse_mode: 'HTML',
+      ...Markup.keyboard(isOwner(ctx) ? OWNER_KEYBOARD.reply_markup.keyboard : USER_KEYBOARD.reply_markup.keyboard).resize().oneTime()
+    });
   } catch (err) {
-    const cause = err && err.cause;
-    const detail = cause && (cause.code || cause.message) ? ' [' + (cause.code || cause.message) + ']' : '';
-    const out = new Error(((err && err.message) || 'Permintaan jaringan gagal') + detail);
-    out.status = err && err.status;
-    throw out;
-  } finally {
-    clearTimeout(timer);
+    console.error('[showHome]', err && err.stack || err);
+    return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴜᴀᴛ ᴍᴇɴᴜ</b>\n\n<blockquote>ᴄᴏʙᴀ /start ʟᴀɢɪ</blockquote>', { parse_mode: 'HTML' }).catch(() => {});
   }
 }
 
-function safeJson(text) { try { return JSON.parse(text || '{}'); } catch (_) { return {}; } }
-function num(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; }
+function buildStoreKeyboard() {
+  const packages = getPackagesByTier('premium');
+  const rows = [];
+  for (let i = 0; i < packages.length; i += 2) {
+    rows.push(packages.slice(i, i + 2).map((pkg) =>
+      styledCallback(pkg.durationLabel + ' · ' + formatIDR(pkg.price), 'pkg:' + pkg.id, 'primary')
+    ));
+  }
+  return Markup.inlineKeyboard(rows);
+}
+async function showStore(ctx, edit) {
+  const user = await getEffectiveUser(ctx);
+  const packages = getPackagesByTier('premium');
+  const message = renderStoreCatalog({ user, packages });
+  const keyboard = buildStoreKeyboard();
+  if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+async function showPackage(ctx, pkg, edit) {
+  const user = await getEffectiveUser(ctx);
+  const message = renderPackageDetailCard({ user, pkg });
+  const keyboard = Markup.inlineKeyboard([
+    [
+      styledCallback('✓ BELI · ' + formatIDR(pkg.price), 'buy:' + pkg.id, 'success'),
+      styledCallback('↶ KEMBALI', 'store:premium', 'danger')
+    ]
+  ]);
+  if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+async function showCheckout(ctx, pkg, edit) {
+  const user = await getEffectiveUser(ctx);
+  const message = renderPaymentMaintenanceCard({ user, pkg });
+  const keyboard = Markup.inlineKeyboard([[Markup.button.callback('↶ PILIH PAKET LAIN', 'store:' + pkg.tier)]]);
+  if (edit && ctx.editMessageText) return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard });
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
 
-function toShortTimer(seconds) {
+bot.telegram.deleteMyCommands().catch((err) => console.error('[delete commands]', err && err.message || err));
+
+bot.catch((err, ctx) => {
+  console.error('[bot.catch]', err && err.stack || err);
+  try {
+    if (ctx && ctx.reply) {
+      ctx.reply('✕ <b>ᴛᴇʀᴊᴀᴅɪ ᴋᴇsᴀʟᴀʜᴀɴ</b>\n\n<blockquote>sɪʟᴀᴋᴀɴ ᴄᴏʙᴀ ʟᴀɢɪ /start</blockquote>', { parse_mode: 'HTML' }).catch(() => {});
+    }
+  } catch (_) {}
+});
+
+bot.start(async (ctx) => {
+  try {
+    const payload = String(ctx.startPayload || '');
+    if (payload.startsWith('ref_')) {
+      try {
+        const registered = await registerReferral(ctx.from.id, payload.slice(4));
+        if (registered) {
+          await ctx.reply('♧ Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh 5 koin referral.');
+        }
+      } catch (refErr) {
+        console.error('[start/ref]', refErr && refErr.message || refErr);
+      }
+    }
+    return await showHome(ctx);
+  } catch (err) {
+    console.error('[start]', err && err.stack || err);
+    return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴜᴀᴛ ᴅᴀsʜʙᴏᴀʀᴅ</b>\n\n<blockquote>ᴄᴏʙᴀ ᴋᴇᴍʙᴀʟɪ /start</blockquote>', { parse_mode: 'HTML' }).catch(() => {});
+  }
+});
+bot.command('store', (ctx) => showStore(ctx, false));
+bot.action(/^store:(?:premium|standard|ultra)$/, async (ctx) => { await ctx.answerCbQuery().catch(() => {}); return showStore(ctx, true); });
+bot.action(/^pkg:([a-z0-9_]+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const pkg = getPackageById(ctx.match[1]);
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>');
+  return showPackage(ctx, pkg, true);
+});
+bot.action(/^buy:([a-z0-9_]+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const pkg = getPackageById(ctx.match[1]);
+  if (!pkg) return ctx.reply('⚠️ <b>PAKET TIDAK DITEMUKAN</b>');
+  return showCheckout(ctx, pkg, true);
+});
+
+async function startContact(ctx) {
+  await redis.set('contact:state:' + ctx.from.id, 'waiting', { ex: 600 });
+  return ctx.reply('✦ <b>ʜᴜʙᴜɴɢɪ ᴀᴅᴍɪɴ</b>\n\nᴛᴜʟɪs ᴘᴇsᴀɴ ᴀᴛᴀᴜ ᴋᴇʟᴜʜᴀɴ ᴀɴᴅᴀ.\n\nᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.', { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.callback('× BATALKAN', 'contact:cancel')]]) });
+}
+bot.hears('✉︎ HUBUNGI ADMIN', startContact);
+bot.action('contact:cancel', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await redis.del('contact:state:' + ctx.from.id); return ctx.reply('✕ <b>ᴘᴇɴɢɪʀɪᴍᴀɴ ᴘᴇsᴀɴ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' }); });
+
+async function showStatus(ctx) {
+  const user = await getEffectiveUser(ctx);
+  const referralStats = await getReferralStats(ctx.from.id);
+  return ctx.reply(require('./themes').renderStatus({ user, isVip: isOwner(ctx) || isUserVip(user), isOwner: isOwner(ctx), referralStats }), { parse_mode: 'HTML' });
+}
+async function showLeaderboard(ctx) {
+  const [rows, myRank] = await Promise.all([
+    getLeaderboard(10),
+    getUserRank(ctx.from.id)
+  ]);
+  return ctx.reply(require('./themes').renderLeaderboard(rows, myRank), { parse_mode: 'HTML' });
+}
+async function showReferral(ctx) {
+  const me = await bot.telegram.getMe();
+  const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
+  const stats = await getReferralStats(ctx.from.id);
+  const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
+  return ctx.reply(require('./themes').renderReferral({ link, stats }), { parse_mode: 'HTML', ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl), styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]]) });
+}
+bot.hears('◈ STATUS', showStatus);
+bot.hears('♛ LEADERBOARD', showLeaderboard);
+bot.hears('♧ REFERRAL', showReferral);
+bot.hears('✧ BELI PREMIUM', (ctx) => showStore(ctx, false));
+
+function extractPhoneCandidates(text) {
+  if (!text) return [];
+  const raw = String(text);
+  const phones = [];
+  const seen = new Set();
+
+  function pushDigits(digits) {
+    if (!digits) return;
+    digits = String(digits).replace(/\D/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    // 08xxxxxxxxxx (ID local) -> 62xxxxxxxxxx
+    if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) {
+      digits = '62' + digits.slice(1);
+    }
+    if (digits.length < 8 || digits.length > 15) return;
+    if (/^(19|20)\d{2}$/.test(digits)) return;
+    if (seen.has(digits)) return;
+    seen.add(digits);
+    phones.push('+' + digits);
+  }
+
+  // 1) Prioritas: satu nomor per baris / koma / titik-koma (tidak campur antar baris)
+  const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    // Ambil deretan digit (+ opsional) di dalam baris
+    const m = line.match(/(?:\+|00)?\d[\d\s\-().]{6,18}\d/);
+    if (m) pushDigits(m[0]);
+    else pushDigits(line);
+  }
+
+  // 2) Fallback: scan seluruh teks jika belum ketemu
+  if (!phones.length) {
+    const pattern = /(?:\+|00)?\d(?:[\d\-().]{6,18})\d/g;
+    let match;
+    while ((match = pattern.exec(raw)) !== null) {
+      pushDigits(match[0]);
+    }
+  }
+
+  return phones;
+}
+
+async function startDetect(ctx) {
+  const user = await getEffectiveUser(ctx);
+  const isVip = isOwner(ctx) || isUserVip(user);
+  const remaining = isVip ? 999 : Math.max(0, 3 - Number(user.free_used_today || 0));
+  if (!isVip && remaining <= 0) {
+    return ctx.reply(
+      '✦ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\n\n<blockquote>ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴍᴇɴɢɢᴜɴᴀᴋᴀɴ 3 ᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs ʜᴀʀɪ ɪɴɪ.\nᴜᴘɢʀᴀᴅᴇ ᴋᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛᴀɴᴘᴀ ʙᴀᴛᴀs.</blockquote>',
+      { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]]) }
+    );
+  }
+  await redis.set('detect:mode:' + ctx.from.id, 'waiting_numbers', { ex: 300 });
+  const limitHint = isVip ? 'ᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ / ᴋɪʀɪᴍᴀɴ' : '1 ɴᴏᴍᴏʀ (ғʀᴇᴇ)';
+  return ctx.reply(
+    '⌖ <b>ᴅᴇᴛᴇᴋsɪ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</b>\n\n' +
+    'ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴘᴇʀɪᴋsᴀ.\n' +
+    '· ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴀᴛᴀᴜ ᴋᴏᴍᴀ\n' +
+    '· sɪsᴛᴇᴍ ᴏᴛᴏᴍᴀᴛɪs ᴍᴇɴɢᴇᴋsᴛʀᴀᴋ ᴀɴɢᴋᴀ\n\n' +
+    'ᴄᴏɴᴛᴏʜ ⦂\n' +
+    '<code>+6281234567890</code>\n' +
+    '<code>+6281234567890 (Low) · Jul 2024</code>\n\n' +
+    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3') + '</b>\n' +
+    '▸ ʟɪᴍɪᴛ ⦂ <b>' + limitHint + '</b>\n\n' +
+    'ᴋʟɪᴋ ᴅɪ ʙᴀᴡᴀʜ ɪɴɪ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.',
+    {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [styledCallback('Batal', 'detect:cancel_prompt', 'danger')]
+      ])
+    }
+  );
+}
+bot.hears('⌖ DETECT', startDetect);
+bot.command('detect', startDetect);
+bot.action('detect:cancel_prompt', async (ctx) => {
+  await ctx.answerCbQuery('Dibatalkan').catch(() => {});
+  await redis.del('detect:mode:' + ctx.from.id);
+  return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+});
+
+bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery('Memperbarui status real-time…').catch(() => {});
+  const userId = ctx.from && ctx.from.id;
+  const jobId = ctx.match[1];
+  if (!userId || !jobId) return;
+  const key = 'detect:refresh:' + userId + ':' + jobId;
+  let numbers = null;
+  try {
+    const raw = await redis.get(key);
+    if (raw) numbers = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (_) {}
+  if (!Array.isArray(numbers) || !numbers.length) {
+    return ctx.reply('✦ <b>ᴅᴀᴛᴀ ʀᴇғʀᴇsʜ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>sɪʟᴀᴋᴀɴ ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.</blockquote>', { parse_mode: 'HTML' });
+  }
+  // Detect ulang dari server — tidak pakai cache/sticky
+  return processDetection(ctx, numbers, { forceRefresh: true });
+});
+
+bot.action('detect:info', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const infoText = [
+    'ⓘ <b>ᴋᴇᴛᴇʀᴀɴɢᴀɴ ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>',
+    '──────────────────────',
+    '✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>',
+    'ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ʟᴏɢɪɴ / ᴏᴛᴘ sᴍs.',
+    '',
+    '◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>',
+    'ɴᴏᴍᴏʀ sᴇᴅᴀɴɢ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ sᴍs. ᴛᴜɴɢɢᴜ sᴇsᴜᴀɪ ᴛɪᴍᴇʀ.',
+    '',
+    '◈ <b>sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ</b>',
+    'ᴀᴋᴜɴ ᴅɪᴛᴀʜᴀɴ ᴋᴇᴀᴍᴀɴᴀɴ ("ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴀsᴜᴋ sᴀᴀᴛ ɪɴɪ").',
+    '',
+    '⚠ <b>ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ</b>',
+    'ᴅɪʙʟᴏᴋɪʀ ᴋᴀʀᴇɴᴀ ᴀᴘᴋ ᴛɪᴅᴀᴋ ʀᴇsᴍɪ — ᴘᴇʀʟᴜ ᴡᴀ ʀᴇsᴍɪ.',
+    '',
+    '✕ <b>ᴅɪʙᴀɴ</b>',
+    'ɴᴏᴍᴏʀ ᴛᴇʀᴋᴇɴᴀ ʙᴀɴ / ᴘᴇʟᴀɴɢɢᴀʀᴀɴ ᴡʜᴀᴛsᴀᴘᴘ.',
+    '',
+    '⊘ <b>ɴᴏ ʀᴏᴜᴛᴇs</b>',
+    'ᴊᴀʟᴜʀ sᴍs ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.',
+    '──────────────────────',
+    '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ ⦂ ᴋᴏᴅᴇ ᴍᴀsᴜᴋ ᴋᴇ ᴡᴀ ᴅɪ ʜᴘ ʟᴀᴍᴀ.',
+    '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴘᴀɴɢɢɪʟᴀɴ.',
+    '──────────────────────',
+    '◈ ᴛᴏᴍʙᴏʟ ᴅᴇᴛᴀɪʟ ⦂ ᴇᴍᴀɪʟ · 2ғᴀ · ᴄʜᴀɴɴᴇʟ · sᴋᴏʀ',
+    '⇩ ᴇxᴘᴏʀᴛ sɪᴀᴘ ⦂ ᴜɴᴅᴜʜ ᴅᴀғᴛᴀʀ ɴᴏᴍᴏʀ sɪᴀᴘ (.ᴛxᴛ)'
+  ].join('\n');
+  return ctx.reply(infoText, { parse_mode: 'HTML' });
+});
+
+bot.action(/^detect:detail:([^:]+):(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const jobId = ctx.match[1];
+  const digits = ctx.match[2];
+  const userId = ctx.from && ctx.from.id;
+  const resultKey = 'detect:results:' + userId + ':' + jobId;
+  let payload = null;
+  try {
+    const raw = await redis.get(resultKey);
+    payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (_) {}
+  if (!payload || !payload.detailMap) {
+    return ctx.reply('✦ ᴅᴀᴛᴀ ᴅᴇᴛᴀɪʟ ᴋᴇᴅᴀʟᴜᴡᴀʀsᴀ. ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.', { parse_mode: 'HTML' });
+  }
+  const map = payload.detailMap;
+  let found = null;
+  for (const k of Object.keys(map)) {
+    if (String(k).replace(/\D/g, '') === digits || String(k).endsWith(digits)) {
+      found = map[k];
+      break;
+    }
+  }
+  if (!found) {
+    return ctx.reply('✦ ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ᴅɪ ʜᴀsɪʟ ɪɴɪ.', { parse_mode: 'HTML' });
+  }
+  const text = require('./themes').renderAccountDetail(found);
+  return ctx.reply(text, { parse_mode: 'HTML' });
+});
+
+bot.action(/^detect:export:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery('Menyiapkan file…').catch(() => {});
+  const jobId = ctx.match[1];
+  const userId = ctx.from && ctx.from.id;
+  const resultKey = 'detect:results:' + userId + ':' + jobId;
+  let payload = null;
+  try {
+    const raw = await redis.get(resultKey);
+    payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (_) {}
+  const list = (payload && payload.siapList) || [];
+  if (!list.length) {
+    return ctx.reply('✕ ᴛɪᴅᴀᴋ ᴀᴅᴀ ɴᴏᴍᴏʀ sɪᴀᴘ ᴜɴᴛᴜᴋ ᴅɪᴇxᴘᴏʀᴛ.', { parse_mode: 'HTML' });
+  }
+  const body = list.join('\n') + '\n';
+  const filename = 'siap_' + jobId + '.txt';
+  try {
+    await ctx.replyWithDocument(
+      { source: Buffer.from(body, 'utf8'), filename: filename },
+      { caption: '⇩ <b>ᴇxᴘᴏʀᴛ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>\n▸ ᴊᴜᴍʟᴀʜ ⦂ <b>' + list.length + '</b> ɴᴏᴍᴏʀ', parse_mode: 'HTML' }
+    );
+  } catch (err) {
+    // fallback plain text
+    return ctx.reply(
+      '⇩ <b>ᴅᴀғᴛᴀʀ sɪᴀᴘ</b> (' + list.length + ')\n\n<code>' + list.join('\n') + '</code>',
+      { parse_mode: 'HTML' }
+    );
+  }
+});
+
+function buildProgressBar(pct) {
+  const filled = Math.round(pct / 10);
+  return '●'.repeat(filled) + '○'.repeat(10 - filled);
+}
+
+function formatCooldownSmallCaps(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (sec <= 0) return '0s';
+  if (sec <= 0) return '0ᴅ';
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
   const parts = [];
-  if (h) parts.push(h + 'h');
-  if (m) parts.push(m + 'm');
-  if (s || !parts.length) parts.push(s + 's');
+  if (h > 0) parts.push(h + 'ᴊ');
+  if (m > 0) parts.push(m + 'ᴍ');
+  if (s > 0 || parts.length === 0) parts.push(s + 'ᴅ');
   return parts.join(' ');
 }
 
-function toWaUiTimer(seconds) {
-  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (sec <= 0) return 'Ready';
-  if (sec >= 3600) return 'Coba lagi dalam ' + Math.ceil(sec / 3600) + ' jam';
-  const m = Math.floor(sec / 60);
-  const s = String(sec % 60).padStart(2, '0');
-  return 'Coba lagi dalam ' + m + '.' + s;
-}
-
-function resolveCountryIso2(phoneInfo) {
-  const candidates = [phoneInfo && phoneInfo.iso, phoneInfo && phoneInfo.country_iso, phoneInfo && phoneInfo.country_code_iso];
-  for (const c of candidates) {
-    const s = String(c || '').trim().toLowerCase();
-    if (/^[a-z]{2}$/.test(s)) return s;
-  }
-  const cc = String((phoneInfo && (phoneInfo.cc || phoneInfo.country_code)) || '').replace(/\D/g, '');
-  const DIAL_ISO = {
-    '1': 'us', '7': 'ru', '20': 'eg', '27': 'za', '30': 'gr', '31': 'nl', '32': 'be', '33': 'fr', '34': 'es',
-    '36': 'hu', '39': 'it', '40': 'ro', '41': 'ch', '43': 'at', '44': 'gb', '45': 'dk', '46': 'se', '47': 'no',
-    '48': 'pl', '49': 'de', '51': 'pe', '52': 'mx', '53': 'cu', '54': 'ar', '55': 'br', '56': 'cl', '57': 'co',
-    '58': 've', '60': 'my', '61': 'au', '62': 'id', '63': 'ph', '64': 'nz', '65': 'sg', '66': 'th', '81': 'jp',
-    '82': 'kr', '84': 'vn', '86': 'cn', '90': 'tr', '91': 'in', '92': 'pk', '93': 'af', '94': 'lk', '95': 'mm',
-    '98': 'ir', '880': 'bd', '966': 'sa', '971': 'ae', '234': 'ng', '254': 'ke', '255': 'tz', '256': 'ug',
-    '212': 'ma', '213': 'dz', '216': 'tn', '218': 'ly', '963': 'sy', '964': 'iq', '965': 'kw', '968': 'om',
-    '973': 'bh', '974': 'qa', '977': 'np', '992': 'tj', '993': 'tm', '994': 'az', '995': 'ge', '996': 'kg', '998': 'uz'
+function toSmallCapsDevice(name) {
+  if (!name) return 'ᴜɴᴋɴᴏᴡɴ';
+  const map = {
+    a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ', j: 'ᴊ',
+    k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'ǫ', r: 'ʀ', s: 's', t: 'ᴛ',
+    u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', x: 'x', y: 'ʏ', z: 'ᴢ'
   };
-  if (cc && DIAL_ISO[cc]) return DIAL_ISO[cc];
-  const fullDigits = String((phoneInfo && (phoneInfo.full || phoneInfo.phone || phoneInfo.e164)) || '').replace(/\D/g, '');
-  if (fullDigits) {
-    const keys = Object.keys(DIAL_ISO).sort((a, b) => b.length - a.length);
-    for (const k of keys) if (fullDigits.startsWith(k)) return DIAL_ISO[k];
-  }
-  return null;
+  return String(name).toLowerCase().replace(/[a-z]/g, (ch) => map[ch] || ch);
+}
+function deviceLabel(r) {
+  // ◉ ON-DEVICE = kode masuk ke WA di HP lama; ○ OFF-DEVICE = langsung SMS/panggilan
+  if (r && (r.deviceName || r.waOldEligible)) return '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ';
+  return '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ';
 }
 
-function extractChannelTimers(existRaw, codeRaw) {
-  const exist = existRaw || {};
-  const code = codeRaw || {};
-  const existNoRoutes = exist.reason === 'no_routes' || exist.reason === 'no_route';
-  const codeNoRoutes = code.reason === 'no_routes' || code.reason === 'no_route';
-  const existSms = existNoRoutes ? 0 : Math.max(num(exist.sms_wait), num(exist.send_sms_wait), num(exist.sms_cooldown));
-  const codeSmsRaw = codeNoRoutes ? 0 : Math.max(num(code.sms_wait), num(code.send_sms_wait), num(code.sms_cooldown));
-  const existVoice = Math.max(num(exist.voice_wait), num(exist.voice_cooldown));
-  const codeVoice = Math.max(num(code.voice_wait), num(code.voice_cooldown));
-  const existFlash = Math.max(num(exist.flash_wait), num(exist.flash_cooldown));
-  const codeFlash = Math.max(num(code.flash_wait), num(code.flash_cooldown));
-  const existEmail = Math.max(num(exist.email_wait), num(exist.email_cooldown));
-  const codeEmail = Math.max(num(code.email_wait), num(code.email_cooldown));
-  const waOldWait = Math.max(num(exist.wa_old_wait), num(exist.wa_old_cooldown), num(code.wa_old_wait), num(code.wa_old_cooldown));
-  const existRetry = existNoRoutes ? 0 : num(exist.retry_after);
-  const codeRetry = codeNoRoutes ? 0 : num(code.retry_after);
-  const isCodeSent = code.status === 'sent' || code.status === 'ok';
-  const codeMethod = String(code.method || code.login_method || '').toLowerCase();
-  const isWaOldMethod = codeMethod.includes('wa_old');
-  // Echo wa_old: probe method=wa_old sering balikin ~120–300s palsu
-  // Aturan ketat: jika exist SMS open (0), timer code <= 6 menit SELALU dianggap echo
-  const isWaOldEcho =
-    existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 360 &&
-    (isCodeSent || isWaOldMethod || true);
-  // SMS CD HANYA dari exist.* (sumber kebenaran UI WhatsApp)
-  // JANGAN pakai code.sms_wait / retry_after dari probe wa_old
-  let smsSeconds = 0;
-  if (existSms > 0) {
-    smsSeconds = existSms;
-  }
-  // code SMS hanya jika exist gagal total DAN timer panjang (>10 menit) DAN bukan wa_old
-  if (smsSeconds === 0 && !isWaOldEcho && !isWaOldMethod && !isCodeSent && codeSmsRaw >= 600) {
-    smsSeconds = codeSmsRaw;
-  }
-  // JANGAN pakai existRetry sebagai SMS CD — sering retry_after wa_old (~120–300s)
-  let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
-  let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
-  let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
-  if (voiceWait >= 240 && existVoice === 0 && isWaOldMethod) voiceWait = 0;
-  if (flashWait >= 240 && existFlash === 0 && isWaOldMethod) flashWait = 0;
-  const deviceName = pickDeviceName(exist, code);
-  const waOldEligible =
-    Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1 ||
-    Boolean(deviceName);
-  return {
-    sms: smsSeconds, voice: voiceWait, flash: flashWait, email: emailWait, wa_old: waOldWait,
-    retry_after: Math.max(existRetry, codeRetry),
-    wa_old_eligible: waOldEligible, device_name: deviceName, is_wa_old_echo: isWaOldEcho,
-    exist_no_routes: existNoRoutes, code_no_routes: codeNoRoutes, is_code_sent: isCodeSent,
-    exist_sms: existSms, code_sms: codeSmsRaw
-  };
-}
+const PROGRESS_SPINNERS = ['◐', '◓', '◑', '◒'];
+let progressSpinIdx = 0;
 
-function pickDeviceName(exist, code) {
-  const sources = [exist, code];
-  const keys = [
-    'wa_old_device_name', 'wa_old_device', 'device_name', 'old_device_name',
-    'wa_device_name', 'registered_device_name', 'phone_model',
-    'device_model', 'wa_old_model', 'last_device_name', 'device_os_name',
-    'os_name', 'device_board', 'marketing_name'
-  ];
-  for (const src of sources) {
-    if (!src || typeof src !== 'object') continue;
-    for (const k of keys) {
-      const v = src[k];
-      if (v == null) continue;
-      if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
-      if (typeof v === 'object') {
-        const nested = v.name || v.device_name || v.model || v.model_name || v.marketing_name || v.device || null;
-        if (nested && String(nested).trim()) return cleanDeviceName(nested);
-      }
-    }
-    for (const nestKey of ['account_security', 'security', 'device_info', 'wa_old', 'device', 'meta']) {
-      const nest = src[nestKey];
-      if (!nest || typeof nest !== 'object') continue;
-      for (const k of keys) {
-        const v = nest[k];
-        if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
-      }
-    }
-  }
-  try {
-    const blob = JSON.stringify({ exist, code });
-    const patterns = [
-      /"wa_old_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"old_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"wa_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"marketing_name"\s*:\s*"([^"]{2,80})"/i,
-      /"model_name"\s*:\s*"([^"]{2,80})"/i
-    ];
-    for (const re of patterns) {
-      const m = blob.match(re);
-      if (m && m[1] && m[1].trim() && m[1].toLowerCase() !== 'null') return cleanDeviceName(m[1]);
-    }
-  } catch (_) {}
-  return null;
-}
-
-function cleanDeviceName(name) {
-  let s = String(name || '').trim();
-  if (!s) return null;
-  // strip junk wrappers
-  s = s.replace(/^[\s"']+|[\s"']+$/g, '');
-  if (!s || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined' || s === '-') return null;
-  // keep readable length
-  if (s.length > 40) s = s.slice(0, 40).trim();
-  return s;
-}
-
-function buildChannel(seconds) {
-  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  return { isCooldown: sec > 0, rawSeconds: sec, uiTimer: toShortTimer(sec), humanTime: toWaUiTimer(sec), formatted: toShortTimer(sec) };
-}
-
-function applyPatternLibrary(exist, code, timers) {
-  const reason = String(exist.reason || code.reason || '').toLowerCase();
-  const status = String(exist.status || code.status || '').toLowerCase();
-  const hints = [];
-  if (timers.is_wa_old_echo) hints.push('WA_OLD_ECHO');
-  if (reason === 'temporarily_unavailable' || status === 'temporarily_unavailable') hints.push('TEMP_LOCK');
-  if (reason.includes('too_many') || reason === 'too_recent') hints.push('RATE_LIMIT');
-  if (exist.high_sms_rereg_user || code.high_sms_rereg_user) hints.push('HIGH_REREG');
-  if (reason === 'no_routes' || reason === 'no_route') hints.push('NO_ROUTES');
-  if (code.reason === 'method_not_allowed' && !timers.exist_no_routes && timers.sms === 0) hints.push('METHOD_NOT_ALLOWED_SOFT');
-  if (timers.is_code_sent && timers.sms === 0) hints.push('CODE_SENT_READY');
-  if (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal) hints.push('HARD_BAN');
-  return hints;
-}
-
-function detectBanSignals(exist, code, parsed, patternHints) {
-  if (patternHints.includes('HARD_BAN')) return true;
-  if (parsed && parsed.isBanned === true && (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal)) return true;
-  return Boolean(
-    exist.status === 'banned' || code.status === 'banned' ||
-    exist.reason === 'banned' || code.reason === 'banned' ||
-    exist.violation_type || code.violation_type ||
-    exist.in_app_ban_appeal || code.in_app_ban_appeal
-  );
-}
-
-function detectCloneSignals(exist, code, parsed) {
-  if (parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) {
-    return { isCloneBlocked: true, isSecurityBlock: Boolean(parsed.isSecurityBlock) };
-  }
-  const rawBlock = exist.custom_block_screen || code.custom_block_screen || exist.block_screen || code.block_screen || null;
-  let blockScreen = '';
-  if (rawBlock && typeof rawBlock === 'object') {
-    blockScreen = JSON.stringify(rawBlock).toLowerCase();
+function buildProgressText(processed, total, stageLabel, currentNumber) {
+  const safeTotal = total > 0 ? total : 1;
+  const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
+  const pct = Math.round((safeProcessed / safeTotal) * 100);
+  const isDone = safeProcessed >= safeTotal;
+  const title = isDone
+    ? '✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ'
+    : '◔  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ʙᴇʀᴊᴀʟᴀɴ';
+  let currentLine;
+  if (isDone) {
+    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ <b>sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ</b>';
   } else {
-    blockScreen = String(rawBlock || '').toLowerCase();
+    const spin = PROGRESS_SPINNERS[Math.floor(safeProcessed) % PROGRESS_SPINNERS.length];
+    const num = currentNumber || '-';
+    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ ' + spin + ' <code>' + num + '</code>';
   }
-  const reason = String(exist.reason || code.reason || '').toLowerCase();
-  const status = String(exist.status || code.status || '').toLowerCase();
-  const textBlob = (blockScreen + ' ' + JSON.stringify({ exist: { reason: exist.reason, status: exist.status }, code: { reason: code.reason, status: code.status } })).toLowerCase();
+  return (
+    title + '\n\n' +
+    buildProgressBar(pct) + '  <b>' + pct + '%</b>\n' +
+    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ\n' +
+    currentLine + '\n' +
+    '──────────────────────'
+  );
+}
 
-  const unofficial = (
-    blockScreen.includes('unofficial') ||
-    blockScreen.includes('clone') ||
-    blockScreen.includes('tidak resmi') ||
-    blockScreen.includes('aplikasi resmi') ||
-    blockScreen.includes('official whatsapp') ||
-    blockScreen.includes('whatsapp.com/download') ||
-    blockScreen.includes('unduh whatsapp') ||
-    blockScreen.includes('download whatsapp') ||
-    reason.includes('unofficial') ||
-    reason.includes('clone')
-  );
-  const security = (
-    blockScreen.includes('security') ||
-    blockScreen.includes('keamanan') ||
-    blockScreen.includes('demi keamanan') ||
-    blockScreen.includes('login not available') ||
-    blockScreen.includes('login is not available') ||
-    reason.includes('security') ||
-    status.includes('security') ||
-    textBlob.includes('tidak dapat masuk saat ini') ||
-    Boolean(parsed && parsed.isSecurityBlock)
-  );
-  // Jika ada custom_block_screen object dengan title resmi → treat as clone block
-  if (!unofficial && rawBlock && typeof rawBlock === 'object') {
-    const title = String(rawBlock.title || rawBlock.header || '').toLowerCase();
-    if (title.includes('resmi') || title.includes('official') || title.includes('unduh') || title.includes('download')) {
-      return { isCloneBlocked: true, isSecurityBlock: false };
-    }
+async function processDetection(ctx, numbers, detectOpts) {
+  detectOpts = detectOpts || {};
+  const userId = ctx.from.id;
+  const jobId = Date.now().toString(36);
+  await redis.set('detect:active:' + userId, jobId, { ex: 600 });
+  await redis.del('detect:mode:' + userId);
+  const total = numbers.length;
+  const results = new Array(total);
+  let progressMsg;
+  let currentStageLabel = 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+  let stageProcessed = 0;
+  let stageTotal = total;
+  let currentNumber = '-';
+  const inFlight = new Set();
+  let lastProgressEdit = 0;
+  let progressTimer = null;
+  try {
+    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel, currentNumber), { parse_mode: 'HTML' });
+  } catch (_) {}
+  function pickCurrentNumber() {
+    if (inFlight.size === 0) return currentNumber || '-';
+    // Ambil nomor pertama yang masih diproses (stabil, tidak loncat acak)
+    return inFlight.values().next().value || currentNumber || '-';
   }
-  return { isCloneBlocked: Boolean(unofficial), isSecurityBlock: Boolean(security) && !unofficial };
-}
-
-function resolveSmsAvailability(exist, code, timers, patternHints) {
-  const toBool = (v) => {
-    if (typeof v === 'boolean') return v;
-    if (v === 1 || v === '1') return true;
-    if (v === 0 || v === '0') return false;
-    return null;
-  };
-  const eB = toBool(exist.send_sms_eligible);
-  const cB = toBool(code.send_sms_eligible);
-  if (eB === true || cB === true) return true;
-  if (timers.wa_old_eligible || timers.sms > 0 || timers.is_code_sent) return true;
-  if (patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG')) return true;
-  if (patternHints.includes('NO_ROUTES') && eB === false) return false;
-  if (eB === false && cB === false && timers.exist_no_routes) return false;
-  if (eB === false && timers.exist_no_routes && cB === null) return false;
-  return null;
-}
-
-async function runExistOnlyProbe(payloads, headers, countryIso2) {
-  const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    const existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
-    return { existText, codeText: null, partial: true };
-  }, 2, countryIso2);
-  return { existText: data.existText || null, codeText: null, partial: true, proxyMode, sessionTag, existOnly: true };
-}
-
-async function runDualProbe(payloads, headers, countryIso2) {
-  const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    let existText = null;
-    let codeText = null;
-    try {
-      existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
-    } catch (_) {}
-    await sleep(25);
-    try {
-      codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
-    } catch (_) {}
-    if (!existText && !codeText) throw new Error('Dual probe gagal: jaringan');
-    return { existText, codeText, partial: !existText || !codeText };
-  }, undefined, countryIso2);
-  return { existText: data.existText || null, codeText: data.codeText || null, partial: Boolean(data.partial), proxyMode, sessionTag };
-}
-
-function classifyFromResponses(payloads, existText, codeText, proxyMode, sessionTag, countryIso2, meta) {
-  const existResponse = safeJson(existText);
-  const codeResponse = safeJson(codeText);
-  const parsed = WADetector.parseDualResponse(payloads.phoneInfo, existText || '{}', codeText || '{}');
-  const timers = extractChannelTimers(existResponse, codeResponse);
-  const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
-
-  // ========== BAN (ketat — hindari false positive temporary/block soft) ==========
-  const reasonBlob = (
-    String(existResponse.reason || '') + ' ' + String(codeResponse.reason || '') + ' ' +
-    String(existResponse.status || '') + ' ' + String(codeResponse.status || '')
-  ).toLowerCase();
-  const hasAppeal = Boolean(
-    existResponse.in_app_ban_appeal || codeResponse.in_app_ban_appeal ||
-    existResponse.appeal_token || codeResponse.appeal_token
-  );
-  const hasViolation = Boolean(existResponse.violation_type || codeResponse.violation_type);
-  const explicitBan =
-    existResponse.status === 'banned' || codeResponse.status === 'banned' ||
-    existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
-    /\bbanned\b/.test(reasonBlob);
-  // "blocked" saja sering temporary — hanya ban jika ada violation/appeal
-  const blockedHard =
-    (existResponse.reason === 'blocked' || codeResponse.reason === 'blocked') &&
-    (hasViolation || hasAppeal);
-  const hardBan = Boolean(explicitBan || blockedHard || (hasViolation && hasAppeal));
-  let isBanned = hardBan;
-
-  // Temporary / rate-limit → jangan masuk DIBATASI
-  const isTempLock = reasonBlob.includes('temporarily_unavailable') ||
-    reasonBlob.includes('too_many') || reasonBlob.includes('too_recent') ||
-    reasonBlob.includes('rate_limit') || patternHints.includes('TEMP_LOCK') ||
-    patternHints.includes('RATE_LIMIT');
-
-  // ========== CLONE / SECURITY (tidak mempengaruhi siap/cd grouping) ==========
-  const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
-  let isCloneBlocked = Boolean((parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) || cloneSig.isCloneBlocked);
-  let isSecurityBlock = Boolean((parsed && parsed.isSecurityBlock) || cloneSig.isSecurityBlock);
-  if (isBanned) { isCloneBlocked = false; isSecurityBlock = false; }
-  if (isCloneBlocked) isSecurityBlock = false;
-
-  // ========== SMS COOLDOWN — HANYA dari exist (sumber kebenaran UI WA) ==========
-  // exist.sms_wait / send_sms_wait > 0  → cooldown nyata (seperti "Coba lagi dalam 42.51")
-  // exist.sms_wait === 0 & bukan no_routes → SMS terbuka → SIAP
-  // code.sms_wait sering echo wa_old 2–5 menit → JANGAN dipakai sebagai CD SMS
-  const existNoRoutes = Boolean(
-    timers.exist_no_routes ||
-    existResponse.reason === 'no_routes' ||
-    existResponse.reason === 'no_route'
-  );
-  const existSms = Math.max(0, Number(timers.exist_sms) || 0);
-  const existAnswered = Boolean(existText && String(existText).trim());
-
-  // Sumber kebenaran SMS CD: HANYA exist.sms_wait / send_sms_wait
-  // Timer 2–5 menit dari probe wa_old = PALSU, diabaikan total
-  let smsSeconds = existSms > 0 ? existSms : 0;
-  const engineCd = Math.max(0, Number(parsed && parsed.cooldownSeconds) || 0);
-  const st = String((parsed && parsed.state) || '').toUpperCase();
-
-  // Engine sudah filter wa_old echo. Jika engine bilang ready & exist SMS 0 → siap
-  // Engine CD hanya dipercaya jika >= 10 menit (bukan echo 125s/300s)
-  if (smsSeconds === 0 && engineCd >= 600 && parsed && parsed.isCooldown && !parsed.isReady) {
-    smsSeconds = engineCd;
-  }
-
-  // ========== READY vs COOLDOWN ==========
-  let isCooldown = false;
-  let isReady = false;
-
-  if (!isBanned) {
-    if (smsSeconds > 0) {
-      // CD SMS nyata dari exist
-      isCooldown = true;
-      isReady = false;
-    } else if (parsed && parsed.isReady) {
-      // Engine: OTP ready (sudah buang wa_old echo)
-      isReady = true;
-      isCooldown = false;
-    } else if (st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
-      isReady = true;
-      isCooldown = false;
-    } else if (existAnswered && !existNoRoutes) {
-      // exist menjawab & SMS open → SIAP (abaikan code timer palsu)
-      isReady = true;
-      isCooldown = false;
-    } else if (isTempLock && engineCd >= 600) {
-      // Temp lock hanya jika timer panjang nyata
-      isCooldown = true;
-      isReady = false;
-      smsSeconds = engineCd;
-    } else if (st === 'IN_COOLDOWN' || st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN') {
-      // State CD dari engine — tapi buang timer pendek gimmick
-      if (engineCd >= 600) {
-        isCooldown = true;
-        smsSeconds = engineCd;
-      } else if (parsed && parsed.isCooldown && engineCd > 0 && existSms > 0) {
-        isCooldown = true;
-        smsSeconds = existSms;
-      } else if (parsed && parsed.isReady) {
-        isReady = true;
-      } else {
-        // Timer pendek tanpa exist SMS → anggap siap (bukan CD palsu)
-        isReady = true;
+  async function updateProgress(force) {
+    if (!progressMsg) return;
+    const now = Date.now();
+    // Throttle edit agar tidak kelap-kelip (min 450ms)
+    if (!force && now - lastProgressEdit < 450) {
+      if (!progressTimer) {
+        progressTimer = setTimeout(() => {
+          progressTimer = null;
+          updateProgress(true).catch(() => {});
+        }, 450 - (now - lastProgressEdit));
       }
-    } else if (parsed && parsed.isCooldown && existSms > 0) {
-      isCooldown = true;
-      smsSeconds = existSms;
-    } else if (existAnswered) {
-      // Default aman: exist jawab tanpa CD → siap
-      isReady = true;
+      return;
     }
-  }
-
-  const hasDevicePath = Boolean(
-    timers.wa_old_eligible ||
-    timers.device_name ||
-    Number(existResponse.wa_old_eligible || codeResponse.wa_old_eligible || 0) === 1 ||
-    String((parsed && parsed.state) || '').toUpperCase() === 'REGISTERED_ON_DEVICE'
-  );
-
-  const channels = {
-    sms: buildChannel(smsSeconds),
-    voice: buildChannel(timers.voice),
-    flash: buildChannel(timers.flash),
-    email: buildChannel(timers.email),
-    wa_old: buildChannel(timers.wa_old)
-  };
-
-  let accountStatus = 'UNKNOWN';
-  let description = (parsed && parsed.description) || '';
-  if (isBanned) {
-    accountStatus = 'BANNED';
-    description = description || 'Nomor dibatasi / banned';
-  } else if (isCooldown) {
-    accountStatus = 'IN_COOLDOWN';
-    description = description || ('Cooldown SMS · ' + (channels.sms.uiTimer || '0s'));
-  } else if (isReady) {
-    accountStatus = hasDevicePath ? 'REGISTERED_ON_DEVICE' : 'READY';
-    description = description || (hasDevicePath ? 'Siap diverifikasi · perangkat terdaftar' : 'Siap diverifikasi');
-  } else if (existNoRoutes) {
-    accountStatus = 'NO_ROUTES';
-    description = description || 'Jalur SMS tidak tersedia';
-  }
-
-  const confidence = isBanned || isReady || isCooldown ? 0.94 : (existAnswered ? 0.5 : 0.3);
-
-  const rawDigits = String(payloads.rawNumber || '').replace(/\D/g, '');
-  const safeFmt = rawDigits ? ('+' + rawDigits) : String(payloads.rawNumber || '');
-  let formatted = normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone);
-  const shown = String(formatted || '').replace(/\D/g, '');
-  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) {
-    formatted = safeFmt;
-  }
-
-  return {
-    formattedNumber: formatted || safeFmt,
-    region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country || payloads.phoneInfo.iso)) || null,
-    accountStatus,
-    isBanned,
-    isCloneBlocked: false,
-    isSecurityBlock: false,
-    isReady,
-    smsAvailable: isReady || isCooldown,
-    smsOptionMissing: existNoRoutes,
-    anyCooldown: isCooldown,
-    description,
-    deviceName: timers.device_name || null,
-    waOldEligible: hasDevicePath,
-    channels,
-    primaryTimer: { rawSeconds: channels.sms.rawSeconds, uiTimer: channels.sms.uiTimer, humanTime: channels.sms.humanTime },
-    proxyInfo: String(proxyMode || '') + ' · ' + String(sessionTag || ''),
-    proxyTag: sessionTag,
-    proxyCountry: countryIso2,
-    confidence,
-    existClear: isReady || isCooldown || isBanned,
-    needsRecheck: accountStatus === 'UNKNOWN',
-    decisionReasons: [],
-    patternHints,
-    softFallback: false,
-    error: false,
-    partialResponse: Boolean(meta && meta.partial),
-    secondaryPath: isCooldown ? 'cooldown' : (hasDevicePath ? 'device' : (isReady ? 'ready' : null)),
-    secondarySeconds: smsSeconds,
-    engineState: (parsed && parsed.state) || null
-  };
-}
-
-function mergeConsensus(results) {
-  if (!results || !results.length) return softFallback('', {}, null, null);
-  const score = { ready: 0, cooldown: 0, clone: 0, ban: 0, sms: 0 };
-  for (const r of results) {
-    const w = Number(r.confidence) || 0.5;
-    if (r.isBanned) score.ban += w;
-    else if (r.isCloneBlocked || r.isSecurityBlock) score.clone += w;
-    else if (r.anyCooldown) score.cooldown += w;
-    else if (r.smsOptionMissing) score.sms += w;
-    else if (r.isReady) score.ready += w;
-    else score.cooldown += w * 0.5;
-  }
-  let best = 'cooldown'; let bestVal = -1;
-  for (const k of Object.keys(score)) {
-    if (score[k] > bestVal) { bestVal = score[k]; best = k; }
-  }
-  const base = results.filter((r) => {
-    if (best === 'ban') return r.isBanned;
-    if (best === 'clone') return r.isCloneBlocked || r.isSecurityBlock;
-    if (best === 'cooldown') return r.anyCooldown || r.softFallback;
-    if (best === 'sms') return r.smsOptionMissing;
-    if (best === 'ready') return r.isReady;
-    return false;
-  }).sort((a, b) => {
-    const ta = (a.primaryTimer && a.primaryTimer.rawSeconds) || 0;
-    const tb = (b.primaryTimer && b.primaryTimer.rawSeconds) || 0;
-    const stableA = ta > 0 ? 1 : 0;
-    const stableB = tb > 0 ? 1 : 0;
-    if (stableB !== stableA) return stableB - stableA;
-    return (b.confidence || 0) - (a.confidence || 0);
-  })[0] || results[0];
-  return { ...base, confidence: Math.min(0.99, (base.confidence || 0) + 0.05), consensusVotes: bestVal, consensusRounds: results.length, needsRecheck: false };
-}
-
-function softFallback(rawNumber, payloads, countryIso2, lastError) {
-  const rawDigits = String(rawNumber || '').replace(/\D/g, '');
-  const safeFmt = rawDigits ? ('+' + rawDigits) : String(rawNumber || '');
-  let formatted = normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null);
-  const shown = String(formatted || '').replace(/\D/g, '');
-  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) {
-    formatted = safeFmt;
-  }
-  return {
-    formattedNumber: formatted || safeFmt,
-    region: null,
-    accountStatus: 'UNKNOWN',
-    isBanned: false,
-    isCloneBlocked: false,
-    isSecurityBlock: false,
-    isReady: false,
-    smsAvailable: null,
-    smsOptionMissing: false,
-    anyCooldown: false,
-    description: 'Respons tidak stabil — coba ulang sebentar.',
-    deviceName: null,
-    waOldEligible: false,
-    channels: {
-      sms: buildChannel(0), voice: buildChannel(0), flash: buildChannel(0),
-      email: buildChannel(0), wa_old: buildChannel(0)
-    },
-    primaryTimer: { rawSeconds: 0, uiTimer: '0s', humanTime: 'Ready' },
-    proxyInfo: 'FALLBACK', proxyTag: 'FALLBACK', proxyCountry: countryIso2,
-    softFallback: true,
-    confidence: 0.3,
-    needsRecheck: true,
-    decisionReasons: ['soft_fallback'],
-    patternHints: ['SOFT_FALLBACK'],
-    error: false,
-    secondaryPath: null,
-    secondarySeconds: 0
-  };
-}
-
-async function checkWhatsAppCooldown(rawNumber, options) {
-  const opts = options || {};
-  if (!opts.skipSticky && !opts.forceRefresh && opts.wave !== 'exist') {
-    const cached = stickyGet(rawNumber);
-    if (cached) {
-      return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
-    }
-  }
-  const payloads = await WADetector.buildDualPayloads(String(rawNumber));
-  if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
-  payloads.rawNumber = String(rawNumber);
-  const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
-  const headers = buildHeaders(payloads.userAgent, countryIso2);
-  if (opts.wave === 'exist') {
+    lastProgressEdit = now;
+    currentNumber = pickCurrentNumber();
     try {
-      const probe = await runExistOnlyProbe(payloads, headers, countryIso2);
-      return classifyFromResponses(payloads, probe.existText, null, probe.proxyMode, probe.sessionTag, countryIso2, { partial: true, existOnly: true });
-    } catch (err) {
-      return softFallback(rawNumber, payloads, countryIso2, err);
-    }
-  }
-  if (!(opts.wave === 'full' || opts.wave === 'dual')) {
-    try {
-      const existProbe = await runExistOnlyProbe(payloads, headers, countryIso2);
-      const existResult = classifyFromResponses(payloads, existProbe.existText, null, existProbe.proxyMode, existProbe.sessionTag, countryIso2, { partial: true, existOnly: true });
-      if (existResult.existClear && !existResult.needsRecheck) {
-        const outClear = { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
-        stickySet(rawNumber, outClear);
-        return outClear;
-      }
+      await ctx.telegram.editMessageText(
+        progressMsg.chat.id,
+        progressMsg.message_id,
+        undefined,
+        buildProgressText(stageProcessed, stageTotal, currentStageLabel, currentNumber),
+        { parse_mode: 'HTML' }
+      );
     } catch (_) {}
   }
-  const rounds = [];
-  let lastError = null;
-  for (let attempt = 1; attempt <= INTERNAL_RETRIES; attempt++) {
-    try {
-      const dual = await runDualProbe(payloads, headers, countryIso2);
-      const result = classifyFromResponses(payloads, dual.existText, dual.codeText, dual.proxyMode, dual.sessionTag, countryIso2, { partial: dual.partial, existOnly: false });
-      rounds.push(result);
-      if (!result.needsRecheck && result.accountStatus !== 'UNKNOWN') {
-        if (!CONSENSUS_ENABLED || result.confidence >= LOW_CONFIDENCE_THRESHOLD) {
-          if (result.isBanned && !(result.patternHints && result.patternHints.includes('HARD_BAN')) && attempt < INTERNAL_RETRIES) {
-            await sleep(100);
+  function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+  function preserveNumber(raw, result) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    const fallback = digits ? ('+' + digits) : String(raw || '');
+    if (!result) return fallback;
+    const shown = String(result.formattedNumber || '').replace(/\D/g, '');
+    // If result lost country code (shorter/different than input), force original
+    if (!shown || (digits.length >= 10 && shown.length < digits.length - 1) || (digits.length >= 10 && !digits.endsWith(shown.slice(-8)))) {
+      result.formattedNumber = fallback;
+    } else if (!String(result.formattedNumber || '').startsWith('+') && digits) {
+      result.formattedNumber = '+' + shown;
+    }
+    return result.formattedNumber || fallback;
+  }
+  async function checkOne(raw, waveOpts) {
+    const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
+    if (stop) return { cancelled: true };
+    const digits = String(raw || '').replace(/\D/g, '');
+    const safeNumber = digits ? ('+' + digits) : String(raw || '');
+    const opts = Object.assign({ skipSticky: true, forceRefresh: Boolean(detectOpts.forceRefresh) }, waveOpts || {});
+    let last = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const stop2 = await redis.get('detect:stop:' + userId + ':' + jobId);
+      if (stop2) return { cancelled: true };
+      try {
+        let result = await checkWhatsAppCooldown(raw, opts);
+        if (result && !result.cancelled) {
+          preserveNumber(raw, result);
+          // soft / network → retry with short backoff (max 2 attempts for speed)
+          const isNetFail = result.softFallback || result.needsRecheck ||
+            (result.description && /transport|network|too_many|timeout|ECONN|unstable/i.test(String(result.description)));
+          if (isNetFail && attempt < 2) {
+            last = result;
+            await sleep(250 * attempt + Math.floor(Math.random() * 200));
             continue;
           }
-          const out = { ...result, probeMode: 'dual', consensusRounds: rounds.length };
-          stickySet(rawNumber, out);
-          return out;
+          if (result.softFallback && (result.isReady || result.anyCooldown) && !result.isBanned) {
+            result.softFallback = false;
+            result.needsRecheck = false;
+          }
+          // Ban dari soft/network jangan dipercaya — paksa recheck path
+          if (result.isBanned && (result.softFallback || result.needsRecheck || (result.confidence || 0) < 0.8)) {
+            result.isBanned = false;
+            result.accountStatus = 'UNKNOWN';
+            result.needsRecheck = true;
+            result.softFallback = true;
+          }
+          if (!result.error && !result.softFallback) {
+            await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-').catch(() => {});
+          }
+          return result;
         }
-      }
-      if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) {
-        await sleep(200 + Math.floor(Math.random() * 300));
-        continue;
-      }
-      if (rounds.length >= 2) {
-        const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
-        stickySet(rawNumber, mc);
-        return mc;
-      }
-      return { ...result, probeMode: 'dual', consensusRounds: rounds.length };
-    } catch (err) {
-      lastError = err;
-      if (attempt < INTERNAL_RETRIES) {
-        const msg = String((err && err.message) || '');
-        const wait = /too_many|rate|timeout|network|transport/i.test(msg)
-          ? (800 * attempt + Math.floor(Math.random() * 700))
-          : (300 + Math.floor(Math.random() * 400));
-        await sleep(wait);
-        continue;
+      } catch (err) {
+        last = {
+          formattedNumber: safeNumber,
+          isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false,
+          accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.2,
+          needsRecheck: true,
+          description: String((err && err.message) || 'network').slice(0, 120)
+        };
+        await sleep(300 * attempt + Math.floor(Math.random() * 250));
       }
     }
+    // Final: jangan biarkan "Lainnya" kosong info — kembalikan last atau soft
+    if (last) {
+      preserveNumber(raw, last);
+      return last;
+    }
+    return {
+      formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false,
+      anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true,
+      confidence: 0.2, needsRecheck: true, description: 'Respons tidak stabil · coba ulang'
+    };
   }
-  if (rounds.length >= 2) {
-    const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
-    stickySet(rawNumber, mc);
-    return mc;
+  async function runPool(indexes, waveOpts) {
+    let cursor = 0;
+    stageProcessed = 0;
+    stageTotal = indexes.length || 1;
+    let conc;
+    // Balance kecepatan vs akurasi + stabilitas progress
+    if (indexes.length >= 20) conc = 6;
+    else if (indexes.length >= 12) conc = 5;
+    else if (indexes.length >= 6) conc = 4;
+    else conc = Math.min(3, indexes.length || 1);
+    const CONCURRENCY_SAFE = Math.max(1, conc);
+    async function worker(workerId) {
+      if (workerId > 0) await sleep(workerId * 40);
+      while (cursor < indexes.length) {
+        const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
+        if (stop) return;
+        const pos = cursor++;
+        if (pos >= indexes.length) return;
+        const i = indexes[pos];
+        const rawNum = numbers[i];
+        const digs = String(rawNum || '').replace(/\D/g, '');
+        const displayNum = digs ? ('+' + digs) : String(rawNum || '-');
+        inFlight.add(displayNum);
+        currentNumber = pickCurrentNumber();
+        await updateProgress(false);
+        try {
+          results[i] = await checkOne(numbers[i], waveOpts);
+        } finally {
+          inFlight.delete(displayNum);
+        }
+        stageProcessed += 1;
+        currentNumber = pickCurrentNumber();
+        await updateProgress(stageProcessed === stageTotal);
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
+    stageProcessed = stageTotal;
+    await updateProgress();
   }
-  if (rounds.length === 1 && rounds[0].accountStatus !== 'UNKNOWN') {
-    return { ...rounds[0], consensusRounds: 1, probeMode: 'dual' };
+  const allIdx = Array.from({ length: total }, (_, i) => i);
+  // Selalu dual-probe (exist+code) agar akurat — SMS wait & device dari response lengkap
+  currentStageLabel = total > 1 ? 'ᴍᴇᴍᴘʀᴏsᴇs ' + total + ' ɴᴏᴍᴏʀ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
+  await runPool(allIdx, { wave: 'full' });
+  const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
+  await redis.del('detect:active:' + userId);
+  await redis.del('detect:stop:' + userId + ':' + jobId);
+  if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+
+  const groups = { ready: [], cooldown: [], security: [], clone: [], restricted: [], noroutes: [], other: [] };
+  const detailMap = {};
+  for (let gi = 0; gi < results.length; gi++) {
+    const r = results[gi];
+    if (!r || r.cancelled) continue;
+    const origDigits = String(numbers[gi] || '').replace(/\D/g, '');
+    const origNum = origDigits ? ('+' + origDigits) : null;
+    let num = origNum || r.formattedNumber || '-';
+    const shownDigits = String(num).replace(/\D/g, '');
+    if (origDigits && shownDigits && shownDigits !== origDigits) num = origNum;
+    r.formattedNumber = num;
+    detailMap[num] = r;
+
+    const dev = deviceLabel(r);
+    const score = r.qualityScore != null ? (' · ' + r.qualityScore) : '';
+
+    if (r.isBanned === true || r.accountStatus === 'BANNED') {
+      groups.restricted.push(num);
+    } else if (r.isCloneBlocked || r.accountStatus === 'CLONE_BLOCK') {
+      groups.clone.push(num + ' ' + dev);
+    } else if (r.isSecurityBlock || r.accountStatus === 'SECURITY_BLOCK') {
+      groups.security.push(num + ' ' + dev);
+    } else if (r.accountStatus === 'NO_ROUTES') {
+      groups.noroutes.push(num);
+    } else if (r.isReady && !r.isBanned) {
+      groups.ready.push({ line: num + ' ' + dev + score, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num, score: r.qualityScore || 0 });
+    } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
+      let secs = 0;
+      if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
+      else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
+      else if (r.secondarySeconds > 0) secs = Number(r.secondarySeconds) || 0;
+      if (secs > 0 && secs <= 360 && (Number(r.confidence) || 0) < 0.9 && r.isReady) secs = 0;
+      const dur = formatCooldownSmallCaps(secs);
+      // Channel breakdown singkat
+      let chHint = '';
+      if (r.channels) {
+        const parts = [];
+        if (r.channels.sms && r.channels.sms.rawSeconds > 0) parts.push('sᴍs');
+        if (r.channels.voice && r.channels.voice.rawSeconds > 0) parts.push('ᴠᴏɪᴄᴇ');
+        if (r.channels.flash && r.channels.flash.rawSeconds > 0) parts.push('ғʟᴀsʜ');
+        if (parts.length) chHint = ' · ' + parts.join('/');
+      }
+      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' ' + dev + chHint, secs: secs, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num });
+    } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
+      const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
+      groups.other.push(num + note);
+    } else {
+      const note = r.description ? (' · ' + r.description) : '';
+      groups.other.push(num + note);
+    }
   }
-  return softFallback(rawNumber, payloads, countryIso2, lastError);
+
+  groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0) || (b.score || 0) - (a.score || 0));
+  groups.cooldown.sort((a, b) => {
+    const ra = a.rank != null ? a.rank : 1;
+    const rb = b.rank != null ? b.rank : 1;
+    if (ra !== rb) return ra - rb;
+    return (a.secs || 0) - (b.secs || 0);
+  });
+
+  const lines = [];
+  lines.push('✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ');
+  lines.push('');
+  lines.push(buildProgressBar(100) + '  100%');
+  lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
+  lines.push('sᴀᴀᴛ ɪɴɪ ⦂ sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ');
+  lines.push('──────────────────────');
+  lines.push('✧ sɪᴀᴘ ⦂ <b>' + groups.ready.length + '</b>');
+  lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
+  lines.push('◈ sᴇᴄᴜʀɪᴛʏ ⦂ <b>' + groups.security.length + '</b>');
+  lines.push('⚠ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
+  lines.push('✕ ʙᴀɴ ⦂ <b>' + groups.restricted.length + '</b>');
+  if (groups.noroutes.length) lines.push('⊘ ɴᴏ ʀᴏᴜᴛᴇs ⦂ <b>' + groups.noroutes.length + '</b>');
+  if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
+  lines.push('──────────────────────');
+  lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
+  if (groups.ready.length) {
+    lines.push('');
+    lines.push('✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
+    groups.ready.forEach((n) => lines.push(n.line || n));
+  }
+  if (groups.cooldown.length) {
+    lines.push('');
+    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
+    groups.cooldown.forEach((n) => lines.push(n.line || n));
+  }
+  if (groups.security.length) {
+    lines.push('');
+    lines.push('◈ <b>sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ</b>');
+    groups.security.forEach((n) => lines.push(n));
+  }
+  if (groups.clone.length) {
+    lines.push('');
+    lines.push('⚠ <b>ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ</b>');
+    groups.clone.forEach((n) => lines.push(n));
+  }
+  if (groups.restricted.length) {
+    lines.push('');
+    lines.push('✕ <b>ᴅɪʙᴀɴ</b>');
+    groups.restricted.forEach((n) => lines.push(n));
+  }
+  if (groups.noroutes.length) {
+    lines.push('');
+    lines.push('⊘ <b>ɴᴏ ʀᴏᴜᴛᴇs</b>');
+    groups.noroutes.forEach((n) => lines.push(n));
+  }
+  if (groups.other.length) {
+    lines.push('');
+    lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
+    groups.other.forEach((n) => lines.push(n));
+  }
+  try {
+    const user = await getEffectiveUser(ctx);
+    const checkedCount = results.filter((r) => r && !r.cancelled).length || total;
+    if (!isOwner(ctx) && !isUserVip(user)) {
+      await consumeQuota(ctx.from.id, Math.min(checkedCount, 1));
+    } else {
+      await incrementUserChecks(ctx.from.id, checkedCount);
+    }
+  } catch (e) { console.error('[quota/leaderboard]', e && e.message || e); }
+
+  // Simpan hasil lengkap untuk DETAIL + EXPORT
+  const resultKey = 'detect:results:' + userId + ':' + jobId;
+  const siapList = groups.ready.map((x) => x.num || String(x.line || '').split(' ')[0]).filter(Boolean);
+  try {
+    const refreshKey = 'detect:refresh:' + userId + ':' + jobId;
+    await redis.set(refreshKey, JSON.stringify(numbers), { ex: 3600 });
+    await redis.set(resultKey, JSON.stringify({ results: results.filter(Boolean), siapList, detailMap }), { ex: 3600 });
+  } catch (_) {}
+
+  // Tombol detail: max 6 nomor agar keyboard tidak terlalu panjang
+  const detailBtns = [];
+  const allNums = Object.keys(detailMap).slice(0, 6);
+  for (let di = 0; di < allNums.length; di += 2) {
+    const row = [];
+    row.push(styledCallback('◈ ' + allNums[di].slice(-6), 'detect:detail:' + jobId + ':' + allNums[di].replace(/\D/g, ''), 'primary'));
+    if (allNums[di + 1]) {
+      row.push(styledCallback('◈ ' + allNums[di + 1].slice(-6), 'detect:detail:' + jobId + ':' + allNums[di + 1].replace(/\D/g, ''), 'primary'));
+    }
+    detailBtns.push(row);
+  }
+
+  const keyboardRows = [
+    [
+      styledCallback('↻ UPDATE', 'detect:refresh:' + jobId, 'success'),
+      styledCallback('ⓘ INFO', 'detect:info', 'primary')
+    ]
+  ];
+  if (siapList.length) {
+    keyboardRows.push([styledCallback('⇩ EXPORT SIAP (' + siapList.length + ')', 'detect:export:' + jobId, 'success')]);
+  }
+  keyboardRows.push(...detailBtns);
+
+  return ctx.reply(lines.join('\n'), {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard(keyboardRows)
+  });
 }
 
-module.exports = { checkWhatsAppCooldown, getHealth };
+bot.hears('♛ OWNER CONSOLE', async (ctx) => {
+  if (!isOwner(ctx)) return ctx.reply('✕ ᴀᴋsᴇs ᴅɪᴛᴏʟᴀᴋ', { parse_mode: 'HTML' });
+  return ctx.reply('♛ <b>ᴏᴡɴᴇʀ ᴄᴏɴsᴏʟᴇ</b>\n\nᴘɪʟɪʜ ᴀᴋsɪ ᴅɪ ʙᴀᴡᴀʜ.', {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([
+      [
+        styledCallback('✚ AKTIVASI PREMIUM', 'owner:activate', 'success'),
+        styledCallback('▤ BROADCAST', 'owner:broadcast', 'primary')
+      ]
+    ])
+  });
+});
+bot.hears('✚ AKTIVASI PREMIUM', async (ctx) => {
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'activate_vip');
+  return ctx.reply('✚ <b>ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ</b>\n\nᴋɪʀɪᴍ ғᴏʀᴍᴀᴛ:\n<code>user_id hari</code>\nᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+});
+bot.hears('▤ BROADCAST', async (ctx) => {
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'broadcast');
+  return ctx.reply('▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴇʙᴀʀ ᴋᴇ sᴇᴍᴜᴀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+});
+bot.action('owner:activate', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'activate_vip');
+  return ctx.reply('✚ <b>ᴀᴋᴛɪᴠᴀsɪ ᴘʀᴇᴍɪᴜᴍ</b>\n\nᴋɪʀɪᴍ ғᴏʀᴍᴀᴛ:\n<code>user_id hari</code>\nᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+});
+bot.action('owner:broadcast', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  await setOwnerAction(ctx.from.id, 'broadcast');
+  return ctx.reply('▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\nᴋɪʀɪᴍ ᴘᴇsᴀɴ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪsᴇʙᴀʀ ᴋᴇ sᴇᴍᴜᴀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+});
+bot.action(/^contact:reply:(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  if (!isOwner(ctx)) return;
+  const targetId = ctx.match[1];
+  await redis.set('owner:contact:target:' + ctx.from.id, targetId, { ex: 600 });
+  return ctx.reply('✉︎ <b>ʙᴀʟᴀs ᴘᴇsᴀɴ</b>\n\nᴋɪʀɪᴍ ʙᴀʟᴀsᴀɴ ᴜɴᴛᴜᴋ ᴜsᴇʀ <code>' + targetId + '</code>.', { parse_mode: 'HTML' });
+});
+const REFERRAL_OFFERS = {
+  'quota_3': { type: 'quota', amount: 3, cost: 10, label: '3 ᴋᴜᴏᴛᴀ ᴄᴇᴋ' },
+  'vip_1': { type: 'vip', amount: 1, cost: 25, label: '1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ' },
+  'vip_3': { type: 'vip', amount: 3, cost: 50, label: '3 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ' },
+  'vip_7': { type: 'vip', amount: 7, cost: 100, label: '7 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ' }
+};
+
+async function showReferralExchange(ctx, edit) {
+  const stats = await getReferralStats(ctx.from.id);
+  const message = require('./themes').renderReferralExchange(stats);
+  const keyboard = Markup.inlineKeyboard([
+    [styledCallback('✧ 3 ᴋᴜᴏᴛᴀ · 10 ᴋᴏɪɴ', 'referral:redeem:quota_3', 'primary')],
+    [styledCallback('✧ 1 ʜᴀʀɪ · 25 ᴋᴏɪɴ', 'referral:redeem:vip_1', 'success')],
+    [styledCallback('✧ 3 ʜᴀʀɪ · 50 ᴋᴏɪɴ', 'referral:redeem:vip_3', 'success')],
+    [styledCallback('✧ 7 ʜᴀʀɪ · 100 ᴋᴏɪɴ', 'referral:redeem:vip_7', 'success')],
+    [styledCallback('↶ KEMBALI', 'referral:back', 'danger')]
+  ]);
+  if (edit && ctx.editMessageText) {
+    return ctx.editMessageText(message, { parse_mode: 'HTML', ...keyboard }).catch(() =>
+      ctx.reply(message, { parse_mode: 'HTML', ...keyboard })
+    );
+  }
+  return ctx.reply(message, { parse_mode: 'HTML', ...keyboard });
+}
+
+bot.action('referral:menu', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return showReferralExchange(ctx, false);
+});
+
+bot.action('referral:back', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const me = await bot.telegram.getMe();
+  const link = 'https://t.me/' + me.username + '?start=ref_' + ctx.from.id;
+  const stats = await getReferralStats(ctx.from.id);
+  const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(link) + '&text=' + encodeURIComponent('Gabung MetaDetect!');
+  return ctx.editMessageText(require('./themes').renderReferral({ link, stats }), {
+    parse_mode: 'HTML',
+    ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl), styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]])
+  }).catch(async () => {
+    return ctx.reply(require('./themes').renderReferral({ link, stats }), {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([[Markup.button.url('⇧ BAGIKAN TAUTAN', shareUrl), styledCallback('◈ TUKAR KOIN', 'referral:menu', 'primary')]])
+    });
+  });
+});
+
+bot.action(/^referral:redeem:(quota_3|vip_1|vip_3|vip_7)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const offerKey = ctx.match[1];
+  const offer = REFERRAL_OFFERS[offerKey];
+  if (!offer) return ctx.reply('✕ ᴘᴀᴋᴇᴛ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ', { parse_mode: 'HTML' });
+  try {
+    const result = await redeemReferralReward(ctx.from.id, offer);
+    if (!result.ok) {
+      return ctx.reply(
+        '✕ <b>ᴋᴏɪɴ ᴛɪᴅᴀᴋ ᴄᴜᴋᴜᴘ</b>\n\n' +
+        '▸ sᴀʟᴅᴏ ⦂ <b>' + result.balance + '</b> ᴋᴏɪɴ\n' +
+        '▸ ᴅɪʙᴜᴛᴜʜᴋᴀɴ ⦂ <b>' + offer.cost + '</b> ᴋᴏɪɴ\n\n' +
+        '<blockquote>ᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ ʟᴇʙɪʜ ʙᴀɴʏᴀᴋ ᴜɴᴛᴜᴋ ᴍᴇɴᴅᴀᴘᴀᴛᴋᴀɴ ᴋᴏɪɴ.</blockquote>',
+        { parse_mode: 'HTML' }
+      );
+    }
+    const successMsg = offer.type === 'quota'
+      ? ('✓ <b>ᴘᴇɴᴜᴋᴀʀᴀɴ ʙᴇʀʜᴀsɪʟ</b>\n\n' +
+         '▸ ᴘᴀᴋᴇᴛ ⦂ <b>' + offer.label + '</b>\n' +
+         '▸ sɪsᴀ ᴋᴏɪɴ ⦂ <b>' + result.balance + '</b>\n\n' +
+         '<blockquote>ᴋᴜᴏᴛᴀ ᴛᴀᴍʙᴀʜᴀɴ sᴜᴅᴀʜ ᴀᴋᴛɪғ ᴅᴀɴ ʙɪsᴀ ʟᴀɴɢsᴜɴɢ ᴅɪᴘᴀᴋᴀɪ.</blockquote>')
+      : ('✓ <b>ᴘᴇɴᴜᴋᴀʀᴀɴ ʙᴇʀʜᴀsɪʟ</b>\n\n' +
+         '▸ ᴘᴀᴋᴇᴛ ⦂ <b>' + offer.label + '</b>\n' +
+         '▸ sɪsᴀ ᴋᴏɪɴ ⦂ <b>' + result.balance + '</b>\n\n' +
+         '<blockquote>ᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ sᴜᴅᴀʜ ᴀᴋᴛɪғ. sᴇʟᴀᴍᴀᴛ ᴍᴇɴᴄᴏʙᴀ!</blockquote>');
+    return ctx.reply(successMsg, { parse_mode: 'HTML' });
+  } catch (err) {
+    console.error('[referral redeem]', err && err.message || err);
+    return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴᴜᴋᴀʀ. ᴄᴏʙᴀ ʟᴀɢɪ.', { parse_mode: 'HTML' });
+  }
+});
+
+bot.on('text', async (ctx, next) => {
+  const text = (ctx.message && ctx.message.text) || '';
+  if (/^(⌖\s*DETECT|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
+
+  // Owner reply to user contact
+  if (isOwner(ctx)) {
+    const replyTarget = await redis.get('owner:contact:target:' + ctx.from.id);
+    if (replyTarget) {
+      await redis.del('owner:contact:target:' + ctx.from.id);
+      try {
+        await ctx.telegram.sendMessage(Number(replyTarget), '✉︎ <b>ʙᴀʟᴀsᴀɴ ᴀᴅᴍɪɴ</b>\n\n' + escapeHtml(text), { parse_mode: 'HTML' });
+        return ctx.reply('✓ ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ ᴋᴇ ᴜsᴇʀ <code>' + replyTarget + '</code>.', { parse_mode: 'HTML' });
+      } catch (err) {
+        return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ: ' + String(err.message || err).slice(0, 120));
+      }
+    }
+    const ownerAction = await getOwnerAction(ctx.from.id);
+    if (ownerAction === 'activate_vip') {
+      await clearOwnerAction(ctx.from.id);
+      const parts = text.trim().split(/\s+/);
+      const targetId = Number(parts[0]);
+      const days = Number(parts[1] || 30);
+      if (!targetId || !days) {
+        return ctx.reply('✕ ғᴏʀᴍᴀᴛ sᴀʟᴀʜ. ᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+      }
+      try {
+        await activateVip(targetId, days, 'OWNER');
+        try { await ctx.telegram.sendMessage(targetId, '✧ <b>ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ</b>\n\nᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ ᴋᴀᴍᴜ ᴛᴇʟᴀʜ ᴅɪᴀᴋᴛɪғᴋᴀɴ sᴇʟᴀᴍᴀ <b>' + days + '</b> ʜᴀʀɪ.', { parse_mode: 'HTML' }); } catch (_) {}
+        return ctx.reply('✓ ᴘʀᴇᴍɪᴜᴍ ᴀᴋᴛɪғ ᴜɴᴛᴜᴋ <code>' + targetId + '</code> · ' + days + ' ʜᴀʀɪ.', { parse_mode: 'HTML' });
+      } catch (err) {
+        return ctx.reply('✕ ɢᴀɢᴀʟ: ' + String(err.message || err).slice(0, 120));
+      }
+    }
+    if (ownerAction === 'broadcast') {
+      await clearOwnerAction(ctx.from.id);
+      const broadcastText = text.trim();
+      if (!broadcastText) {
+        return ctx.reply('✕ ᴘᴇsᴀɴ ʙʀᴏᴀᴅᴄᴀsᴛ ᴋᴏsᴏɴɢ.', { parse_mode: 'HTML' });
+      }
+      let userIds = [];
+      try {
+        userIds = await redis.smembers('users:all') || [];
+      } catch (err) {
+        console.error('[broadcast list]', err && err.message || err);
+        return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇᴍʙᴀᴄᴀ ᴅᴀғᴛᴀʀ ᴜsᴇʀ.', { parse_mode: 'HTML' });
+      }
+      if (!userIds.length) {
+        return ctx.reply('✕ ʙᴇʟᴜᴍ ᴀᴅᴀ ᴜsᴇʀ ᴛᴇʀᴅᴀғᴛᴀʀ ᴅɪ sɪsᴛᴇᴍ.', { parse_mode: 'HTML' });
+      }
+      const statusMsg = await ctx.reply(
+        '▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ ᴅɪᴍᴜʟᴀɪ</b>\n\n' +
+        '▸ ᴛᴏᴛᴀʟ ᴛᴀʀɢᴇᴛ ⦂ <b>' + userIds.length + '</b> ᴜsᴇʀ\n' +
+        '▸ sᴛᴀᴛᴜs ⦂ ᴍᴇɴɢɪʀɪᴍ…',
+        { parse_mode: 'HTML' }
+      );
+      let ok = 0;
+      let fail = 0;
+      const payload =
+        '▤ <b>ᴘᴇɴɢᴜᴍᴜᴍᴀɴ</b>\n\n' +
+        escapeHtml(broadcastText) + '\n\n' +
+        '<i>— MetaDetect</i>';
+      for (let bi = 0; bi < userIds.length; bi++) {
+        const uid = Number(userIds[bi]);
+        if (!uid) { fail += 1; continue; }
+        try {
+          await ctx.telegram.sendMessage(uid, payload, { parse_mode: 'HTML' });
+          ok += 1;
+        } catch (_) {
+          fail += 1;
+        }
+        // Rate-limit Telegram ~25 msg/s aman
+        if (bi % 20 === 19) await new Promise((r) => setTimeout(r, 1200));
+        else await new Promise((r) => setTimeout(r, 50));
+      }
+      const doneText =
+        '▤ <b>ʙʀᴏᴀᴅᴄᴀsᴛ sᴇʟᴇsᴀɪ</b>\n\n' +
+        '▸ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + ok + '</b>\n' +
+        '▸ ɢᴀɢᴀʟ ⦂ <b>' + fail + '</b>\n' +
+        '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + userIds.length + '</b>';
+      try {
+        if (statusMsg) {
+          await ctx.telegram.editMessageText(statusMsg.chat.id, statusMsg.message_id, undefined, doneText, { parse_mode: 'HTML' });
+        } else {
+          await ctx.reply(doneText, { parse_mode: 'HTML' });
+        }
+      } catch (_) {
+        await ctx.reply(doneText, { parse_mode: 'HTML' });
+      }
+      return;
+    }
+  }
+
+  // User contact admin — forward message to owner
+  const contactState = await redis.get('contact:state:' + ctx.from.id);
+  if (contactState === 'waiting') {
+    await redis.del('contact:state:' + ctx.from.id);
+    const uname = ctx.from.username ? '@' + ctx.from.username : '-';
+    const fullName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Pengguna';
+    if (!ADMIN_ID) {
+      return ctx.reply('✕ <b>ᴀᴅᴍɪɴ ʙᴇʟᴜᴍ ᴅɪᴋᴏɴғɪɢᴜʀᴀsɪ</b>\n\n<blockquote>sᴇᴛ ᴇɴᴠ ADMIN_ID ᴅɪ ᴠᴇʀᴄᴇʟ.</blockquote>', { parse_mode: 'HTML' });
+    }
+    try {
+      await ctx.telegram.sendMessage(
+        ADMIN_ID,
+        '✉︎ <b>ᴘᴇsᴀɴ ᴅᴀʀɪ ᴜsᴇʀ</b>\n\n' +
+        '▸ ɴᴀᴍᴀ ⦂ <b>' + escapeHtml(fullName) + '</b>\n' +
+        '▸ ᴜsᴇʀ ⦂ <b>' + escapeHtml(uname) + '</b>\n' +
+        '▸ ɪᴅ ⦂ <code>' + ctx.from.id + '</code>\n\n' +
+        '<blockquote>' + escapeHtml(text) + '</blockquote>',
+        {
+          parse_mode: 'HTML',
+          ...Markup.inlineKeyboard([
+            [styledCallback('↩ BALAS', 'contact:reply:' + ctx.from.id, 'primary')]
+          ])
+        }
+      );
+      return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴀᴅᴍɪɴ ᴀᴋᴀɴ ᴍᴇᴍʙᴀʟᴀs sᴇʙᴇɢᴀɪᴍᴀɴᴀ ᴍᴜɴɢᴋɪɴ.', { parse_mode: 'HTML' });
+    } catch (err) {
+      console.error('[contact forward]', err && err.message || err);
+      return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ ᴘᴇsᴀɴ</b>\n\n<blockquote>' + escapeHtml(String(err.message || err).slice(0, 120)) + '</blockquote>', { parse_mode: 'HTML' });
+    }
+  }
+
+  const mode = await redis.get('detect:mode:' + ctx.from.id);
+  if (mode !== 'waiting_numbers') return next();
+  const phones = extractPhoneCandidates(text);
+  if (!phones.length) {
+    return ctx.reply('✦ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ ⦂ +6281234567890</blockquote>', { parse_mode: 'HTML' });
+  }
+  const user = await getEffectiveUser(ctx);
+  const isVip = isOwner(ctx) || isUserVip(user);
+  const max = isVip ? 30 : 1;
+  const list = phones.slice(0, max);
+  if (!isVip && phones.length > 1) {
+    return ctx.reply(
+      '✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n' +
+      '<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ <b>1 ɴᴏᴍᴏʀ</b> ᴘᴇʀ ᴋɪʀɪᴍᴀɴ.\n' +
+      'ᴋᴀᴍᴜ ᴋɪʀɪᴍ <b>' + phones.length + '</b> ɴᴏᴍᴏʀ — ʜᴀɴʏᴀ ʏᴀɴɢ ᴘᴇʀᴛᴀᴍᴀ ʏᴀɴɢ ᴅɪᴘʀᴏsᴇs.\n' +
+      'ᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>',
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
+      }
+    );
+  }
+  return processDetection(ctx, list);
+});
+
+if (require.main === module) {
+  process.on('unhandledRejection', (err) => { console.error('[unhandledRejection]', err && err.stack || err); });
+  process.on('uncaughtException', (err) => { console.error('[uncaughtException]', err && err.stack || err); });
+  bot.launch({ dropPendingUpdates: true })
+    .then(() => console.log('[bot] launched successfully'))
+    .catch((err) => { console.error('[launch]', err && err.stack || err); process.exitCode = 1; });
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}
+module.exports = bot;
