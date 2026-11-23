@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node bot.js",
     "set-webhook": "node scripts/set-webhook.js",
-    "check": "node --check bot.js && node --check api/bot.js && node --check database.js && node --check themes.js && node --check waChecker.js && node --check waEngine.js && node --check proxyManager.js && node --check scripts/set-webhook.js"
+    "check": "node --check bot.js && node --check api/bot.js && node --check database.js && node --check themes.js && node --check waChecker.js && node --check lib/statusSignals.js && node --check scripts/test-status-classification.js && node --check waEngine.js && node --check proxyManager.js && node --check scripts/set-webhook.js",
+    "test:status": "node scripts/test-status-classification.js"
   },
   "dependencies": {
     "@upstash/redis": "^1.34.3",
