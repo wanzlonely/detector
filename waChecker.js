@@ -56,7 +56,7 @@ const LOCALE_BY_ISO = {
   ru: 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
 };
 
-function buildHeaders(userAgent, countryIso2, deviceHint) {
+function buildHeaders(userAgent, countryIso2) {
   const iso = String(countryIso2 || '').toLowerCase();
   const ua = String(userAgent || '');
   const isIOS = /iphone|ipad|ios/i.test(ua);
@@ -70,8 +70,6 @@ function buildHeaders(userAgent, countryIso2, deviceHint) {
     'Connection': 'keep-alive',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
-    'DNT': '1',
-    'Upgrade-Insecure-Requests': '1',
     'Sec-Fetch-Dest': 'empty',
     'Sec-Fetch-Mode': 'cors',
     'Sec-Fetch-Site': 'same-origin'
@@ -82,10 +80,6 @@ function buildHeaders(userAgent, countryIso2, deviceHint) {
   } else if (isAndroid) {
     headers['Sec-CH-UA-Mobile'] = '?1';
     headers['Sec-CH-UA-Platform'] = '"Android"';
-  }
-  if (deviceHint && typeof deviceHint === 'object') {
-    if (deviceHint.model) headers['X-Device-Model'] = String(deviceHint.model).slice(0, 40);
-    if (deviceHint.os) headers['X-Device-OS'] = String(deviceHint.os).slice(0, 40);
   }
   return headers;
 }
@@ -206,106 +200,6 @@ function resolveCountryIso2(phoneInfo) {
   return null;
 }
 
-function cleanDeviceName(name) {
-  let s = String(name || '').trim();
-  if (!s) return null;
-  s = s.replace(/^[\s"']+|[\s"']+$/g, '');
-  if (!s || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined' || s === '-') return null;
-  if (s.length > 40) s = s.slice(0, 40).trim();
-  return s;
-}
-
-function pickDeviceName(exist, code) {
-  const sources = [exist, code];
-  const keys = [
-    'wa_old_device_name', 'wa_old_device', 'device_name', 'old_device_name',
-    'wa_device_name', 'registered_device_name', 'phone_model',
-    'device_model', 'wa_old_model', 'last_device_name', 'device_os_name',
-    'os_name', 'device_board', 'marketing_name'
-  ];
-  for (const src of sources) {
-    if (!src || typeof src !== 'object') continue;
-    for (const k of keys) {
-      const v = src[k];
-      if (v == null) continue;
-      if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
-      if (typeof v === 'object') {
-        const nested = v.name || v.device_name || v.model || v.model_name || v.marketing_name || v.device || null;
-        if (nested && String(nested).trim()) return cleanDeviceName(nested);
-      }
-    }
-    for (const nestKey of ['account_security', 'security', 'device_info', 'wa_old', 'device', 'meta']) {
-      const nest = src[nestKey];
-      if (!nest || typeof nest !== 'object') continue;
-      for (const k of keys) {
-        const v = nest[k];
-        if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
-      }
-    }
-  }
-  try {
-    const blob = JSON.stringify({ exist, code });
-    const patterns = [
-      /"wa_old_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"old_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"wa_device_name"\s*:\s*"([^"]{2,80})"/i,
-      /"marketing_name"\s*:\s*"([^"]{2,80})"/i,
-      /"model_name"\s*:\s*"([^"]{2,80})"/i
-    ];
-    for (const re of patterns) {
-      const m = blob.match(re);
-      if (m && m[1] && m[1].trim() && m[1].toLowerCase() !== 'null') return cleanDeviceName(m[1]);
-    }
-  } catch (_) {}
-  return null;
-}
-
-function extractEmail(exist, code, parsed) {
-  const candidates = [
-    exist && exist.email, exist && exist.email_address,
-    exist && exist.masked_email, exist && exist.recovery_email,
-    exist && exist.email_masked, exist && exist.contact_email,
-    exist && exist.security_email, exist && exist.two_step_email,
-    code && code.email, code && code.email_address,
-    code && code.masked_email, code && code.recovery_email,
-    code && code.email_masked, code && code.contact_email,
-    code && code.security_email, code && code.two_step_email,
-    parsed && parsed.maskedEmail, parsed && parsed.email
-  ];
-  for (const c of candidates) {
-    if (typeof c === 'string' && c.includes('@') && c.length >= 5) return c.trim();
-    if (c && typeof c === 'object') {
-      const e = c.email || c.address || c.value || c.masked;
-      if (typeof e === 'string' && e.includes('@')) return e.trim();
-    }
-  }
-  for (const nest of [exist, code]) {
-    if (!nest || typeof nest !== 'object') continue;
-    for (const key of ['account_security', 'security', 'recovery', 'two_step', 'verification', 'meta', 'email_info']) {
-      const sub = nest[key];
-      if (!sub || typeof sub !== 'object') continue;
-      for (const k of ['email', 'email_address', 'masked_email', 'recovery_email', 'email_masked']) {
-        const v = sub[k];
-        if (typeof v === 'string' && v.includes('@')) return v.trim();
-      }
-    }
-  }
-  try {
-    const blob = JSON.stringify({ exist: exist || {}, code: code || {} });
-    const masked = blob.match(/"([a-zA-Z0-9._%+\-]{1,}\*+[a-zA-Z0-9._%+\-]*@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})"/);
-    if (masked && masked[1]) return masked[1];
-    const plain = blob.match(/"([a-zA-Z0-9._%+\-]{3,}@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})"/g);
-    if (plain) {
-      for (const p of plain) {
-        const email = p.replace(/^"|"$/g, '');
-        if (!/whatsapp|facebook|fbcdn|meta\.com|graph\./i.test(email)) return email;
-      }
-    }
-  } catch (_) {}
-  return null;
-}
-
 function extractChannelTimers(existRaw, codeRaw) {
   const exist = existRaw || {};
   const code = codeRaw || {};
@@ -366,6 +260,106 @@ function extractChannelTimers(existRaw, codeRaw) {
     exist_sms: existSms,
     code_sms: codeSmsRaw
   };
+}
+
+function pickDeviceName(exist, code) {
+  const sources = [exist, code];
+  const keys = [
+    'wa_old_device_name', 'wa_old_device', 'device_name', 'old_device_name',
+    'wa_device_name', 'registered_device_name', 'phone_model',
+    'device_model', 'wa_old_model', 'last_device_name', 'device_os_name',
+    'os_name', 'device_board', 'marketing_name'
+  ];
+  for (const src of sources) {
+    if (!src || typeof src !== 'object') continue;
+    for (const k of keys) {
+      const v = src[k];
+      if (v == null) continue;
+      if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
+      if (typeof v === 'object') {
+        const nested = v.name || v.device_name || v.model || v.model_name || v.marketing_name || v.device || null;
+        if (nested && String(nested).trim()) return cleanDeviceName(nested);
+      }
+    }
+    for (const nestKey of ['account_security', 'security', 'device_info', 'wa_old', 'device', 'meta']) {
+      const nest = src[nestKey];
+      if (!nest || typeof nest !== 'object') continue;
+      for (const k of keys) {
+        const v = nest[k];
+        if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
+      }
+    }
+  }
+  try {
+    const blob = JSON.stringify({ exist, code });
+    const patterns = [
+      /"wa_old_device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"old_device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"wa_device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"marketing_name"\s*:\s*"([^"]{2,80})"/i,
+      /"model_name"\s*:\s*"([^"]{2,80})"/i
+    ];
+    for (const re of patterns) {
+      const m = blob.match(re);
+      if (m && m[1] && m[1].trim() && m[1].toLowerCase() !== 'null') return cleanDeviceName(m[1]);
+    }
+  } catch (_) {}
+  return null;
+}
+
+function cleanDeviceName(name) {
+  let s = String(name || '').trim();
+  if (!s) return null;
+  s = s.replace(/^[\s"']+|[\s"']+$/g, '');
+  if (!s || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined' || s === '-') return null;
+  if (s.length > 40) s = s.slice(0, 40).trim();
+  return s;
+}
+
+function extractEmail(exist, code, parsed) {
+  const candidates = [
+    exist && exist.email, exist && exist.email_address,
+    exist && exist.masked_email, exist && exist.recovery_email,
+    exist && exist.email_masked, exist && exist.contact_email,
+    exist && exist.security_email, exist && exist.two_step_email,
+    code && code.email, code && code.email_address,
+    code && code.masked_email, code && code.recovery_email,
+    code && code.email_masked, code && code.contact_email,
+    code && code.security_email, code && code.two_step_email,
+    parsed && parsed.maskedEmail, parsed && parsed.email
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.includes('@') && c.length >= 5) return c.trim();
+    if (c && typeof c === 'object') {
+      const e = c.email || c.address || c.value || c.masked;
+      if (typeof e === 'string' && e.includes('@')) return e.trim();
+    }
+  }
+  for (const nest of [exist, code]) {
+    if (!nest || typeof nest !== 'object') continue;
+    for (const key of ['account_security', 'security', 'recovery', 'two_step', 'verification', 'meta', 'email_info']) {
+      const sub = nest[key];
+      if (!sub || typeof sub !== 'object') continue;
+      for (const k of ['email', 'email_address', 'masked_email', 'recovery_email', 'email_masked']) {
+        const v = sub[k];
+        if (typeof v === 'string' && v.includes('@')) return v.trim();
+      }
+    }
+  }
+  try {
+    const blob = JSON.stringify({ exist: exist || {}, code: code || {} });
+    const masked = blob.match(/"([a-zA-Z0-9._%+\-]{1,}\*+[a-zA-Z0-9._%+\-]*@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})"/);
+    if (masked && masked[1]) return masked[1];
+    const plain = blob.match(/"([a-zA-Z0-9._%+\-]{3,}@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})"/g);
+    if (plain) {
+      for (const p of plain) {
+        const email = p.replace(/^"|"$/g, '');
+        if (!/whatsapp|facebook|fbcdn|meta\.com|graph\./i.test(email)) return email;
+      }
+    }
+  } catch (_) {}
+  return null;
 }
 
 function buildChannel(seconds) {
@@ -446,24 +440,6 @@ function detectCloneSignals(exist, code, parsed) {
   return { isCloneBlocked: Boolean(unofficial), isSecurityBlock: Boolean(security) && !unofficial };
 }
 
-function resolveSmsAvailability(exist, code, timers, patternHints) {
-  const toBool = (v) => {
-    if (typeof v === 'boolean') return v;
-    if (v === 1 || v === '1') return true;
-    if (v === 0 || v === '0') return false;
-    return null;
-  };
-  const eB = toBool(exist.send_sms_eligible);
-  const cB = toBool(code.send_sms_eligible);
-  if (eB === true || cB === true) return true;
-  if (timers.wa_old_eligible || timers.sms > 0 || timers.is_code_sent) return true;
-  if (patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG')) return true;
-  if (patternHints.includes('NO_ROUTES') && eB === false) return false;
-  if (eB === false && cB === false && timers.exist_no_routes) return false;
-  if (eB === false && timers.exist_no_routes && cB === null) return false;
-  return null;
-}
-
 async function runExistOnlyProbe(payloads, headers, countryIso2) {
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
     await checkProxyHealth(proxyCtx.dispatcher);
@@ -517,7 +493,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     String(existResponse.reason || '') + ' ' + String(codeResponse.reason || '') + ' ' +
     String(existResponse.status || '') + ' ' + String(codeResponse.status || '')
   ).toLowerCase();
-
+  
   const hasAppeal = Boolean(
     existResponse.in_app_ban_appeal || codeResponse.in_app_ban_appeal ||
     existResponse.appeal_token || codeResponse.appeal_token
@@ -622,12 +598,8 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     wa_old: buildChannel(timers.wa_old)
   };
 
-  if (!isBanned && isCloneBlocked) {
-    isReady = false;
-  }
-  if (!isBanned && isSecurityBlock) {
-    isReady = false;
-  }
+  if (!isBanned && isCloneBlocked) isReady = false;
+  if (!isBanned && isSecurityBlock) isReady = false;
 
   let accountStatus = 'UNKNOWN';
   let description = (parsed && parsed.description) || '';
@@ -655,6 +627,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   }
 
   const maskedEmail = extractEmail(existResponse, codeResponse, parsed);
+  const emailVerified = Boolean(maskedEmail) || Boolean(parsed && parsed.emailOtpEligible);
   const hasPassword = Boolean(
     Number(existResponse.password_eligible || codeResponse.password_eligible || 0) === 1 ||
     existResponse.security_code_set || codeResponse.security_code_set
@@ -715,7 +688,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     secondarySeconds: smsSeconds,
     engineState: (parsed && parsed.state) || null,
     maskedEmail,
-    emailVerified: Boolean(maskedEmail),
+    emailVerified,
     hasPassword,
     hasPasskey,
     recommendedMethods: Array.isArray(recommendedMethods) ? recommendedMethods : [],
@@ -821,11 +794,11 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
     }
   }
-  const payloads = await WADetector.buildDualPayloads(String(rawNumber));
+  const payloads = await WADetector.buildDualPayloads(String(rawNumber), { method: 'sms' });
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
   payloads.rawNumber = String(rawNumber);
   const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
-  const headers = buildHeaders(payloads.userAgent, countryIso2, payloads.deviceInfo);
+  const headers = buildHeaders(payloads.userAgent, countryIso2);
   if (opts.wave === 'exist') {
     try {
       const probe = await runExistOnlyProbe(payloads, headers, countryIso2);
@@ -896,4 +869,17 @@ async function checkWhatsAppCooldown(rawNumber, options) {
   return softFallback(rawNumber, payloads, countryIso2, lastError);
 }
 
-module.exports = { checkWhatsAppCooldown, getHealth };
+async function triggerEmailVerification(rawNumber) {
+  const payloads = await WADetector.buildDualPayloads(String(rawNumber), { method: 'email' });
+  if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid.');
+  
+  const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
+  const headers = buildHeaders(payloads.userAgent, countryIso2);
+
+  const probe = await runDualProbe(payloads, headers, countryIso2);
+  const parsed = WADetector.parseDualResponse(payloads.phoneInfo, probe.existText, probe.codeText);
+  
+  return parsed;
+}
+
+module.exports = { checkWhatsAppCooldown, triggerEmailVerification, getHealth };
