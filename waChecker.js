@@ -794,7 +794,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
     }
   }
-  const payloads = await WADetector.buildDualPayloads(String(rawNumber), { method: 'sms' });
+  const payloads = await WADetector.buildDualPayloads(String(rawNumber));
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
   payloads.rawNumber = String(rawNumber);
   const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
@@ -872,14 +872,22 @@ async function checkWhatsAppCooldown(rawNumber, options) {
 async function triggerEmailVerification(rawNumber) {
   const payloads = await WADetector.buildDualPayloads(String(rawNumber), { method: 'email' });
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid.');
-  
+
   const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
   const headers = buildHeaders(payloads.userAgent, countryIso2);
 
   const probe = await runDualProbe(payloads, headers, countryIso2);
-  const parsed = WADetector.parseDualResponse(payloads.phoneInfo, probe.existText, probe.codeText);
-  
-  return parsed;
+  const parsed = WADetector.parseDualResponse(payloads.phoneInfo, probe.existText, probe.codeText) || {};
+
+  const maskedEmail = parsed.maskedEmail || null;
+  const emailOtpEligible = Boolean(parsed.emailOtpEligible) || Boolean(maskedEmail);
+
+  return {
+    ...parsed,
+    maskedEmail,
+    emailOtpEligible,
+    isBanned: Boolean(parsed.isBanned)
+  };
 }
 
 module.exports = { checkWhatsAppCooldown, triggerEmailVerification, getHealth };
