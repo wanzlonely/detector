@@ -10,7 +10,8 @@ const {
   escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
   renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary
 } = require('./themes');
-const { checkWhatsAppCooldown } = require('./waChecker');
+const waChecker = require('./waChecker');
+const checkWhatsAppCooldown = waChecker.checkWhatsAppCooldown;
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
@@ -256,7 +257,6 @@ function extractPhoneCandidates(text) {
     if (!digits) return;
     digits = String(digits).replace(/\D/g, '');
     if (digits.startsWith('00')) digits = digits.slice(2);
-    // 08xxxxxxxxxx (ID local) -> 62xxxxxxxxxx
     if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) {
       digits = '62' + digits.slice(1);
     }
@@ -267,16 +267,13 @@ function extractPhoneCandidates(text) {
     phones.push('+' + digits);
   }
 
-  // 1) Prioritas: satu nomor per baris / koma / titik-koma (tidak campur antar baris)
   const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
   for (const line of lines) {
-    // Ambil deretan digit (+ opsional) di dalam baris
     const m = line.match(/(?:\+|00)?\d[\d\s\-().]{6,18}\d/);
     if (m) pushDigits(m[0]);
     else pushDigits(line);
   }
 
-  // 2) Fallback: scan seluruh teks jika belum ketemu
   if (!phones.length) {
     const pattern = /(?:\+|00)?\d(?:[\d\-().]{6,18})\d/g;
     let match;
@@ -341,7 +338,6 @@ bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
   if (!Array.isArray(numbers) || !numbers.length) {
     return ctx.reply('✦ <b>ᴅᴀᴛᴀ ʀᴇғʀᴇsʜ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>sɪʟᴀᴋᴀɴ ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.</blockquote>', { parse_mode: 'HTML' });
   }
-  // Detect ulang dari server — tidak pakai cache/sticky
   return processDetection(ctx, numbers, { forceRefresh: true });
 });
 
@@ -428,7 +424,6 @@ bot.action(/^detect:export:(.+)$/, async (ctx) => {
       { caption: '⇩ <b>ᴇxᴘᴏʀᴛ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>\n▸ ᴊᴜᴍʟᴀʜ ⦂ <b>' + list.length + '</b> ɴᴏᴍᴏʀ', parse_mode: 'HTML' }
     );
   } catch (err) {
-    // fallback plain text
     return ctx.reply(
       '⇩ <b>ᴅᴀғᴛᴀʀ sɪᴀᴘ</b> (' + list.length + ')\n\n<code>' + list.join('\n') + '</code>',
       { parse_mode: 'HTML' }
@@ -464,7 +459,6 @@ function toSmallCapsDevice(name) {
   return String(name).toLowerCase().replace(/[a-z]/g, (ch) => map[ch] || ch);
 }
 function deviceLabel(r) {
-  // ◉ ON-DEVICE = kode masuk ke WA di HP lama; ○ OFF-DEVICE = langsung SMS/panggilan
   if (r && (r.deviceName || r.waOldEligible)) return '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ';
   return '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ';
 }
@@ -498,6 +492,9 @@ function buildProgressText(processed, total, stageLabel, currentNumber) {
 }
 
 async function processDetection(ctx, numbers, detectOpts) {
+  if (typeof checkWhatsAppCooldown !== 'function') {
+    return ctx.reply('✕ <b>ᴋᴇsᴀʟᴀʜᴀɴ sɪsᴛᴇᴍ</b>\n\n<blockquote>Fungsi detektor tidak ditemukan. Pastikan file waChecker.js sudah benar dan di-restart.</blockquote>', { parse_mode: 'HTML' });
+  }
   detectOpts = detectOpts || {};
   const userId = ctx.from.id;
   const jobId = Date.now().toString(36);
@@ -518,13 +515,11 @@ async function processDetection(ctx, numbers, detectOpts) {
   } catch (_) {}
   function pickCurrentNumber() {
     if (inFlight.size === 0) return currentNumber || '-';
-    // Ambil nomor pertama yang masih diproses (stabil, tidak loncat acak)
     return inFlight.values().next().value || currentNumber || '-';
   }
   async function updateProgress(force) {
     if (!progressMsg) return;
     const now = Date.now();
-    // Throttle edit agar tidak kelap-kelip (min 450ms)
     if (!force && now - lastProgressEdit < 450) {
       if (!progressTimer) {
         progressTimer = setTimeout(() => {
@@ -552,7 +547,6 @@ async function processDetection(ctx, numbers, detectOpts) {
     const fallback = digits ? ('+' + digits) : String(raw || '');
     if (!result) return fallback;
     const shown = String(result.formattedNumber || '').replace(/\D/g, '');
-    // If result lost country code (shorter/different than input), force original
     if (!shown || (digits.length >= 10 && shown.length < digits.length - 1) || (digits.length >= 10 && !digits.endsWith(shown.slice(-8)))) {
       result.formattedNumber = fallback;
     } else if (!String(result.formattedNumber || '').startsWith('+') && digits) {
@@ -574,7 +568,6 @@ async function processDetection(ctx, numbers, detectOpts) {
         let result = await checkWhatsAppCooldown(raw, opts);
         if (result && !result.cancelled) {
           preserveNumber(raw, result);
-          // soft / network → retry with short backoff (max 2 attempts for speed)
           const isNetFail = result.softFallback || result.needsRecheck ||
             (result.description && /transport|network|too_many|timeout|ECONN|unstable/i.test(String(result.description)));
           if (isNetFail && attempt < 2) {
@@ -586,7 +579,6 @@ async function processDetection(ctx, numbers, detectOpts) {
             result.softFallback = false;
             result.needsRecheck = false;
           }
-          // Ban dari soft/network jangan dipercaya — paksa recheck path
           if (result.isBanned && (result.softFallback || result.needsRecheck || (result.confidence || 0) < 0.8)) {
             result.isBanned = false;
             result.accountStatus = 'UNKNOWN';
@@ -599,17 +591,17 @@ async function processDetection(ctx, numbers, detectOpts) {
           return result;
         }
       } catch (err) {
+        const errMsg = String((err && err.message) || 'network');
         last = {
           formattedNumber: safeNumber,
           isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false,
           accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.2,
           needsRecheck: true,
-          description: String((err && err.message) || 'network').slice(0, 120)
+          description: errMsg.includes('not a function') ? 'Kesalahan sistem detektor' : errMsg.slice(0, 120)
         };
         await sleep(300 * attempt + Math.floor(Math.random() * 250));
       }
     }
-    // Final: jangan biarkan "Lainnya" kosong info — kembalikan last atau soft
     if (last) {
       preserveNumber(raw, last);
       return last;
@@ -625,7 +617,6 @@ async function processDetection(ctx, numbers, detectOpts) {
     stageProcessed = 0;
     stageTotal = indexes.length || 1;
     let conc;
-    // Balance kecepatan vs akurasi + stabilitas progress
     if (indexes.length >= 20) conc = 6;
     else if (indexes.length >= 12) conc = 5;
     else if (indexes.length >= 6) conc = 4;
@@ -660,7 +651,6 @@ async function processDetection(ctx, numbers, detectOpts) {
     await updateProgress();
   }
   const allIdx = Array.from({ length: total }, (_, i) => i);
-  // Selalu dual-probe (exist+code) agar akurat — SMS wait & device dari response lengkap
   currentStageLabel = total > 1 ? 'ᴍᴇᴍᴘʀᴏsᴇs ' + total + ' ɴᴏᴍᴏʀ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
   await runPool(allIdx, { wave: 'full' });
   const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
@@ -701,7 +691,6 @@ async function processDetection(ctx, numbers, detectOpts) {
       else if (r.secondarySeconds > 0) secs = Number(r.secondarySeconds) || 0;
       if (secs > 0 && secs <= 360 && (Number(r.confidence) || 0) < 0.9 && r.isReady) secs = 0;
       const dur = formatCooldownSmallCaps(secs);
-      // Channel breakdown singkat
       let chHint = '';
       if (r.channels) {
         const parts = [];
@@ -789,7 +778,6 @@ async function processDetection(ctx, numbers, detectOpts) {
     }
   } catch (e) { console.error('[quota/leaderboard]', e && e.message || e); }
 
-  // Simpan hasil lengkap untuk DETAIL + EXPORT
   const resultKey = 'detect:results:' + userId + ':' + jobId;
   const siapList = groups.ready.map((x) => x.num || String(x.line || '').split(' ')[0]).filter(Boolean);
   try {
@@ -798,7 +786,6 @@ async function processDetection(ctx, numbers, detectOpts) {
     await redis.set(resultKey, JSON.stringify({ results: results.filter(Boolean), siapList, detailMap }), { ex: 3600 });
   } catch (_) {}
 
-  // Tombol detail: max 6 nomor agar keyboard tidak terlalu panjang
   const detailBtns = [];
   const allNums = Object.keys(detailMap).slice(0, 6);
   for (let di = 0; di < allNums.length; di += 2) {
@@ -951,7 +938,6 @@ bot.on('text', async (ctx, next) => {
   const text = (ctx.message && ctx.message.text) || '';
   if (/^(⌖\s*DETECT|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
 
-  // Owner reply to user contact
   if (isOwner(ctx)) {
     const replyTarget = await redis.get('owner:contact:target:' + ctx.from.id);
     if (replyTarget) {
@@ -1017,7 +1003,6 @@ bot.on('text', async (ctx, next) => {
         } catch (_) {
           fail += 1;
         }
-        // Rate-limit Telegram ~25 msg/s aman
         if (bi % 20 === 19) await new Promise((r) => setTimeout(r, 1200));
         else await new Promise((r) => setTimeout(r, 50));
       }
@@ -1039,7 +1024,6 @@ bot.on('text', async (ctx, next) => {
     }
   }
 
-  // User contact admin — forward message to owner
   const contactState = await redis.get('contact:state:' + ctx.from.id);
   if (contactState === 'waiting') {
     await redis.del('contact:state:' + ctx.from.id);
@@ -1063,7 +1047,7 @@ bot.on('text', async (ctx, next) => {
           ])
         }
       );
-      return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴀᴅᴍɪɴ ᴀᴋᴀɴ ᴍᴇᴍʙᴀʟᴀs sᴇʙᴇɢᴀɪᴍᴀɴᴀ ᴍᴜɴɢᴋɪɴ.', { parse_mode: 'HTML' });
+      return ctx.reply('✓ <b>ᴘᴇsᴀɴ ᴛᴇʀᴋɪʀɪᴍ</b>\n\nᴀᴅᴍɪɴ ᴀᴋᴀɴ ᴍᴇᴍʙᴀʟᴀs sᴇʙᴀɢᴀɪᴍᴀɴᴀ ᴍᴜɴɢᴋɪɴ.', { parse_mode: 'HTML' });
     } catch (err) {
       console.error('[contact forward]', err && err.message || err);
       return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ ᴘᴇsᴀɴ</b>\n\n<blockquote>' + escapeHtml(String(err.message || err).slice(0, 120)) + '</blockquote>', { parse_mode: 'HTML' });
