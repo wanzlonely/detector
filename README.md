@@ -39,7 +39,7 @@ npm install
 npm run check
 ```
 
-The check command validates JavaScript syntax, phone-input parsing, and the disabled state of retired network modules.
+The check command validates JavaScript syntax, valid and invalid phone input, international normalization, duplicate handling, input limits, and the disabled state of retired network modules.
 
 ## Local polling mode
 
