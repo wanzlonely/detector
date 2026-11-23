@@ -345,28 +345,30 @@ bot.action('detect:info', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const infoText = [
     'ⓘ ᴋᴇᴛᴇʀᴀɴɢᴀɴ ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ',
-    '──────────────────────',
+    '──────────────────────────────',
+    '',
     '✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ',
-    'ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ʟᴏɢɪɴ / ᴏᴛᴘ sᴍs.',
+    '  └ ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ᴛᴇʀɪᴍᴀ ᴋᴏᴅᴇ ᴏᴛᴘ.',
     '',
     '◐ ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ',
-    'ɴᴏᴍᴏʀ sᴇᴅᴀɴɢ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ sᴍs. ᴛᴜɴɢɢᴜ sᴇsᴜᴀɪ ᴛɪᴍᴇʀ.',
+    '  └ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ sᴍs, ᴛᴜɴɢɢᴜ ᴛɪᴍᴇʀ sᴇʟᴇsᴀɪ.',
     '',
     '◈ sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ',
-    'ᴀᴋᴜɴ ᴅɪᴛᴀʜᴀɴ ᴋᴇᴀᴍᴀɴᴀɴ ("ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴀsᴜᴋ sᴀᴀᴛ ɪɴɪ").',
+    '  └ ᴅɪᴛᴀʜᴀɴ sɪsᴛᴇᴍ ("ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴀsᴜᴋ sᴀᴀᴛ ɪɴɪ").',
     '',
-    '⚠ ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ',
-    'ᴅɪʙʟᴏᴋɪʀ ᴋᴀʀᴇɴᴀ ᴀᴘᴋ ᴛɪᴅᴀᴋ ʀᴇsᴍɪ — ᴘᴇʀʟᴜ ᴡᴀ ʀᴇsᴍɪ.',
+    '△ ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ',
+    '  └ ᴡᴀᴊɪʙ ʟᴏɢɪɴ ᴍᴇɴɢɢᴜɴᴀᴋᴀɴ ᴡʜᴀᴛsᴀᴘᴘ ʀᴇsᴍɪ.',
     '',
     '✕ ᴅɪʙᴀɴ',
-    'ɴᴏᴍᴏʀ ᴛᴇʀᴋᴇɴᴀ ʙᴀɴ / ᴘᴇʟᴀɴɢɢᴀʀᴀɴ ᴡʜᴀᴛsᴀᴘᴘ.',
+    '  └ ɴᴏᴍᴏʀ ᴛᴇʀʙʟᴏᴋɪʀ ᴀᴋɪʙᴀᴛ ᴘᴇʟᴀɴɢɢᴀʀᴀɴ.',
     '',
     '⊘ ɴᴏ ʀᴏᴜᴛᴇs',
-    'ᴊᴀʟᴜʀ sᴍs ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.',
-    '──────────────────────',
-    '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ ⦂ ᴋᴏᴅᴇ ᴍᴀsᴜᴋ ᴋᴇ ᴡᴀ ᴅɪ ʜᴘ ʟᴀᴍᴀ.',
-    '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴘᴀɴɢɢɪʟᴀɴ.',
-    '──────────────────────',
+    '  └ ᴊᴀʟᴜʀ ᴏᴛᴘ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.',
+    '',
+    '──────────────────────────────',
+    '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ  ⦂ ᴋᴏᴅᴇ ᴍᴀsᴜᴋ ᴋᴇ ᴀᴘʟɪᴋᴀsɪ ᴡᴀ ʟᴀᴍᴀ.',
+    '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʙɪsᴀ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴛᴇʟᴇᴘᴏɴ.',
+    '──────────────────────────────',
     '⇩ ᴇxᴘᴏʀᴛ ᴅᴇᴛᴀɪʟ ⦂ ᴜɴᴅᴜʜ sᴇᴍᴜᴀ ʜᴀsɪʟ (.ᴛxᴛ)'
   ].join('\n');
   return ctx.reply(infoText, { parse_mode: 'HTML' });
@@ -687,7 +689,7 @@ async function processDetection(ctx, numbers, detectOpts) {
   lines.push('✧ sɪᴀᴘ ⦂ <b>' + groups.ready.length + '</b>');
   lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
   lines.push('◈ sᴇᴄᴜʀɪᴛʏ ⦂ <b>' + groups.security.length + '</b>');
-  lines.push('⚠ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
+  lines.push('△ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
   lines.push('✕ ʙᴀɴ ⦂ <b>' + groups.restricted.length + '</b>');
   if (groups.noroutes.length) lines.push('⊘ ɴᴏ ʀᴏᴜᴛᴇs ⦂ <b>' + groups.noroutes.length + '</b>');
   if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
@@ -710,7 +712,7 @@ async function processDetection(ctx, numbers, detectOpts) {
   }
   if (groups.clone.length) {
     lines.push('');
-    lines.push('⚠ <b>ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ</b>');
+    lines.push('△ <b>ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ</b>');
     groups.clone.forEach((n) => lines.push(n));
   }
   if (groups.restricted.length) {
@@ -752,7 +754,6 @@ async function processDetection(ctx, numbers, detectOpts) {
       styledCallback('ⓘ INFO', 'detect:info', 'primary')
     ]
   ];
-  // Ganti tombol Export Siap dengan Export Detail
   if (Object.keys(detailMap).length > 0) {
     keyboardRows.push([styledCallback('⇩ EXPORT DETAIL', 'detect:export_detail:' + jobId, 'success')]);
   }
