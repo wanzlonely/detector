@@ -2554,24 +2554,31 @@ var WADetector = (() => {
 
     const existProvided = metaInfo && metaInfo.existProvided !== undefined ? Boolean(metaInfo.existProvided) : true;
     const codeProvided = metaInfo && metaInfo.codeProvided !== undefined ? Boolean(metaInfo.codeProvided) : true;
+    const existEmpty = !rawExist || Object.keys(rawExist).length === 0;
+    const codeEmpty = !rawCode || Object.keys(rawCode).length === 0;
     const hasExistError = Boolean(
       existProvided && (
         rawExist.status === "error" ||
-        rawExist.error_type ||
+        Boolean(rawExist.error_type) ||
         rawExist.reason === "non_json" ||
-        Object.keys(rawExist).length === 0
+        existEmpty
       )
     );
     const hasCodeError = Boolean(
       codeProvided && (
         rawCode.status === "error" ||
-        rawCode.error_type ||
+        Boolean(rawCode.error_type) ||
         rawCode.reason === "non_json" ||
-        Object.keys(rawCode).length === 0
+        codeEmpty
       )
     );
+    const onlyTransportPair = (hasExistError || hasCodeError) && !(
+      rawExist.sms_wait || rawExist.send_sms_wait || rawExist.reason === "blocked" ||
+      rawExist.reason === "banned" || rawExist.wa_old_eligible || rawExist.email_otp_eligible ||
+      rawCode.sms_wait || rawCode.status === "sent" || rawCode.method
+    );
 
-    if ((hasExistError && existProvided) || (hasCodeError && codeProvided)) {
+    if (onlyTransportPair && ((hasExistError && existProvided) || (hasCodeError && codeProvided))) {
       const errType = rawExist.error_type || rawCode.error_type || "NETWORK_OR_TRANSPORT_ERROR";
       const errReason = rawExist.reason || rawCode.reason || "unknown_error";
       return {
