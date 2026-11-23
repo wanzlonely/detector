@@ -8,7 +8,7 @@ const {
 } = require('./database');
 const {
   escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
-  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary
+  renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary, renderExportDetail
 } = require('./themes');
 const waChecker = require('./waChecker');
 const checkWhatsAppCooldown = waChecker.checkWhatsAppCooldown;
@@ -344,94 +344,35 @@ bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
 bot.action('detect:info', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   const infoText = [
-    'ⓘ <b>ᴋᴇᴛᴇʀᴀɴɢᴀɴ ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>',
+    'ⓘ ᴋᴇᴛᴇʀᴀɴɢᴀɴ ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ',
     '──────────────────────',
-    '✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>',
+    '✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ',
     'ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ʟᴏɢɪɴ / ᴏᴛᴘ sᴍs.',
     '',
-    '◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>',
+    '◐ ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ',
     'ɴᴏᴍᴏʀ sᴇᴅᴀɴɢ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ sᴍs. ᴛᴜɴɢɢᴜ sᴇsᴜᴀɪ ᴛɪᴍᴇʀ.',
     '',
-    '◈ <b>sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ</b>',
+    '◈ sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ',
     'ᴀᴋᴜɴ ᴅɪᴛᴀʜᴀɴ ᴋᴇᴀᴍᴀɴᴀɴ ("ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴀsᴜᴋ sᴀᴀᴛ ɪɴɪ").',
     '',
-    '⚠ <b>ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ</b>',
+    '⚠ ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ',
     'ᴅɪʙʟᴏᴋɪʀ ᴋᴀʀᴇɴᴀ ᴀᴘᴋ ᴛɪᴅᴀᴋ ʀᴇsᴍɪ — ᴘᴇʀʟᴜ ᴡᴀ ʀᴇsᴍɪ.',
     '',
-    '✕ <b>ᴅɪʙᴀɴ</b>',
+    '✕ ᴅɪʙᴀɴ',
     'ɴᴏᴍᴏʀ ᴛᴇʀᴋᴇɴᴀ ʙᴀɴ / ᴘᴇʟᴀɴɢɢᴀʀᴀɴ ᴡʜᴀᴛsᴀᴘᴘ.',
     '',
-    '⊘ <b>ɴᴏ ʀᴏᴜᴛᴇs</b>',
+    '⊘ ɴᴏ ʀᴏᴜᴛᴇs',
     'ᴊᴀʟᴜʀ sᴍs ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.',
     '──────────────────────',
     '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ ⦂ ᴋᴏᴅᴇ ᴍᴀsᴜᴋ ᴋᴇ ᴡᴀ ᴅɪ ʜᴘ ʟᴀᴍᴀ.',
     '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴘᴀɴɢɢɪʟᴀɴ.',
     '──────────────────────',
-    '◈ ᴛᴏᴍʙᴏʟ ᴅᴇᴛᴀɪʟ ⦂ ᴇᴍᴀɪʟ · 2ғᴀ · ᴄʜᴀɴɴᴇʟ · sᴋᴏʀ',
-    '⇩ ᴇxᴘᴏʀᴛ sɪᴀᴘ ⦂ ᴜɴᴅᴜʜ ᴅᴀғᴛᴀʀ ɴᴏᴍᴏʀ sɪᴀᴘ (.ᴛxᴛ)'
+    '⇩ ᴇxᴘᴏʀᴛ ᴅᴇᴛᴀɪʟ ⦂ ᴜɴᴅᴜʜ sᴇᴍᴜᴀ ʜᴀsɪʟ (.ᴛxᴛ)'
   ].join('\n');
   return ctx.reply(infoText, { parse_mode: 'HTML' });
 });
 
-async function showDetailPage(ctx, jobId, page, edit = false) {
-  const userId = ctx.from && ctx.from.id;
-  const resultKey = 'detect:results:' + userId + ':' + jobId;
-  let payload = null;
-  try {
-    const raw = await redis.get(resultKey);
-    payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  } catch (_) {}
-  if (!payload || !payload.detailMap) {
-    return ctx.reply('✦ ᴅᴀᴛᴀ ᴅᴇᴛᴀɪʟ ᴋᴇᴅᴀʟᴜᴡᴀʀsᴀ. ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.', { parse_mode: 'HTML' });
-  }
-  const keys = Object.keys(payload.detailMap);
-  if (!keys.length) return ctx.reply('✦ ᴛɪᴅᴀᴋ ᴀᴅᴀ ᴅᴀᴛᴀ ᴅᴇᴛᴀɪʟ.', { parse_mode: 'HTML' });
-
-  page = Math.max(0, Math.min(page, keys.length - 1));
-  const numKey = keys[page];
-  const found = payload.detailMap[numKey];
-
-  const text = require('./themes').renderAccountDetail(found);
-
-  const navButtons = [];
-  if (page > 0) navButtons.push(styledCallback('◀ ᴘʀᴇᴠ', 'detect:detail_page:' + jobId + ':' + (page - 1), 'primary'));
-  if (page < keys.length - 1) navButtons.push(styledCallback('ɴᴇxᴛ ▶', 'detect:detail_page:' + jobId + ':' + (page + 1), 'primary'));
-
-  const keyboardRows = [];
-  if (navButtons.length) keyboardRows.push(navButtons);
-  keyboardRows.push([styledCallback('✕ ᴛᴜᴛᴜᴘ', 'detect:detail_close:' + jobId, 'danger')]);
-
-  const keyboard = Markup.inlineKeyboard(keyboardRows);
-  const pageIndicator = '\n\n<i>Halaman ' + (page + 1) + ' / ' + keys.length + '</i>';
-  const finalText = text + pageIndicator;
-
-  if (edit && ctx.editMessageText) {
-    return ctx.editMessageText(finalText, { parse_mode: 'HTML', ...keyboard }).catch(() => {
-       return ctx.reply(finalText, { parse_mode: 'HTML', ...keyboard });
-    });
-  } else {
-    return ctx.reply(finalText, { parse_mode: 'HTML', ...keyboard });
-  }
-}
-
-bot.action(/^detect:detail_menu:(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  return showDetailPage(ctx, ctx.match[1], 0, false);
-});
-
-bot.action(/^detect:detail_page:([^:]+):(\d+)$/, async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  return showDetailPage(ctx, ctx.match[1], parseInt(ctx.match[2], 10), true);
-});
-
-bot.action(/^detect:detail_close:(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery('Ditutup').catch(() => {});
-  if (ctx.editMessageText) {
-    return ctx.editMessageText('✕ <b>ᴅᴇᴛᴀɪʟ ᴅɪᴛᴜᴛᴜᴘ</b>', { parse_mode: 'HTML' }).catch(() => {});
-  }
-});
-
-bot.action(/^detect:export:(.+)$/, async (ctx) => {
+bot.action(/^detect:export_detail:(.+)$/, async (ctx) => {
   await ctx.answerCbQuery('Menyiapkan file…').catch(() => {});
   const jobId = ctx.match[1];
   const userId = ctx.from && ctx.from.id;
@@ -441,22 +382,21 @@ bot.action(/^detect:export:(.+)$/, async (ctx) => {
     const raw = await redis.get(resultKey);
     payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
   } catch (_) {}
-  const list = (payload && payload.siapList) || [];
-  if (!list.length) {
-    return ctx.reply('✕ ᴛɪᴅᴀᴋ ᴀᴅᴀ ɴᴏᴍᴏʀ sɪᴀᴘ ᴜɴᴛᴜᴋ ᴅɪᴇxᴘᴏʀᴛ.', { parse_mode: 'HTML' });
+  
+  if (!payload || !payload.detailMap || Object.keys(payload.detailMap).length === 0) {
+    return ctx.reply('✕ ᴛɪᴅᴀᴋ ᴀᴅᴀ ᴅᴀᴛᴀ ᴜɴᴛᴜᴋ ᴅɪᴇxᴘᴏʀᴛ.', { parse_mode: 'HTML' });
   }
-  const body = list.join('\n') + '\n';
-  const filename = 'siap_' + jobId + '.txt';
+  
+  const textContent = renderExportDetail(payload.detailMap);
+  const filename = 'detail_detect_' + jobId + '.txt';
+  
   try {
     await ctx.replyWithDocument(
-      { source: Buffer.from(body, 'utf8'), filename: filename },
-      { caption: '⇩ <b>ᴇxᴘᴏʀᴛ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>\n▸ ᴊᴜᴍʟᴀʜ ⦂ <b>' + list.length + '</b> ɴᴏᴍᴏʀ', parse_mode: 'HTML' }
+      { source: Buffer.from(textContent, 'utf8'), filename: filename },
+      { caption: '⇩ <b>ᴇxᴘᴏʀᴛ ᴅᴇᴛᴀɪʟ</b>\n▸ ᴊᴜᴍʟᴀʜ ⦂ <b>' + Object.keys(payload.detailMap).length + '</b> ɴᴏᴍᴏʀ', parse_mode: 'HTML' }
     );
   } catch (err) {
-    return ctx.reply(
-      '⇩ <b>ᴅᴀғᴛᴀʀ sɪᴀᴘ</b> (' + list.length + ')\n\n<code>' + list.join('\n') + '</code>',
-      { parse_mode: 'HTML' }
-    );
+    return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ ғɪʟᴇ ᴅᴇᴛᴀɪʟ.', { parse_mode: 'HTML' });
   }
 });
 
@@ -806,22 +746,16 @@ async function processDetection(ctx, numbers, detectOpts) {
     await redis.set(resultKey, JSON.stringify({ results: results.filter(Boolean), siapList, detailMap }), { ex: 3600 });
   } catch (_) {}
 
-  const detailBtns = [];
-  const allNumsCount = Object.keys(detailMap).length;
-  if (allNumsCount > 0) {
-    detailBtns.push([styledCallback('◈ DETAIL AKUN (' + allNumsCount + ')', 'detect:detail_menu:' + jobId, 'primary')]);
-  }
-
   const keyboardRows = [
     [
       styledCallback('↻ UPDATE', 'detect:refresh:' + jobId, 'success'),
       styledCallback('ⓘ INFO', 'detect:info', 'primary')
     ]
   ];
-  if (siapList.length) {
-    keyboardRows.push([styledCallback('⇩ EXPORT SIAP (' + siapList.length + ')', 'detect:export:' + jobId, 'success')]);
+  // Ganti tombol Export Siap dengan Export Detail
+  if (Object.keys(detailMap).length > 0) {
+    keyboardRows.push([styledCallback('⇩ EXPORT DETAIL', 'detect:export_detail:' + jobId, 'success')]);
   }
-  keyboardRows.push(...detailBtns);
 
   return ctx.reply(lines.join('\n'), {
     parse_mode: 'HTML',
