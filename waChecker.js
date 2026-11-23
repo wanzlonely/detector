@@ -173,13 +173,27 @@ function resolveCountryIso2(phoneInfo) {
   return null;
 }
 
+function firstExplicitTimer(source, keys) {
+  for (const key of keys) {
+    const value = source && source[key];
+    if (value === undefined || value === null || value === '') continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
+  }
+  return null;
+}
+
 function extractChannelTimers(existRaw, codeRaw) {
   const exist = existRaw || {};
   const code = codeRaw || {};
   const existNoRoutes = exist.reason === 'no_routes' || exist.reason === 'no_route';
   const codeNoRoutes = code.reason === 'no_routes' || code.reason === 'no_route';
-  const existSms = existNoRoutes ? 0 : Math.max(num(exist.sms_wait), num(exist.send_sms_wait), num(exist.sms_cooldown));
-  const codeSmsRaw = codeNoRoutes ? 0 : Math.max(num(code.sms_wait), num(code.send_sms_wait), num(code.sms_cooldown));
+  // Prefer the first explicit SMS timer field from /exist. Do not take the
+  // maximum across distinct fields or let a later /code response overwrite it.
+  const existSmsValue = existNoRoutes ? 0 : firstExplicitTimer(exist, ['sms_wait', 'send_sms_wait', 'sms_cooldown']);
+  const codeSmsValue = codeNoRoutes ? 0 : firstExplicitTimer(code, ['sms_wait', 'send_sms_wait', 'sms_cooldown']);
+  const existSms = existSmsValue === null ? 0 : existSmsValue;
+  const codeSmsRaw = codeSmsValue === null ? 0 : codeSmsValue;
   const existVoice = Math.max(num(exist.voice_wait), num(exist.voice_cooldown));
   const codeVoice = Math.max(num(code.voice_wait), num(code.voice_cooldown));
   const existFlash = Math.max(num(exist.flash_wait), num(exist.flash_cooldown));
@@ -197,13 +211,11 @@ function extractChannelTimers(existRaw, codeRaw) {
     (isCodeSent || isWaOldMethod ||
       (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 5) ||
       (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 5 && num(code.send_sms_wait) === 0));
+  // SMS cooldown comes only from explicit SMS fields. retry_after is a
+  // generic request/method timer and must never be relabelled as SMS cooldown.
   let smsSeconds = 0;
-  if (existSms > 0) smsSeconds = existSms;
-  else if (!isWaOldEcho && codeSmsRaw > 0) {
-    if (codeSmsRaw >= 240 && existSms === 0 && !num(code.send_sms_wait)) smsSeconds = 0;
-    else smsSeconds = codeSmsRaw;
-  }
-  if (smsSeconds === 0 && !isWaOldEcho && existRetry > 30) smsSeconds = existRetry;
+  if (existSmsValue !== null) smsSeconds = existSms;
+  else if (!isWaOldEcho && codeSmsValue !== null) smsSeconds = codeSmsRaw;
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
   let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
   let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
@@ -269,7 +281,7 @@ function detectCloneSignals(exist, code, parsed) {
   return { isCloneBlocked: Boolean(unofficial), isSecurityBlock: Boolean(security) };
 }
 
-function resolveSmsAvailability(exist, code, timers, patternHints) {
+function resolveSmsAvailability(exist, code) {
   const toBool = (v) => {
     if (typeof v === 'boolean') return v;
     if (v === 1 || v === '1') return true;
@@ -278,12 +290,11 @@ function resolveSmsAvailability(exist, code, timers, patternHints) {
   };
   const eB = toBool(exist.send_sms_eligible);
   const cB = toBool(code.send_sms_eligible);
-  if (eB === true || cB === true) return true;
-  if (timers.wa_old_eligible || timers.sms > 0 || timers.is_code_sent) return true;
-  if (patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG')) return true;
-  if (patternHints.includes('NO_ROUTES') && eB === false) return false;
-  if (eB === false && cB === false && timers.exist_no_routes) return false;
-  if (eB === false && timers.exist_no_routes && cB === null) return false;
+  // Conflicting explicit flags are ambiguous. Never infer SMS eligibility
+  // from device, email, a sent response, or a non-SMS method timer.
+  if (eB !== null && cB !== null && eB !== cB) return null;
+  if (eB !== null) return eB;
+  if (cB !== null) return cB;
   return null;
 }
 
@@ -319,7 +330,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const timers = extractChannelTimers(existResponse, codeResponse);
   const engineState = String((parsed && parsed.state) || '').toUpperCase();
   const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
-  const smsAvailable = resolveSmsAvailability(existResponse, codeResponse, timers, patternHints);
+  const smsAvailable = resolveSmsAvailability(existResponse, codeResponse);
   const channels = {
     sms: buildChannel(timers.sms), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash),
     email: buildChannel(timers.email), wa_old: buildChannel(timers.wa_old)
@@ -328,11 +339,11 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const engineCooldown = Boolean(parsed && parsed.isCooldown);
   const engineClone = Boolean(parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock));
   const engineSecurity = Boolean(parsed && parsed.isSecurityBlock);
-  const liveSmsWait = timers.exist_sms > 0 ? timers.exist_sms : timers.sms;
+  const liveSmsWait = timers.sms;
   const hasLiveSms = liveSmsWait > 0;
   const hasLiveVoice = timers.voice > 15;
+  const hasLiveWait = hasLiveSms || hasLiveVoice || timers.flash > 15 || timers.email > 15;
   const existSmsOpenEarly = timers.exist_sms === 0 && !timers.exist_no_routes;
-  const hasLiveWait = hasLiveSms || (!existSmsOpenEarly && (hasLiveVoice || timers.flash > 15 || timers.email > 15));
   const reasons = [];
   let isBanned = detectBanSignals(existResponse, codeResponse, parsed, patternHints);
   if (isBanned && (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
@@ -363,34 +374,23 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
   const hasDevicePath = Boolean(timers.wa_old_eligible || timers.device_name || engineState === 'REGISTERED_ON_DEVICE');
 
+  // Only an explicit SMS timer creates the SMS cooldown category. Voice,
+  // email, wa_old and generic retry_after timers remain separate signals.
   const meaningfulCooldown =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !hasDevicePath &&
-    (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT') ||
-      engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN');
+    !isBanned && !isCloneBlocked && !isSecurityBlock && hasLiveSms;
 
-  const hasOpenPath =
-    engineReady || smsAvailable === true || hasDevicePath || timers.is_code_sent ||
-    patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG') ||
-    patternHints.includes('METHOD_NOT_ALLOWED_SOFT') ||
-    (smsAvailable !== false && !timers.exist_no_routes) ||
-    (existSmsOpen && smsAvailable !== false);
+  const hasOpenPath = smsAvailable === true && !timers.exist_no_routes && !timers.code_no_routes;
 
+  // READY means SMS is explicitly eligible now. Device-path, status=sent,
+  // HIGH-REREG and other methods are not proof that a fresh SMS OTP can be sent.
   let isReady = false;
-  if (!isBanned && !isCloneBlocked && !isSecurityBlock) {
-    if (hasDevicePath) {
-      isReady = true;
-      reasons.push('device_path_ready');
-    } else if (!hasLiveWait && (engineReady || hasOpenPath || engineState === 'AVAILABLE_READY')) {
-      isReady = true;
-      reasons.push('open_path_ready');
-    } else if (existSmsOpen && !hasLiveWait && smsAvailable !== false) {
-      isReady = true;
-      reasons.push('exist_sms_open');
-    }
+  if (!isBanned && !isCloneBlocked && !isSecurityBlock &&
+      smsAvailable === true && !hasLiveSms && !timers.exist_no_routes && !timers.code_no_routes) {
+    isReady = true;
+    reasons.push('explicit_sms_eligible');
   }
-  if (!hasDevicePath && hasLiveWait) isReady = false;
 
-  const effectiveCooldown = isReady ? false : (meaningfulCooldown || (!hasDevicePath && hasLiveWait));
+  const effectiveCooldown = !isReady && meaningfulCooldown;
 
   const isPartial = Boolean(meta && (meta.partial || meta.existOnly));
   const anyChannelSignal =
@@ -413,14 +413,19 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone).';
   else if (isSecurityBlock) description = 'Demi keamanan: login sementara tidak tersedia.';
   else if (effectiveCooldown) {
-    const ch = hasLiveSms ? channels.sms : (channels.voice.rawSeconds > 0 ? channels.voice : channels.flash);
+    const ch = channels.sms;
     const t = (ch && (ch.humanTime || ch.uiTimer)) || 'aktif';
-    description = t.startsWith('Coba lagi') ? t : ('Cooldown aktif · ' + t);
+    description = t.startsWith('Coba lagi') ? ('Cooldown SMS · ' + t) : ('Cooldown SMS · ' + t);
   } else if (isReady) {
     description = hasDevicePath && timers.device_name
-      ? 'Siap diverifikasi · terdaftar di ' + timers.device_name
-      : (hasDevicePath ? 'Siap diverifikasi · perangkat terdaftar' : 'Nomor siap menerima verifikasi.');
+      ? 'SMS siap · perangkat terdaftar di ' + timers.device_name
+      : (hasDevicePath ? 'SMS siap · perangkat terdaftar' : 'SMS siap menerima OTP.');
+  } else if (hasDevicePath) {
+    description = 'Informasi perangkat tersedia, tetapi kelayakan SMS belum terkonfirmasi.';
+  } else if (timers.is_code_sent) {
+    description = 'Respons menunjukkan proses verifikasi berjalan; kesiapan SMS baru belum terkonfirmasi.';
   } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
+  else if (!description) description = 'Status SMS belum dapat dipastikan dari respons yang tersedia.';
 
   let accountStatus = 'UNKNOWN';
   if (isBanned) accountStatus = 'BANNED';
@@ -431,35 +436,15 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
   else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
 
-  let signalCount = 0;
-  if (hasDevicePath) signalCount += 1;
-  if (hasLiveSms) signalCount += 1;
-  if (timers.is_code_sent) signalCount += 1;
-  if (existSmsOpen && !hasLiveSms) signalCount += 1;
-  if (engineReady) signalCount += 1;
-  if (patternHints.includes('HARD_BAN')) signalCount += 2;
-
+  // Confidence reflects account-response evidence only, never proxy geography
+  // or several correlated hints from the same response.
   let confidence = 0.55;
   if (isBanned && patternHints.includes('HARD_BAN')) confidence = 0.96;
   else if (isBanned) confidence = 0.9;
   else if (isCloneBlocked || isSecurityBlock) confidence = 0.88;
-  else if (isReady && hasDevicePath) confidence = 0.92;
   else if (effectiveCooldown && hasLiveSms) confidence = 0.93;
-  else if (effectiveCooldown) confidence = 0.8;
-  else if (isReady && (timers.is_code_sent || engineReady)) confidence = 0.9;
-  else if (isReady && existSmsOpen) confidence = 0.86;
-  else if (isReady) confidence = 0.8;
+  else if (isReady && smsAvailable === true) confidence = 0.86;
   else if (smsOptionMissing) confidence = 0.75;
-
-  if (signalCount >= 3) confidence = Math.min(0.98, confidence + 0.04);
-  else if (signalCount >= 2) confidence = Math.min(0.96, confidence + 0.02);
-
-  const proxyIso = String(countryIso2 || '').toLowerCase();
-  const tag = String(sessionTag || proxyMode || '').toLowerCase();
-  if (proxyIso && (tag.includes(proxyIso) || tag.includes('geo'))) {
-    confidence = Math.min(0.99, confidence + 0.03);
-    reasons.push('proxy_geo_match');
-  }
 
   if (meta && meta.partial) confidence = Math.max(0.4, confidence - 0.08);
   if (meta && meta.existOnly) confidence = Math.min(confidence, 0.88);
@@ -473,12 +458,10 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   let secondarySeconds = 0;
   if (hasDevicePath) {
     secondaryPath = 'device';
-  } else if (hasLiveSms || (!hasDevicePath && hasLiveWait)) {
+  } else if (hasLiveSms) {
     secondaryPath = 'cooldown';
-    secondarySeconds = liveSmsWait > 0 ? liveSmsWait : (
-      timers.voice > 0 ? timers.voice : (timers.flash > 0 ? timers.flash : (timers.email > 0 ? timers.email : 0))
-    );
-  } else if (existSmsOpen || engineReady || hasOpenPath) {
+    secondarySeconds = liveSmsWait;
+  } else if (isReady || hasOpenPath) {
     secondaryPath = 'ready';
   }
 
