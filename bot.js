@@ -459,15 +459,18 @@ async function processDetection(ctx, numbers) {
   await redis.del('detect:stop:' + userId + ':' + jobId);
   if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 
-  const groups = { ready: [], cooldown: [], clone: [], restricted: [], other: [] };
+  const groups = { ready: [], cooldown: [], clone: [], restricted: [], notRegistered: [], noRoutes: [], other: [] };
   for (const r of results) {
     if (!r || r.cancelled) continue;
     const num = r.formattedNumber || '-';
+    const deviceTag = r.deviceStatus === 'ON_DEVICE'
+      ? ' · ᴏɴ-ᴅᴇᴠɪᴄᴇ' + (r.deviceName ? ' (' + r.deviceName + ')' : '')
+      : (r.deviceStatus === 'OFF_DEVICE' ? ' · ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ' : '');
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
       groups.restricted.push('· ' + num + ' ⦂ ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴅɪᴅᴀꜰᴛᴀʀᴋᴀɴ');
     } else if (r.isCloneBlocked || r.isSecurityBlock) {
       const sec = r.secondaryPath || (
-        (r.deviceName || r.waOldEligible) ? 'device' :
+        r.deviceStatus === 'ON_DEVICE' || r.deviceStatus === 'DEVICE_PATH' ? 'device' :
         ((Number(r.secondarySeconds) || (r.primaryTimer && r.primaryTimer.rawSeconds) || 0) > 0 ? 'cooldown' :
         (r.isReady ? 'ready' : null))
       );
@@ -486,12 +489,18 @@ async function processDetection(ctx, numbers) {
         label = 'sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs';
         sortSecs = 0;
       }
-      groups.clone.push({ line: '· ' + num + ' ⦂ ' + label, secs: sortSecs });
+      groups.clone.push({ line: '· ' + num + ' ⦂ ' + label + deviceTag, secs: sortSecs });
+    } else if (r.registrationStatus === 'NOT_REGISTERED' || r.accountStatus === 'NOT_REGISTERED') {
+      groups.notRegistered.push('· ' + num + ' ⦂ ɴᴏᴛ ʀᴇɢɪsᴛᴇʀᴇᴅ');
+    } else if (r.routeStatus === 'NO_ROUTES' || r.accountStatus === 'NO_ROUTES') {
+      groups.noRoutes.push('· ' + num + ' ⦂ ɴᴏ ʀᴏᴜᴛᴇs' + deviceTag);
     } else if (r.isReady && !r.anyCooldown) {
-      if (r.deviceName || r.waOldEligible || r.accountStatus === 'REGISTERED_ON_DEVICE') {
-        groups.ready.push({ line: '· ' + num + ' ⦂ ᴘᴇʀᴀɴɢᴋᴀᴛ ᴛᴇʀᴅᴀꜰᴛᴀʀ', rank: 0 });
+      if (r.deviceStatus === 'ON_DEVICE') {
+        groups.ready.push({ line: '· ' + num + ' ⦂ ᴏɴ-ᴅᴇᴠɪᴄᴇ' + (r.deviceName ? ' (' + r.deviceName + ')' : ''), rank: 0 });
+      } else if (r.deviceStatus === 'OFF_DEVICE') {
+        groups.ready.push({ line: '· ' + num + ' ⦂ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ · sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs', rank: 1 });
       } else {
-        groups.ready.push({ line: '· ' + num + ' ⦂ sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs', rank: 1 });
+        groups.ready.push({ line: '· ' + num + ' ⦂ sɪᴀᴘ ᴍᴇɴᴇʀɪᴍᴀ sᴍs', rank: 2 });
       }
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
@@ -499,13 +508,13 @@ async function processDetection(ctx, numbers) {
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
       else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
       const dur = formatCooldownSmallCaps(secs);
-      groups.cooldown.push({ line: '· ' + num + ' ⦂ ' + dur, secs: secs });
+      groups.cooldown.push({ line: '· ' + num + ' ⦂ ' + dur + deviceTag, secs: secs });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
-      groups.other.push('· ' + num + note);
+      groups.other.push('· ' + num + note + deviceTag);
     } else {
       const note = r.description ? (' · ' + r.description) : '';
-      groups.other.push('· ' + num + note);
+      groups.other.push('· ' + num + note + deviceTag);
     }
   }
 
@@ -525,6 +534,8 @@ async function processDetection(ctx, numbers) {
   lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
   lines.push('△ ᴛɪᴅᴀᴋ sᴜᴘᴘᴏʀᴛ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
   lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.restricted.length + '</b>');
+  lines.push('⊘ ɴᴏᴛ ʀᴇɢɪsᴛᴇʀᴇᴅ ⦂ <b>' + groups.notRegistered.length + '</b>');
+  lines.push('⊘ ɴᴏ ʀᴏᴜᴛᴇs ⦂ <b>' + groups.noRoutes.length + '</b>');
   if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
   lines.push('');
   lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
@@ -551,6 +562,18 @@ async function processDetection(ctx, numbers) {
     lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
     lines.push('');
     groups.restricted.forEach((n) => lines.push(n));
+  }
+  if (groups.notRegistered.length) {
+    lines.push('');
+    lines.push('⊘ <b>ɴᴏᴛ ʀᴇɢɪsᴛᴇʀᴇᴅ</b>');
+    lines.push('');
+    groups.notRegistered.forEach((n) => lines.push(n));
+  }
+  if (groups.noRoutes.length) {
+    lines.push('');
+    lines.push('⊘ <b>ɴᴏ ʀᴏᴜᴛᴇs</b>');
+    lines.push('');
+    groups.noRoutes.forEach((n) => lines.push(n));
   }
   if (groups.other.length) {
     lines.push('');
