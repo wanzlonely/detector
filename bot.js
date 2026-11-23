@@ -351,18 +351,89 @@ bot.action('detect:info', async (ctx) => {
     'ⓘ <b>ᴋᴇᴛᴇʀᴀɴɢᴀɴ ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>',
     '──────────────────────',
     '✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>',
-    'ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ʟᴏɢɪɴ sᴇᴋᴀʀᴀɴɢ.',
+    'ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ʟᴏɢɪɴ / ᴏᴛᴘ sᴍs.',
     '',
     '◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>',
-    'ɴᴏᴍᴏʀ sᴇᴅᴀɴɢ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ, ᴛᴜɴɢɢᴜ sᴇsᴜᴀɪ ᴡᴀᴋᴛᴜ ʏᴀɴɢ ᴛᴇʀᴛᴇʀᴀ.',
+    'ɴᴏᴍᴏʀ sᴇᴅᴀɴɢ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ sᴍs. ᴛᴜɴɢɢᴜ sᴇsᴜᴀɪ ᴛɪᴍᴇʀ.',
     '',
-    '✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>',
-    'ɴᴏᴍᴏʀ ᴛᴇʀᴋᴇɴᴀ ʙᴀᴛᴀsᴀɴ / ʙʟᴏᴋɪʀ sᴇᴍᴇɴᴛᴀʀᴀ.',
+    '◈ <b>sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ</b>',
+    'ᴀᴋᴜɴ ᴅɪᴛᴀʜᴀɴ ᴋᴇᴀᴍᴀɴᴀɴ ("ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴀsᴜᴋ sᴀᴀᴛ ɪɴɪ").',
+    '',
+    '⚠ <b>ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ</b>',
+    'ᴅɪʙʟᴏᴋɪʀ ᴋᴀʀᴇɴᴀ ᴀᴘᴋ ᴛɪᴅᴀᴋ ʀᴇsᴍɪ — ᴘᴇʀʟᴜ ᴡᴀ ʀᴇsᴍɪ.',
+    '',
+    '✕ <b>ᴅɪʙᴀɴ</b>',
+    'ɴᴏᴍᴏʀ ᴛᴇʀᴋᴇɴᴀ ʙᴀɴ / ᴘᴇʟᴀɴɢɢᴀʀᴀɴ ᴡʜᴀᴛsᴀᴘᴘ.',
+    '',
+    '⊘ <b>ɴᴏ ʀᴏᴜᴛᴇs</b>',
+    'ᴊᴀʟᴜʀ sᴍs ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.',
     '──────────────────────',
     '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ ⦂ ᴋᴏᴅᴇ ᴍᴀsᴜᴋ ᴋᴇ ᴡᴀ ᴅɪ ʜᴘ ʟᴀᴍᴀ.',
-    '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴘᴀɴɢɢɪʟᴀɴ.'
+    '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴘᴀɴɢɢɪʟᴀɴ.',
+    '──────────────────────',
+    '◈ ᴛᴏᴍʙᴏʟ ᴅᴇᴛᴀɪʟ ⦂ ᴇᴍᴀɪʟ · 2ғᴀ · ᴄʜᴀɴɴᴇʟ · sᴋᴏʀ',
+    '⇩ ᴇxᴘᴏʀᴛ sɪᴀᴘ ⦂ ᴜɴᴅᴜʜ ᴅᴀғᴛᴀʀ ɴᴏᴍᴏʀ sɪᴀᴘ (.ᴛxᴛ)'
   ].join('\n');
   return ctx.reply(infoText, { parse_mode: 'HTML' });
+});
+
+bot.action(/^detect:detail:([^:]+):(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const jobId = ctx.match[1];
+  const digits = ctx.match[2];
+  const userId = ctx.from && ctx.from.id;
+  const resultKey = 'detect:results:' + userId + ':' + jobId;
+  let payload = null;
+  try {
+    const raw = await redis.get(resultKey);
+    payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (_) {}
+  if (!payload || !payload.detailMap) {
+    return ctx.reply('✦ ᴅᴀᴛᴀ ᴅᴇᴛᴀɪʟ ᴋᴇᴅᴀʟᴜᴡᴀʀsᴀ. ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.', { parse_mode: 'HTML' });
+  }
+  const map = payload.detailMap;
+  let found = null;
+  for (const k of Object.keys(map)) {
+    if (String(k).replace(/\D/g, '') === digits || String(k).endsWith(digits)) {
+      found = map[k];
+      break;
+    }
+  }
+  if (!found) {
+    return ctx.reply('✦ ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ᴅɪ ʜᴀsɪʟ ɪɴɪ.', { parse_mode: 'HTML' });
+  }
+  const text = require('./themes').renderAccountDetail(found);
+  return ctx.reply(text, { parse_mode: 'HTML' });
+});
+
+bot.action(/^detect:export:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery('Menyiapkan file…').catch(() => {});
+  const jobId = ctx.match[1];
+  const userId = ctx.from && ctx.from.id;
+  const resultKey = 'detect:results:' + userId + ':' + jobId;
+  let payload = null;
+  try {
+    const raw = await redis.get(resultKey);
+    payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (_) {}
+  const list = (payload && payload.siapList) || [];
+  if (!list.length) {
+    return ctx.reply('✕ ᴛɪᴅᴀᴋ ᴀᴅᴀ ɴᴏᴍᴏʀ sɪᴀᴘ ᴜɴᴛᴜᴋ ᴅɪᴇxᴘᴏʀᴛ.', { parse_mode: 'HTML' });
+  }
+  const body = list.join('\n') + '\n';
+  const filename = 'siap_' + jobId + '.txt';
+  try {
+    await ctx.replyWithDocument(
+      { source: Buffer.from(body, 'utf8'), filename: filename },
+      { caption: '⇩ <b>ᴇxᴘᴏʀᴛ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>\n▸ ᴊᴜᴍʟᴀʜ ⦂ <b>' + list.length + '</b> ɴᴏᴍᴏʀ', parse_mode: 'HTML' }
+    );
+  } catch (err) {
+    // fallback plain text
+    return ctx.reply(
+      '⇩ <b>ᴅᴀғᴛᴀʀ sɪᴀᴘ</b> (' + list.length + ')\n\n<code>' + list.join('\n') + '</code>',
+      { parse_mode: 'HTML' }
+    );
+  }
 });
 
 function buildProgressBar(pct) {
@@ -597,33 +668,49 @@ async function processDetection(ctx, numbers, detectOpts) {
   await redis.del('detect:stop:' + userId + ':' + jobId);
   if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 
-  const groups = { ready: [], cooldown: [], restricted: [], other: [] };
+  const groups = { ready: [], cooldown: [], security: [], clone: [], restricted: [], noroutes: [], other: [] };
+  const detailMap = {};
   for (let gi = 0; gi < results.length; gi++) {
     const r = results[gi];
     if (!r || r.cancelled) continue;
-    // Always prefer original input number for display
     const origDigits = String(numbers[gi] || '').replace(/\D/g, '');
     const origNum = origDigits ? ('+' + origDigits) : null;
     let num = origNum || r.formattedNumber || '-';
     const shownDigits = String(num).replace(/\D/g, '');
-    if (origDigits && shownDigits && shownDigits !== origDigits) {
-      num = origNum;
-    }
+    if (origDigits && shownDigits && shownDigits !== origDigits) num = origNum;
     r.formattedNumber = num;
+    detailMap[num] = r;
+
+    const dev = deviceLabel(r);
+    const score = r.qualityScore != null ? (' · ' + r.qualityScore) : '';
+
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
       groups.restricted.push(num);
+    } else if (r.isCloneBlocked || r.accountStatus === 'CLONE_BLOCK') {
+      groups.clone.push(num + ' ' + dev);
+    } else if (r.isSecurityBlock || r.accountStatus === 'SECURITY_BLOCK') {
+      groups.security.push(num + ' ' + dev);
+    } else if (r.accountStatus === 'NO_ROUTES') {
+      groups.noroutes.push(num);
+    } else if (r.isReady && !r.isBanned) {
+      groups.ready.push({ line: num + ' ' + dev + score, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num, score: r.qualityScore || 0 });
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
       if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
-      else if (r.secondarySeconds > 0) secs = Number(r.secondarySeconds) || 0;
       else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-      else if (r.channels && r.channels.voice && r.channels.voice.rawSeconds > 0) secs = Number(r.channels.voice.rawSeconds) || 0;
+      else if (r.secondarySeconds > 0) secs = Number(r.secondarySeconds) || 0;
+      if (secs > 0 && secs <= 360 && (Number(r.confidence) || 0) < 0.9 && r.isReady) secs = 0;
       const dur = formatCooldownSmallCaps(secs);
-      const dev = deviceLabel(r);
-      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' ' + dev, secs: secs, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
-    } else if (r.isReady) {
-      const dev = deviceLabel(r);
-      groups.ready.push({ line: num + ' ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1 });
+      // Channel breakdown singkat
+      let chHint = '';
+      if (r.channels) {
+        const parts = [];
+        if (r.channels.sms && r.channels.sms.rawSeconds > 0) parts.push('sᴍs');
+        if (r.channels.voice && r.channels.voice.rawSeconds > 0) parts.push('ᴠᴏɪᴄᴇ');
+        if (r.channels.flash && r.channels.flash.rawSeconds > 0) parts.push('ғʟᴀsʜ');
+        if (parts.length) chHint = ' · ' + parts.join('/');
+      }
+      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' ' + dev + chHint, secs: secs, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
       groups.other.push(num + note);
@@ -633,8 +720,7 @@ async function processDetection(ctx, numbers, detectOpts) {
     }
   }
 
-  // ON-DEVICE selalu di atas
-  groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0));
+  groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0) || (b.score || 0) - (a.score || 0));
   groups.cooldown.sort((a, b) => {
     const ra = a.rank != null ? a.rank : 1;
     const rb = b.rank != null ? b.rank : 1;
@@ -649,9 +735,12 @@ async function processDetection(ctx, numbers, detectOpts) {
   lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
   lines.push('sᴀᴀᴛ ɪɴɪ ⦂ sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ');
   lines.push('──────────────────────');
-  lines.push('✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ ⦂ <b>' + groups.ready.length + '</b>');
+  lines.push('✧ sɪᴀᴘ ⦂ <b>' + groups.ready.length + '</b>');
   lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
-  lines.push('✕ ᴅɪʙᴀᴛᴀsɪ ⦂ <b>' + groups.restricted.length + '</b>');
+  lines.push('◈ sᴇᴄᴜʀɪᴛʏ ⦂ <b>' + groups.security.length + '</b>');
+  lines.push('⚠ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
+  lines.push('✕ ʙᴀɴ ⦂ <b>' + groups.restricted.length + '</b>');
+  if (groups.noroutes.length) lines.push('⊘ ɴᴏ ʀᴏᴜᴛᴇs ⦂ <b>' + groups.noroutes.length + '</b>');
   if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
   lines.push('──────────────────────');
   lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
@@ -665,10 +754,25 @@ async function processDetection(ctx, numbers, detectOpts) {
     lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
     groups.cooldown.forEach((n) => lines.push(n.line || n));
   }
+  if (groups.security.length) {
+    lines.push('');
+    lines.push('◈ <b>sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ</b>');
+    groups.security.forEach((n) => lines.push(n));
+  }
+  if (groups.clone.length) {
+    lines.push('');
+    lines.push('⚠ <b>ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ</b>');
+    groups.clone.forEach((n) => lines.push(n));
+  }
   if (groups.restricted.length) {
     lines.push('');
-    lines.push('✕ <b>ᴅɪʙᴀᴛᴀsɪ</b>');
+    lines.push('✕ <b>ᴅɪʙᴀɴ</b>');
     groups.restricted.forEach((n) => lines.push(n));
+  }
+  if (groups.noroutes.length) {
+    lines.push('');
+    lines.push('⊘ <b>ɴᴏ ʀᴏᴜᴛᴇs</b>');
+    groups.noroutes.forEach((n) => lines.push(n));
   }
   if (groups.other.length) {
     lines.push('');
@@ -684,18 +788,42 @@ async function processDetection(ctx, numbers, detectOpts) {
       await incrementUserChecks(ctx.from.id, checkedCount);
     }
   } catch (e) { console.error('[quota/leaderboard]', e && e.message || e); }
-  const refreshKey = 'detect:refresh:' + userId + ':' + jobId;
+
+  // Simpan hasil lengkap untuk DETAIL + EXPORT
+  const resultKey = 'detect:results:' + userId + ':' + jobId;
+  const siapList = groups.ready.map((x) => x.num || String(x.line || '').split(' ')[0]).filter(Boolean);
   try {
+    const refreshKey = 'detect:refresh:' + userId + ':' + jobId;
     await redis.set(refreshKey, JSON.stringify(numbers), { ex: 3600 });
+    await redis.set(resultKey, JSON.stringify({ results: results.filter(Boolean), siapList, detailMap }), { ex: 3600 });
   } catch (_) {}
+
+  // Tombol detail: max 6 nomor agar keyboard tidak terlalu panjang
+  const detailBtns = [];
+  const allNums = Object.keys(detailMap).slice(0, 6);
+  for (let di = 0; di < allNums.length; di += 2) {
+    const row = [];
+    row.push(styledCallback('◈ ' + allNums[di].slice(-6), 'detect:detail:' + jobId + ':' + allNums[di].replace(/\D/g, ''), 'primary'));
+    if (allNums[di + 1]) {
+      row.push(styledCallback('◈ ' + allNums[di + 1].slice(-6), 'detect:detail:' + jobId + ':' + allNums[di + 1].replace(/\D/g, ''), 'primary'));
+    }
+    detailBtns.push(row);
+  }
+
+  const keyboardRows = [
+    [
+      styledCallback('↻ UPDATE', 'detect:refresh:' + jobId, 'success'),
+      styledCallback('ⓘ INFO', 'detect:info', 'primary')
+    ]
+  ];
+  if (siapList.length) {
+    keyboardRows.push([styledCallback('⇩ EXPORT SIAP (' + siapList.length + ')', 'detect:export:' + jobId, 'success')]);
+  }
+  keyboardRows.push(...detailBtns);
+
   return ctx.reply(lines.join('\n'), {
     parse_mode: 'HTML',
-    ...Markup.inlineKeyboard([
-      [
-        styledCallback('↻ UPDATE STATUS', 'detect:refresh:' + jobId, 'success'),
-        styledCallback('ⓘ KETERANGAN', 'detect:info', 'primary')
-      ]
-    ])
+    ...Markup.inlineKeyboard(keyboardRows)
   });
 }
 
