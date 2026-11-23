@@ -17,8 +17,9 @@ function getTodayWIB() {
   return new Date(Date.now() + 7 * 3600 * 1000).toISOString().split('T')[0];
 }
 
-function getPackagesByTier() {
-  return PACKAGES.slice();
+function getPackagesByTier(tier) {
+  if (!tier) return PACKAGES.slice();
+  return PACKAGES.filter((p) => p.tier === tier);
 }
 
 function getPackageById(pkgId) {
@@ -119,6 +120,7 @@ async function consumeQuota(telegramId, count = 1) {
   const used = Number((await redis.get(quotaKey)) || 0);
   const bonusKey = 'referral:bonus_quota:' + telegramId;
   const bonus = Number(await redis.get(bonusKey) || 0);
+  
   if (bonus >= count) {
     await redis.incrby(bonusKey, -count);
     user.total_checks = Number(user.total_checks || 0) + count;
@@ -127,6 +129,7 @@ async function consumeQuota(telegramId, count = 1) {
     await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
+  
   if (bonus > 0 && used + (count - bonus) <= 3) {
     await redis.incrby(bonusKey, -bonus);
     await redis.incrby(quotaKey, count - bonus);
@@ -137,6 +140,7 @@ async function consumeQuota(telegramId, count = 1) {
     await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
+  
   if (used + count <= 3) {
     await redis.incrby(quotaKey, count);
     await redis.expire(quotaKey, 90000);
@@ -218,7 +222,6 @@ async function getCachedCheckResult(rawNumber) {
 async function setCachedCheckResult(rawNumber, result) {
   if (CHECK_CACHE_TTL_SECONDS <= 0) return;
   if (!result || result.error || result.softFallback || result.needsRecheck) return;
-  // Never persist cooldown / banned — status changes quickly on recheck
   if (result.anyCooldown || result.accountStatus === 'IN_COOLDOWN' || result.isBanned) return;
   if (result.accountStatus === 'UNKNOWN') return;
 
@@ -332,6 +335,16 @@ async function getLeaderboard(limit = 10) {
   return rows;
 }
 
+async function getUserRank(telegramId) {
+  try {
+    const rank = await redis.zrevrank('leaderboard:checks', String(telegramId));
+    if (rank === null || rank === undefined) return 0;
+    return Number(rank) + 1;
+  } catch (_) {
+    return 0;
+  }
+}
+
 async function incrementUserChecks(telegramId, count = 1) {
   const key = `user:${telegramId}`;
   const user = await redis.get(key);
@@ -364,5 +377,6 @@ module.exports = {
   qualifyReferral,
   getReferralStats,
   redeemReferralReward,
-  getLeaderboard
+  getLeaderboard,
+  getUserRank
 };
