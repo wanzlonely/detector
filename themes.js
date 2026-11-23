@@ -332,21 +332,52 @@ function renderAccountDetail(r) {
 function renderExportDetail(detailMap) {
   if (!detailMap || Object.keys(detailMap).length === 0) return 'Tidak ada data.';
   const keys = Object.keys(detailMap);
-  let out = '════════════════════════════════════════\n';
-  out += '         META DETECT - EXPORT DETAIL       \n';
-  out += '════════════════════════════════════════\n\n';
-  
+  let out = '▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n';
+  out += '       META DETECT - EXPORT DETAIL      \n';
+  out += '▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n\n';
+
+  const pad = (label, value) => '  ▸ ' + label.padEnd(13) + '⦂ ' + value;
+  const fmtSecs = (sec) => {
+    if (!sec || sec <= 0) return 'ᴛᴇʀʙᴜᴋᴀ';
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    const h = Math.floor(sec / 3600);
+    if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+    if (m > 0) return m + 'm ' + s + 's';
+    return s + 's';
+  };
+
   for (let i = 0; i < keys.length; i++) {
     const r = detailMap[keys[i]];
     if (!r) continue;
-    
-    // Clean HTML tags for txt file
-    const plainText = renderAccountDetail(r).replace(/<[^>]+>/g, '');
-    out += plainText + '\n\n';
-    out += '----------------------------------------\n\n';
+
+    const num = r.formattedNumber || '-';
+    const st = r.accountStatus || '-';
+    const dev = r.deviceName || (r.waOldEligible ? 'ᴛᴇʀᴅᴀғᴛᴀʀ' : '-');
+    const email = r.maskedEmail || '-';
+    const ch = r.channels || {};
+
+    out += '◈ ᴅᴇᴛᴀɪʟ ᴀᴋᴜɴ\n';
+    out += pad('ɴᴏᴍᴏʀ', num) + '\n';
+    out += pad('sᴛᴀᴛᴜs', st) + '\n';
+    out += pad('sᴋᴏʀ', (r.qualityScore != null ? r.qualityScore : '-') + '/100') + '\n';
+    out += pad('ᴘᴇʀᴀɴɢᴋᴀᴛ', dev) + '\n';
+    out += pad('ᴇᴍᴀɪʟ', email) + '\n';
+    out += pad('2ғᴀ ᴘᴀssᴡᴏʀᴅ', r.hasPassword ? 'ᴀᴋᴛɪғ' : 'ᴛɪᴅᴀᴋ') + '\n';
+    out += pad('ᴘᴀssᴋᴇʏ', r.hasPasskey ? 'ᴀᴋᴛɪғ' : 'ᴛɪᴅᴀᴋ') + '\n';
+    out += pad('ʜɪɢʜ ʀᴇ-ʀᴇɢ', r.highRereg ? 'ʏᴀ' : 'ᴛɪᴅᴀᴋ') + '\n\n';
+
+    out += '♛ ᴄʜᴀɴɴᴇʟ ᴏᴛᴘ\n';
+    out += pad('sᴍs', fmtSecs(ch.sms?.rawSeconds)) + '\n';
+    out += pad('ᴠᴏɪᴄᴇ', fmtSecs(ch.voice?.rawSeconds)) + '\n';
+    out += pad('ғʟᴀsʜ', fmtSecs(ch.flash?.rawSeconds)) + '\n';
+    out += pad('ᴇᴍᴀɪʟ', fmtSecs(ch.email?.rawSeconds)) + '\n';
+    out += pad('ᴡᴀ ᴏʟᴅ', fmtSecs(ch.wa_old?.rawSeconds)) + '\n\n';
+
+    out += '────────────────────────────────────────\n';
+    if (i < keys.length - 1) out += '\n';
   }
-  
-  out += 'Total: ' + keys.length + ' nomor\n';
+
   return out;
 }
 
