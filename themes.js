@@ -2,7 +2,8 @@ function escapeHtml(str = '') {
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function formatIDR(num) {
@@ -41,10 +42,10 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
   const quota = isOwner || isVip
     ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs'
     : Math.max(0, 3 - Number(user.free_used_today || 0)) + ' / 3 ᴛᴇʀsɪsᴀ';
-  const level = isOwner ? 'ᴏᴡɴᴇʀ' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : totalCount >= 100 ? 'ᴀᴄᴛɪᴠᴇ' : 'ʀᴇɢᴜʟᴇʀ';
+  const level = isOwner ? 'ᴏᴡɴᴇʀ' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : totalCount >= 100 ? 'ᴀᴄᴛɪᴠᴇ' : 'ʀᴇɢᴜʟᴀʀ';
 
   return [
-    '✦ <b>ᴍᴇᴛᴀ ᴅᴇᴛᴇᴄᴛ</b> ✦',
+    '✦ <b>' + escapeHtml(brandName || 'META DETECT') + '</b> ✦',
     '<i>ᴀᴅᴠᴀɴᴄᴇᴅ ᴡʜᴀᴛsᴀᴘᴘ ᴛᴇʟᴇᴍᴇᴛʀʏ</i>',
     '',
     '⚙ <b>sᴛᴀᴛᴜs ᴀᴋᴜɴ</b>',
@@ -86,47 +87,86 @@ function renderStatus({ user, isVip, isOwner = false, referralStats }) {
   ].join('\n');
 }
 
-function renderLeaderboard(rows) {
-  const medals = ['♛', '♜', '♞'];
+function renderLeaderboard(rows, myRank) {
+  const medals = ['♛', '♜', '♝', '♞', '♟', '♙', '♘', '♗', '♖', '♕'];
   const lines = (rows && rows.length)
     ? rows.slice(0, 10).map((row, index) => {
         const rank = String(index + 1).padStart(2, '0');
-        const medal = medals[index] || rank;
+        const medal = medals[index] || '•';
         const name = escapeHtml(row.full_name || 'Pengguna');
         const count = Number(row.total_checks || 0).toLocaleString('id-ID');
-        return medal + ' ✧ <b>' + name + '</b>\n      └ <b>' + count + '</b> ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
+        return medal + ' ' + rank + ' · <b>' + name + '</b>\n      └ <b>' + count + '</b> ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ';
       }).join('\n\n')
     : '<i>ʙᴇʟᴜᴍ ᴀᴅᴀ ᴅᴀᴛᴀ. ᴊᴀᴅɪʟᴀʜ ᴘᴇɴɢɢᴜɴᴀ ᴘᴇʀᴛᴀᴍᴀ ᴅɪ ᴘᴀᴘᴀɴ ᴘᴇʀɪɴɢᴋᴀᴛ.</i>';
 
+  const rankText = (myRank && myRank > 0)
+    ? String(myRank)
+    : '—';
+
   return [
-    '♛ <b>ᴛᴏᴘ 𝟷𝟶 ᴅᴇᴛᴇᴄᴛᴏʀ · ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ</b> ♛',
-    '',
+    '✦ <b>ᴛᴏᴘ 10 ᴅᴇᴛᴇᴄᴛᴏʀ · ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ</b>',
+    '──────────────────────',
     lines,
-    '',
-    '♧ sᴛᴀᴛᴜs ᴅɪ ᴀᴛᴀs ᴀᴅᴀʟᴀʜ ᴜsᴇʀ ʏᴀɴɢ ᴘᴀʟɪɴɢ ᴀᴋᴛɪғ'
+    '──────────────────────',
+    '⌖ ᴘᴇʀɪɴɢᴋᴀᴛ ᴋᴀᴍᴜ ⦂ <b>' + rankText + '</b>',
+    'ⓘ ᴅɪᴘᴇʀʙᴀʀᴜɪ ʀᴇᴀʟ-ᴛɪᴍᴇ ʙᴇʀᴅᴀsᴀʀᴋᴀɴ ᴛᴏᴛᴀʟ ᴄᴇᴋ'
   ].join('\n');
 }
 
 function renderReferral({ link, stats }) {
   const coins = (stats && stats.coins) || 0;
   const invited = (stats && (stats.total || stats.invited)) || 0;
+  const rewarded = (stats && stats.rewarded) || 0;
   return [
-    '♧ <b>ʀᴇғᴇʀʀᴀʟ</b>',
+    '♧ <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀʀᴀʟ</b> ♧',
+    '<i>ᴜɴᴅᴀɴɢ ᴛᴇᴍᴀɴ · ᴅᴀᴘᴀᴛᴋᴀɴ ᴋᴏɪɴ</i>',
     '',
-    '▸ ᴋᴏɪɴ ⦂ <b>' + coins + '</b>',
-    '▸ ᴛᴇʀᴜɴᴅᴀɴɢ ⦂ <b>' + invited + '</b>',
+    '━━━━━━━━━━━━━━━━━━━━',
+    '▸ ᴋᴏɪɴ ᴋᴀᴍᴜ ⦂ <b>' + coins + '</b>',
+    '▸ ᴛᴇᴍᴀɴ ᴛᴇʀᴜɴᴅᴀɴɢ ⦂ <b>' + invited + '</b>',
+    '▸ ʜᴀᴅɪᴀʜ ᴅɪᴋʟᴀɪᴍ ⦂ <b>' + rewarded + '</b>',
+    '━━━━━━━━━━━━━━━━━━━━',
     '',
-    '<blockquote>ʙᴀɢɪᴋᴀɴ ᴛᴀᴜᴛᴀɴ ᴅɪ ʙᴀᴡᴀʜ. sᴇᴛɪᴀᴘ ʀᴇғᴇʀʀᴀʟ ʏᴀɴɢ ᴍᴇɴʏᴇʟᴇsᴀɪᴋᴀɴ 3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴍᴇᴍʙᴇʀɪᴋᴀɴ 5 ᴋᴏɪɴ.</blockquote>',
+    '♛ <b>ᴄᴀʀᴀ ᴋᴇʀᴊᴀ</b>',
+    '1. ʙᴀɢɪᴋᴀɴ ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴ ᴋᴀᴍᴜ',
+    '2. ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ʟᴇᴡᴀᴛ ᴛᴀᴜᴛᴀɴ',
+    '3. ᴛᴇᴍᴀɴ sᴇʟᴇsᴀɪᴋᴀɴ <b>3 ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>',
+    '4. ᴋᴀᴍᴜ ᴅᴀᴘᴀᴛ <b>5 ᴋᴏɪɴ</b> ᴏᴛᴏᴍᴀᴛɪs',
     '',
-    '<code>' + escapeHtml(link) + '</code>'
+    '◈ <b>ᴛᴀᴜᴛᴀɴ ᴜɴᴅᴀɴɢᴀɴ</b>',
+    '<code>' + escapeHtml(link) + '</code>',
+    '',
+    '<blockquote>ᴋᴏɪɴ ʙɪsᴀ ᴅɪᴛᴜᴋᴀʀ ᴍᴇɴᴊᴀᴅɪ ᴋᴜᴏᴛᴀ ᴛᴀᴍʙᴀʜᴀɴ ᴀᴛᴀᴜ ᴀᴋsᴇs ᴘʀᴇᴍɪᴜᴍ.</blockquote>'
   ].join('\n');
 }
 
-function renderReferralExchange() {
+function renderReferralExchange(stats) {
+  const coins = Number((stats && stats.coins) || 0);
   return [
-    '◈ <b>ᴛᴜᴋᴀʀ ᴋᴏɪɴ</b>',
+    '◈ <b>ᴛᴜᴋᴀʀ ᴋᴏɪɴ ʀᴇғᴇʀʀᴀʟ</b>',
+    '<i>ᴛᴜᴋᴀʀ ᴋᴏɪɴ ᴍᴇɴᴊᴀᴅɪ ᴋᴜᴏᴛᴀ ᴀᴛᴀᴜ ᴘʀᴇᴍɪᴜᴍ</i>',
     '',
-    '<blockquote>ғɪᴛᴜʀ ᴘᴇɴᴜᴋᴀʀᴀɴ ᴋᴏɪɴ ᴀᴋᴀɴ sᴇɢᴇʀᴀ ᴛᴇʀsᴇᴅɪᴀ.</blockquote>'
+    '──────────────────────',
+    '▸ sᴀʟᴅᴏ ᴋᴏɪɴ ⦂ <b>' + coins + '</b>',
+    '──────────────────────',
+    '',
+    '♛ <b>ᴘᴀᴋᴇᴛ ᴘᴇɴᴜᴋᴀʀᴀɴ</b>',
+    '',
+    '✧ <b>3 ᴋᴜᴏᴛᴀ ᴄᴇᴋ</b> — 10 ᴋᴏɪɴ',
+    '   └ ᴛᴀᴍʙᴀʜᴀɴ ᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs (ᴀᴋᴜɴ ғʀᴇᴇ)',
+    '',
+    '✧ <b>1 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b> — 25 ᴋᴏɪɴ',
+    '   └ ᴀᴋsᴇs ᴘᴇɴᴜʜ 24 ᴊᴀᴍ',
+    '',
+    '✧ <b>3 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b> — 50 ᴋᴏɪɴ',
+    '   └ ᴀᴋsᴇs ᴘᴇɴᴜʜ 3 × 24 ᴊᴀᴍ',
+    '',
+    '✧ <b>7 ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b> — 100 ᴋᴏɪɴ',
+    '   └ ᴀᴋsᴇs ᴘᴇɴᴜʜ 7 ʜᴀʀɪ',
+    '',
+    '──────────────────────',
+    '<blockquote>1 ʀᴇғᴇʀʀᴀʟ sᴜᴋsᴇs = 5 ᴋᴏɪɴ (sᴇᴛᴇʟᴀʜ ᴛᴇᴍᴀɴ sᴇʟᴇsᴀɪ 3 ᴄᴇᴋ).</blockquote>',
+    'ᴘɪʟɪʜ ᴘᴀᴋᴇᴛ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇɴᴜᴋᴀʀ.'
   ].join('\n');
 }
 
@@ -199,6 +239,199 @@ function renderPaymentMaintenanceCard({ user, pkg }) {
   ].join('\n');
 }
 
+function formatDescription(raw) {
+  if (!raw) return '-';
+  let d = String(raw);
+  if (d.includes('too_many') || d.includes('too_many_attempts')) {
+    return 'Rate limit terlampaui. Tunggu sesuai timer.';
+  }
+  if (d.includes('temporarily_unavailable')) {
+    return 'Akun dibatasi sementara oleh WhatsApp.';
+  }
+  if (d.includes('no_routes') || d.includes('no_route')) {
+    return 'Jalur SMS tidak tersedia untuk nomor ini.';
+  }
+  if (d.includes('banned')) {
+    return 'Nomor diblokir oleh WhatsApp.';
+  }
+  if (d.includes('security')) {
+    return 'Ditahan sistem keamanan WhatsApp.';
+  }
+  return d;
+}
+
+function cleanMethods(methods) {
+  if (!methods || !methods.length) return '-';
+  const unique = [...new Set(methods)];
+  const map = {
+    'email_otp': 'Email OTP',
+    'sms': 'SMS',
+    'voice': 'Voice Call',
+    'wa_old': 'WhatsApp Lama',
+    'passkey': 'Passkey',
+    'password': 'Password'
+  };
+  return unique.map(m => map[m] || m).join(', ');
+}
+
+function renderAccountDetail(r) {
+  if (!r) return '✕ ᴅᴀᴛᴀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ';
+  const num = r.formattedNumber || '-';
+  const st = r.accountStatus || '-';
+  const dev = r.deviceName || (r.waOldEligible ? 'ᴛᴇʀᴅᴀғᴛᴀʀ' : '-');
+  const email = r.maskedEmail || '-';
+
+  const methods = [].concat(r.recommendedMethods || [], r.fallbackMethods || []);
+  const methodStr = cleanMethods(methods);
+  const desc = formatDescription(r.description);
+
+  const ch = r.channels || {};
+  const formatSecs = (sec) => {
+    if (!sec || sec <= 0) return 'ᴛᴇʀʙᴜᴋᴀ';
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    const h = Math.floor(sec / 3600);
+    if (h > 0) return h + 'j ' + m + 'm ' + s + 's';
+    if (m > 0) return m + 'm ' + s + 's';
+    return s + 's';
+  };
+
+  const chLine = (name, c) => {
+    if (!c) return name + ' ⦂ -';
+    const sec = Number(c.rawSeconds || 0);
+    return name + ' ⦂ ' + formatSecs(sec);
+  };
+
+  const lines = [
+    '◈ <b>ᴅᴇᴛᴀɪʟ ᴀᴋᴜɴ</b>',
+    '──────────────────────',
+    '▸ ɴᴏᴍᴏʀ ⦂ <code>' + num + '</code>',
+    '▸ sᴛᴀᴛᴜs ⦂ <b>' + st + '</b>',
+    '▸ sᴋᴏʀ ⦂ <b>' + (r.qualityScore != null ? r.qualityScore : '-') + '/100</b>',
+    '▸ ᴘᴇʀᴀɴɢᴋᴀᴛ ⦂ <b>' + escapeHtml(String(dev)) + '</b>',
+    '▸ ᴇᴍᴀɪʟ ⦂ <b>' + escapeHtml(String(email)) + '</b>',
+    '▸ 2ғᴀ ᴘᴀssᴡᴏʀᴅ ⦂ <b>' + (r.hasPassword ? 'ᴀᴋᴛɪғ' : 'ᴛɪᴅᴀᴋ') + '</b>',
+    '▸ ᴘᴀssᴋᴇʏ ⦂ <b>' + (r.hasPasskey ? 'ᴀᴋᴛɪғ' : 'ᴛɪᴅᴀᴋ') + '</b>',
+    '▸ ʜɪɢʜ ʀᴇ-ʀᴇɢ ⦂ <b>' + (r.highRereg ? 'ʏᴀ' : 'ᴛɪᴅᴀᴋ') + '</b>',
+    '──────────────────────',
+    '♛ <b>ᴄʜᴀɴɴᴇʟ ᴏᴛᴘ</b>',
+    '▸ ' + chLine('sᴍs', ch.sms),
+    '▸ ' + chLine('ᴠᴏɪᴄᴇ', ch.voice),
+    '▸ ' + chLine('ғʟᴀsʜ', ch.flash),
+    '▸ ' + chLine('ᴇᴍᴀɪʟ', ch.email),
+    '▸ ' + chLine('ᴡᴀ ᴏʟᴅ', ch.wa_old),
+    '──────────────────────',
+    '▸ ᴍᴇᴛᴏᴅᴇ ⦂ <b>' + escapeHtml(String(methodStr)) + '</b>',
+    r.wipeType ? ('▸ ᴡɪᴘᴇ ⦂ <b>' + escapeHtml(String(r.wipeType)) + '</b>') : null,
+    '▸ ᴋᴇᴛ ⦂ ' + escapeHtml(String(desc))
+  ].filter(Boolean);
+  
+  return lines.join('\n');
+}
+
+function renderExportDetail(detailMap) {
+  if (!detailMap || Object.keys(detailMap).length === 0) return 'Tidak ada data.';
+  const keys = Object.keys(detailMap);
+
+  const groups = {
+    ready: [],
+    cooldown: [],
+    clone: [],
+    banned: [],
+    other: []
+  };
+
+  for (const k of keys) {
+    const r = detailMap[k];
+    if (!r) continue;
+    if (r.isBanned) groups.banned.push(r);
+    else if (r.isCloneBlocked) groups.clone.push(r);
+    else if (r.isReady) groups.ready.push(r);
+    else if (r.anyCooldown) groups.cooldown.push(r);
+    else groups.other.push(r);
+  }
+
+  let out = '▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n';
+  out += '       META DETECT - EXPORT DETAIL      \n';
+  out += '▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n\n';
+
+  out += `Total Nomor : ${keys.length}\n`;
+  out += `✧ Siap      : ${groups.ready.length}\n`;
+  out += `◐ Cooldown  : ${groups.cooldown.length}\n`;
+  out += `△ Clone     : ${groups.clone.length}\n`;
+  out += `✕ Banned    : ${groups.banned.length}\n`;
+  if (groups.other.length) out += `· Lainnya   : ${groups.other.length}\n`;
+  out += '\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n';
+
+  const pad = (label, value) => '  ▸ ' + label.padEnd(13) + '⦂ ' + value;
+  const fmtSecs = (sec) => {
+    if (!sec || sec <= 0) return 'ᴛᴇʀʙᴜᴋᴀ';
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    const h = Math.floor(sec / 3600);
+    if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+    if (m > 0) return m + 'm ' + s + 's';
+    return s + 's';
+  };
+
+  const renderBlock = (r, index) => {
+    let txt = `[ ${index} ]\n`;
+    txt += pad('ɴᴏᴍᴏʀ', r.formattedNumber || '-') + '\n';
+    txt += pad('sᴛᴀᴛᴜs', r.accountStatus || '-') + '\n';
+    txt += pad('sᴋᴏʀ', (r.qualityScore != null ? r.qualityScore : '-') + '/100') + '\n';
+    txt += pad('ᴘᴇʀᴀɴɢᴋᴀᴛ', r.deviceName || (r.waOldEligible ? 'ᴛᴇʀᴅᴀғᴛᴀʀ' : '-')) + '\n';
+    txt += pad('ᴇᴍᴀɪʟ', r.maskedEmail || '-') + '\n';
+    txt += pad('2ғᴀ ᴘᴀssᴡᴏʀᴅ', r.hasPassword ? 'ᴀᴋᴛɪғ' : 'ᴛɪᴅᴀᴋ') + '\n';
+    txt += pad('ᴘᴀssᴋᴇʏ', r.hasPasskey ? 'ᴀᴋᴛɪғ' : 'ᴛɪᴅᴀᴋ') + '\n';
+    txt += pad('ʜɪɢʜ ʀᴇ-ʀᴇɢ', r.highRereg ? 'ʏᴀ' : 'ᴛɪᴅᴀᴋ') + '\n\n';
+    
+    const ch = r.channels || {};
+    txt += '  ♛ ᴄʜᴀɴɴᴇʟ ᴏᴛᴘ\n';
+    txt += pad('sᴍs', fmtSecs(ch.sms?.rawSeconds)) + '\n';
+    txt += pad('ᴠᴏɪᴄᴇ', fmtSecs(ch.voice?.rawSeconds)) + '\n';
+    txt += pad('ғʟᴀsʜ', fmtSecs(ch.flash?.rawSeconds)) + '\n';
+    txt += pad('ᴇᴍᴀɪʟ', fmtSecs(ch.email?.rawSeconds)) + '\n';
+    txt += pad('ᴡᴀ ᴏʟᴅ', fmtSecs(ch.wa_old?.rawSeconds)) + '\n';
+    
+    txt += '────────────────────────────────────────\n';
+    return txt;
+  };
+
+  let counter = 1;
+
+  if (groups.ready.length) {
+    out += '✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ\n\n';
+    for (const r of groups.ready) out += renderBlock(r, counter++);
+    out += '\n';
+  }
+  
+  if (groups.cooldown.length) {
+    out += '◐ ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ\n\n';
+    for (const r of groups.cooldown) out += renderBlock(r, counter++);
+    out += '\n';
+  }
+  
+  if (groups.clone.length) {
+    out += '△ ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ\n\n';
+    for (const r of groups.clone) out += renderBlock(r, counter++);
+    out += '\n';
+  }
+  
+  if (groups.banned.length) {
+    out += '✕ ᴅɪʙᴀɴ\n\n';
+    for (const r of groups.banned) out += renderBlock(r, counter++);
+    out += '\n';
+  }
+  
+  if (groups.other.length) {
+    out += '· ʟᴀɪɴɴʏᴀ\n\n';
+    for (const r of groups.other) out += renderBlock(r, counter++);
+    out += '\n';
+  }
+
+  return out;
+}
+
 function renderDetectionSummary() { return ''; }
 function renderCooldownCard() { return ''; }
 
@@ -215,5 +448,7 @@ module.exports = {
   renderPackageDetailCard,
   renderPaymentMaintenanceCard,
   renderCooldownCard,
-  renderDetectionSummary
+  renderAccountDetail,
+  renderDetectionSummary,
+  renderExportDetail
 };
