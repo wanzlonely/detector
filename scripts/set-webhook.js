@@ -19,33 +19,71 @@ if (!/^[A-Za-z0-9_-]{1,256}$/.test(WEBHOOK_SECRET)) {
   process.exit(1);
 }
 
-if (!VERCEL_URL || !/^https:\/\//i.test(VERCEL_URL)) {
+let deploymentOrigin = null;
+try {
+  const parsedUrl = new URL(VERCEL_URL);
+  if (
+    parsedUrl.protocol !== 'https:' ||
+    !parsedUrl.hostname ||
+    parsedUrl.username ||
+    parsedUrl.password ||
+    parsedUrl.pathname !== '/' ||
+    parsedUrl.search ||
+    parsedUrl.hash
+  ) {
+    throw new Error('URL harus berupa origin HTTPS tanpa path, query, atau credential.');
+  }
+  deploymentOrigin = parsedUrl.origin;
+} catch (err) {
   console.error('Pakai: node scripts/set-webhook.js https://nama-project-kamu.vercel.app');
+  console.error(err.message);
   process.exit(1);
 }
 
-const webhookUrl = `${VERCEL_URL.replace(/\/$/, '')}/api/bot`;
+const webhookUrl = new URL('/api/bot', deploymentOrigin).toString();
+const telegramApi = 'https://api.telegram.org/bot' + BOT_TOKEN + '/';
 
-async function main() {
-  const body = { url: webhookUrl };
-  if (WEBHOOK_SECRET) body.secret_token = WEBHOOK_SECRET;
+const commands = [
+  { command: 'start', description: 'Buka menu utama' },
+  { command: 'detect', description: 'Validasi format nomor' },
+  { command: 'status', description: 'Lihat status akun' },
+  { command: 'referral', description: 'Lihat referral' },
+  { command: 'store', description: 'Lihat paket Premium' },
+  { command: 'help', description: 'Panduan penggunaan bot' },
+  { command: 'cancel', description: 'Batalkan proses input' }
+];
 
-  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
+async function callTelegram(method, payload) {
+  const response = await fetch(telegramApi + method, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(payload)
   });
-  const data = await res.json();
-  if (!res.ok || !data.ok) throw new Error('setWebhook gagal: ' + (data.description || res.status));
-  console.log('setWebhook result:', data);
+  const data = await response.json();
+  if (!response.ok || !data.ok) {
+    throw new Error(method + ' gagal: ' + (data.description || response.status));
+  }
+  return data;
+}
 
-  const info = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo`);
-  const infoData = await info.json();
-  if (!info.ok || !infoData.ok) throw new Error('getWebhookInfo gagal: ' + (infoData.description || info.status));
-  console.log('getWebhookInfo:', infoData);
+async function main() {
+  await callTelegram('setWebhook', {
+    url: webhookUrl,
+    secret_token: WEBHOOK_SECRET
+  });
+  console.log('Webhook berhasil dikonfigurasi.');
+
+  await callTelegram('setMyCommands', { commands });
+  console.log('Menu command Telegram diperbarui:', commands.length, 'command.');
+
+  const info = await callTelegram('getWebhookInfo', {});
+  console.log('getWebhookInfo:', {
+    configured: Boolean(info.result && info.result.url),
+    pendingUpdates: Number((info.result && info.result.pending_update_count) || 0)
+  });
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error('[set-webhook]', err && err.message || err);
   process.exit(1);
 });

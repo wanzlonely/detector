@@ -155,11 +155,20 @@ async function consumeQuota(telegramId, count = 1) {
 }
 
 async function activateVip(telegramId, days, tier = 'PREMIUM', planName = null) {
-  const userKey = `user:${telegramId}`;
+  const normalizedId = String(telegramId == null ? '' : telegramId).trim();
+  const durationDays = Number(days);
+  if (!/^\d{1,20}$/.test(normalizedId) || !Number.isSafeInteger(Number(normalizedId)) || Number(normalizedId) <= 0) {
+    throw new TypeError('Telegram user ID tidak valid.');
+  }
+  if (!Number.isSafeInteger(durationDays) || durationDays < 1 || durationDays > 3650) {
+    throw new RangeError('Durasi Premium harus berupa bilangan bulat 1–3650 hari.');
+  }
+
+  const userKey = 'user:' + normalizedId;
   let user = await redis.get(userKey);
   if (!user) {
     user = {
-      telegram_id: telegramId,
+      telegram_id: Number(normalizedId),
       username: '-',
       full_name: 'VIP User',
       theme: 'obsidian',
@@ -171,25 +180,23 @@ async function activateVip(telegramId, days, tier = 'PREMIUM', planName = null) 
       total_checks: 0,
       created_at: Math.floor(Date.now() / 1000)
     };
-    await redis.sadd('users:all', String(telegramId));
+    await redis.sadd('users:all', normalizedId);
   }
 
   const normalizedTier = 'PREMIUM';
   const nowSec = Math.floor(Date.now() / 1000);
   const base = Number(user.vip_until || 0) > nowSec ? Number(user.vip_until) : nowSec;
-  const expiry = base + Number(days) * 86400;
+  const expiry = base + durationDays * 86400;
 
   user.vip_until = expiry;
   user.vip_tier = normalizedTier;
-  user.vip_plan = planName || `${normalizedTier} · ${days} Hari`;
+  user.vip_plan = planName || normalizedTier + ' · ' + durationDays + ' Hari';
   user.bulk_limit = 30;
 
   await redis.set(userKey, user);
-  await redis.sadd('users:vip', String(telegramId));
+  await redis.sadd('users:vip', normalizedId);
   return { expiry, user };
-}
-
-async function addCheckLog(telegramId, phoneNumber, statusSummary, proxyNode) {
+}async function addCheckLog(telegramId, phoneNumber, statusSummary, proxyNode) {
   const logKey = `logs:${telegramId}`;
   const entry = {
     phone_number: phoneNumber,
@@ -304,20 +311,41 @@ async function getReferralCoinBalance(id) {
 }
 
 async function redeemReferralReward(id, offer) {
-  const key = 'referral:coins:' + id;
-  const balance = await getReferralCoinBalance(id);
-  if (balance < offer.cost) return { ok: false, balance };
-  const after = Number(await redis.incrby(key, -offer.cost));
-  if (after < 0) {
-    await redis.incrby(key, offer.cost);
-    return { ok: false, balance: await getReferralCoinBalance(id) };
-  }
-  if (offer.type === 'quota') await redis.incrby('referral:bonus_quota:' + id, offer.amount);
-  else await activateVip(id, offer.amount, 'PREMIUM', 'PREMIUM · ' + offer.amount + ' Hari');
-  return { ok: true, balance: after };
-}
+  const normalizedId = String(id == null ? '' : id).trim();
+  const cost = Number(offer && offer.cost);
+  const amount = Number(offer && offer.amount);
+  const type = offer && offer.type;
 
-async function getReferralStats(telegramId) {
+  if (!/^\d{1,20}$/.test(normalizedId) || !Number.isSafeInteger(Number(normalizedId)) || Number(normalizedId) <= 0) {
+    return { ok: false, balance: 0, error: 'invalid_user' };
+  }
+  if (!Number.isSafeInteger(cost) || cost <= 0 || !Number.isSafeInteger(amount) || amount <= 0 ||
+      (type !== 'quota' && type !== 'vip') || (type === 'vip' && amount > 3650)) {
+    return { ok: false, balance: await getReferralCoinBalance(normalizedId), error: 'invalid_offer' };
+  }
+
+  const key = 'referral:coins:' + normalizedId;
+  const balance = await getReferralCoinBalance(normalizedId);
+  if (balance < cost) return { ok: false, balance };
+
+  const after = Number(await redis.incrby(key, -cost));
+  if (after < 0) {
+    await redis.incrby(key, cost);
+    return { ok: false, balance: await getReferralCoinBalance(normalizedId) };
+  }
+
+  try {
+    if (type === 'quota') {
+      await redis.incrby('referral:bonus_quota:' + normalizedId, amount);
+    } else {
+      await activateVip(normalizedId, amount, 'PREMIUM', 'PREMIUM · ' + amount + ' Hari');
+    }
+    return { ok: true, balance: after };
+  } catch (err) {
+    await redis.incrby(key, cost);
+    throw err;
+  }
+}async function getReferralStats(telegramId) {
   const id = String(telegramId);
   const invitees = await redis.smembers('referrals:' + id);
   const rewarded = Number(await redis.get('referral:rewards:' + id) || 0);
