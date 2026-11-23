@@ -2552,10 +2552,26 @@ var WADetector = (() => {
     const rawExist = existRaw || {};
     const rawCode = codeRaw || {};
 
-    const hasExistError = Boolean(rawExist.status === "error" || rawExist.error_type || rawExist.reason === "non_json" || Object.keys(rawExist).length === 0);
-    const hasCodeError = Boolean(rawCode.status === "error" || rawCode.error_type || rawCode.reason === "non_json" || Object.keys(rawCode).length === 0);
+    const existProvided = metaInfo && metaInfo.existProvided !== undefined ? Boolean(metaInfo.existProvided) : true;
+    const codeProvided = metaInfo && metaInfo.codeProvided !== undefined ? Boolean(metaInfo.codeProvided) : true;
+    const hasExistError = Boolean(
+      existProvided && (
+        rawExist.status === "error" ||
+        rawExist.error_type ||
+        rawExist.reason === "non_json" ||
+        Object.keys(rawExist).length === 0
+      )
+    );
+    const hasCodeError = Boolean(
+      codeProvided && (
+        rawCode.status === "error" ||
+        rawCode.error_type ||
+        rawCode.reason === "non_json" ||
+        Object.keys(rawCode).length === 0
+      )
+    );
 
-    if (hasExistError || hasCodeError) {
+    if ((hasExistError && existProvided) || (hasCodeError && codeProvided)) {
       const errType = rawExist.error_type || rawCode.error_type || "NETWORK_OR_TRANSPORT_ERROR";
       const errReason = rawExist.reason || rawCode.reason || "unknown_error";
       return {
@@ -2954,18 +2970,25 @@ var WADetector = (() => {
   function parseDualResponse(phoneInfo, existRawText, codeRawText) {
     let existRaw = null;
     let codeRaw = null;
+    const existProvided = existRawText != null && String(existRawText).trim() !== "";
+    const codeProvided = codeRawText != null && String(codeRawText).trim() !== "";
     try {
-      if (existRawText) existRaw = JSON.parse(existRawText);
+      if (existProvided) existRaw = JSON.parse(existRawText);
     } catch (e) {
       existRaw = { status: "error", error_type: "MALFORMED_JSON", reason: "non_json", raw: String(existRawText || "").slice(0, 100) };
     }
     try {
-      if (codeRawText) codeRaw = JSON.parse(codeRawText);
+      if (codeProvided) codeRaw = JSON.parse(codeRawText);
     } catch (e) {
       codeRaw = { status: "error", error_type: "MALFORMED_JSON", reason: "non_json", raw: String(codeRawText || "").slice(0, 100) };
     }
 
-    const diag = parseWhatsAppDiagnostics(existRaw, codeRaw, phoneInfo, { mode: "both", via: "ANDROID_LOCAL" });
+    const diag = parseWhatsAppDiagnostics(existRaw, codeRaw, phoneInfo, {
+      mode: codeProvided ? "both" : "exist_only",
+      via: "ANDROID_LOCAL",
+      existProvided,
+      codeProvided
+    });
     const isBanned = Boolean(diag.flags?.banned);
     const isSecurityBlock = Boolean(diag.flags?.security_block);
     const isUnofficialAppBlock = Boolean(diag.flags?.unofficial_app_block);
