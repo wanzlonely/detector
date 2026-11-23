@@ -239,6 +239,41 @@ function renderPaymentMaintenanceCard({ user, pkg }) {
   ].join('\n');
 }
 
+function formatDescription(raw) {
+  if (!raw) return '-';
+  let d = String(raw);
+  if (d.includes('too_many') || d.includes('too_many_attempts')) {
+    return 'Rate limit terlampaui. Tunggu sesuai timer.';
+  }
+  if (d.includes('temporarily_unavailable')) {
+    return 'Akun dibatasi sementara oleh WhatsApp.';
+  }
+  if (d.includes('no_routes') || d.includes('no_route')) {
+    return 'Jalur SMS tidak tersedia untuk nomor ini.';
+  }
+  if (d.includes('banned')) {
+    return 'Nomor diblokir oleh WhatsApp.';
+  }
+  if (d.includes('security')) {
+    return 'Ditahan sistem keamanan WhatsApp.';
+  }
+  return d;
+}
+
+function cleanMethods(methods) {
+  if (!methods || !methods.length) return '-';
+  const unique = [...new Set(methods)];
+  const map = {
+    'email_otp': 'Email OTP',
+    'sms': 'SMS',
+    'voice': 'Voice Call',
+    'wa_old': 'WhatsApp Lama',
+    'passkey': 'Passkey',
+    'password': 'Password'
+  };
+  return unique.map(m => map[m] || m).join(', ');
+}
+
 function renderAccountDetail(r) {
   if (!r) return '✕ ᴅᴀᴛᴀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ';
   const num = r.formattedNumber || '-';
@@ -247,7 +282,8 @@ function renderAccountDetail(r) {
   const email = r.maskedEmail || '-';
 
   const methods = [].concat(r.recommendedMethods || [], r.fallbackMethods || []);
-  const methodStr = methods.length ? methods.slice(0, 6).join(', ') : '-';
+  const methodStr = cleanMethods(methods);
+  const desc = formatDescription(r.description);
 
   const ch = r.channels || {};
   const formatSecs = (sec) => {
@@ -287,10 +323,31 @@ function renderAccountDetail(r) {
     '──────────────────────',
     '▸ ᴍᴇᴛᴏᴅᴇ ⦂ <b>' + escapeHtml(String(methodStr)) + '</b>',
     r.wipeType ? ('▸ ᴡɪᴘᴇ ⦂ <b>' + escapeHtml(String(r.wipeType)) + '</b>') : null,
-    '▸ ᴋᴇᴛ ⦂ ' + escapeHtml(String(r.description || '-'))
+    '▸ ᴋᴇᴛ ⦂ ' + escapeHtml(String(desc))
   ].filter(Boolean);
   
   return lines.join('\n');
+}
+
+function renderExportDetail(detailMap) {
+  if (!detailMap || Object.keys(detailMap).length === 0) return 'Tidak ada data.';
+  const keys = Object.keys(detailMap);
+  let out = '════════════════════════════════════════\n';
+  out += '         META DETECT - EXPORT DETAIL       \n';
+  out += '════════════════════════════════════════\n\n';
+  
+  for (let i = 0; i < keys.length; i++) {
+    const r = detailMap[keys[i]];
+    if (!r) continue;
+    
+    // Clean HTML tags for txt file
+    const plainText = renderAccountDetail(r).replace(/<[^>]+>/g, '');
+    out += plainText + '\n\n';
+    out += '----------------------------------------\n\n';
+  }
+  
+  out += 'Total: ' + keys.length + ' nomor\n';
+  return out;
 }
 
 function renderDetectionSummary() { return ''; }
@@ -310,5 +367,6 @@ module.exports = {
   renderPaymentMaintenanceCard,
   renderCooldownCard,
   renderAccountDetail,
-  renderDetectionSummary
+  renderDetectionSummary,
+  renderExportDetail
 };
