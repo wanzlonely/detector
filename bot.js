@@ -316,15 +316,17 @@ function buildProgressBar(pct) {
 
 function formatCooldownSmallCaps(seconds) {
   const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (sec <= 0) return '0ᴅᴇᴛɪᴋ';
+  if (sec <= 0) return '0ᴅ';
+
+  // Keep the Telegram result compact: show seconds only below one minute.
+  if (sec < 60) return sec + 'ᴅ';
+
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
   const parts = [];
-  if (h > 0) parts.push(h + 'ᴊᴀᴍ');
-  if (m > 0) parts.push(m + 'ᴍᴇɴɪᴛ');
-  if (s > 0 || parts.length === 0) parts.push(s + 'ᴅᴇᴛɪᴋ');
-  return parts.join(' ');
+  if (h > 0) parts.push(h + 'ᴊ');
+  if (m > 0) parts.push(m + 'ᴍ');
+  return parts.join(' ') || '1ᴍ';
 }
 
 function buildProgressText(processed, total, stageLabel) {
