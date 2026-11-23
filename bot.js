@@ -498,7 +498,7 @@ async function processDetection(ctx, numbers, detectOpts) {
   async function updateProgress(force) {
     if (!progressMsg) return;
     const now = Date.now();
-    if (!force && now - lastProgressEdit < 450) {
+    if (!force && now - lastProgressEdit < 600) {
       if (!progressTimer) {
         progressTimer = setTimeout(() => {
           progressTimer = null;
@@ -550,7 +550,7 @@ async function processDetection(ctx, numbers, detectOpts) {
             (result.description && /transport|network|too_many|timeout|ECONN|unstable/i.test(String(result.description)));
           if (isNetFail && attempt < 2) {
             last = result;
-            await sleep(250 * attempt + Math.floor(Math.random() * 200));
+            await sleep(180 * attempt + Math.floor(Math.random() * 120));
             continue;
           }
           if (result.softFallback && (result.isReady || result.anyCooldown) && !result.isBanned) {
@@ -577,7 +577,7 @@ async function processDetection(ctx, numbers, detectOpts) {
           needsRecheck: true,
           description: errMsg.includes('not a function') ? 'Kesalahan sistem detektor' : errMsg.slice(0, 120)
         };
-        await sleep(300 * attempt + Math.floor(Math.random() * 250));
+        await sleep(200 * attempt + Math.floor(Math.random() * 150));
       }
     }
     if (last) {
@@ -601,7 +601,7 @@ async function processDetection(ctx, numbers, detectOpts) {
     else conc = Math.min(3, indexes.length || 1);
     const CONCURRENCY_SAFE = Math.max(1, conc);
     async function worker(workerId) {
-      if (workerId > 0) await sleep(workerId * 40);
+      if (workerId > 0) await sleep(workerId * 25);
       while (cursor < indexes.length) {
         const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
         if (stop) return;
