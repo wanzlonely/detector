@@ -28,10 +28,12 @@ async function loadSessionRestore(rawNumber) {
     if (!key || key === 'wasess:') return null;
     const snap = await redis.get(key);
     if (!snap) return null;
+    let obj = snap;
     if (typeof snap === 'string') {
-      try { return JSON.parse(snap); } catch (_) { return null; }
+      try { obj = JSON.parse(snap); } catch (_) { return null; }
     }
-    return snap && snap.authkey ? snap : null;
+    if (!obj || !obj.authkey || !obj.cc || !obj.in || !obj.fdid || !obj.e_ident) return null;
+    return obj;
   } catch (_) {
     return null;
   }
@@ -883,8 +885,8 @@ async function checkWhatsAppCooldown(rawNumber, options) {
 
   if (opts.forceRefresh || opts.wave === 'exist') {
     try {
-      const probe = await runExistOnlyProbe(payloads, headers, countryIso2, { skipHealth: true });
-      const result = classifyFromResponses(
+      let probe = await runExistOnlyProbe(payloads, headers, countryIso2, { skipHealth: true });
+      let result = classifyFromResponses(
         payloads,
         probe.existText,
         null,
@@ -893,6 +895,37 @@ async function checkWhatsAppCooldown(rawNumber, options) {
         countryIso2,
         { partial: true, existOnly: true }
       );
+      const badTransport = result && (
+        result.softFallback ||
+        result.needsRecheck ||
+        result.accountStatus === 'UNKNOWN' ||
+        /NETWORK_OR_TRANSPORT|incorrect|MALFORMED/i.test(String(result.description || ''))
+      );
+      if (badTransport || !probe.existText) {
+        try {
+          await redis.del('wasess:' + String(rawNumber || '').replace(/\D/g, ''));
+        } catch (_) {}
+        const retryPayloads = await buildPayloadsForNumber(rawNumber, {
+          mode: 'read',
+          forceNewSession: true
+        });
+        if (retryPayloads.success) {
+          retryPayloads.rawNumber = String(rawNumber);
+          const retryHeaders = buildHeaders(retryPayloads.userAgent, resolveCountryIso2(retryPayloads.phoneInfo));
+          probe = await runExistOnlyProbe(retryPayloads, retryHeaders, resolveCountryIso2(retryPayloads.phoneInfo), { skipHealth: false });
+          result = classifyFromResponses(
+            retryPayloads,
+            probe.existText,
+            null,
+            probe.proxyMode,
+            probe.sessionTag,
+            resolveCountryIso2(retryPayloads.phoneInfo),
+            { partial: true, existOnly: true }
+          );
+          payloads.sessionReused = false;
+          payloads.identity = retryPayloads.identity;
+        }
+      }
       return {
         ...result,
         probeMode: 'exist_only_refresh',
@@ -902,6 +935,26 @@ async function checkWhatsAppCooldown(rawNumber, options) {
         clientIdentity: payloads.identity || null
       };
     } catch (err) {
+      try {
+        await redis.del('wasess:' + String(rawNumber || '').replace(/\D/g, ''));
+      } catch (_) {}
+      try {
+        const retryPayloads = await buildPayloadsForNumber(rawNumber, { mode: 'read', forceNewSession: true });
+        if (retryPayloads.success) {
+          retryPayloads.rawNumber = String(rawNumber);
+          const cc = resolveCountryIso2(retryPayloads.phoneInfo);
+          const retryHeaders = buildHeaders(retryPayloads.userAgent, cc);
+          const probe = await runExistOnlyProbe(retryPayloads, retryHeaders, cc, { skipHealth: false });
+          const result = classifyFromResponses(retryPayloads, probe.existText, null, probe.proxyMode, probe.sessionTag, cc, { partial: true, existOnly: true });
+          return {
+            ...result,
+            probeMode: 'exist_only_refresh_retry',
+            consensusRounds: 1,
+            decisionReasons: (result.decisionReasons || []).concat(['exist_only_retry_new_session']),
+            sessionReused: false
+          };
+        }
+      } catch (_) {}
       return softFallback(rawNumber, payloads, countryIso2, err);
     }
   }
