@@ -2,7 +2,7 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const {
   redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
-  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, getUserRank, redeemReferralReward
+  activateVip, registerReferral, getReferralStats, getLeaderboard, getUserRank, redeemReferralReward
 } = require('./database');
 const {
   escapeHtml, formatIDR, renderDashboard, renderStoreCatalog,
