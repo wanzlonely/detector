@@ -830,7 +830,10 @@ async function checkWhatsAppCooldown(rawNumber, options) {
     }
   }
 
-  const payloads = await WADetector.buildDualPayloads(String(rawNumber));
+  const payloads = await WADetector.buildDualPayloads(String(rawNumber), {
+    mode: 'read',
+    forceNewSession: false
+  });
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
   payloads.rawNumber = String(rawNumber);
   const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
@@ -852,7 +855,9 @@ async function checkWhatsAppCooldown(rawNumber, options) {
         ...result,
         probeMode: 'exist_only_refresh',
         consensusRounds: 1,
-        decisionReasons: (result.decisionReasons || []).concat(['exist_only_no_code'])
+        decisionReasons: (result.decisionReasons || []).concat(['exist_only_no_code', 'read_model']),
+        sessionReused: Boolean(payloads.sessionReused),
+        clientIdentity: payloads.identity || null
       };
     } catch (err) {
       return softFallback(rawNumber, payloads, countryIso2, err);
@@ -904,7 +909,13 @@ async function checkWhatsAppCooldown(rawNumber, options) {
             await sleep(100);
             continue;
           }
-          const out = { ...result, probeMode: 'dual', consensusRounds: rounds.length };
+          const out = {
+            ...result,
+            probeMode: 'dual',
+            consensusRounds: rounds.length,
+            sessionReused: Boolean(payloads.sessionReused),
+            clientIdentity: payloads.identity || null
+          };
           if (result.deviceName) {
             out.waOldEligible = true;
           }
@@ -953,7 +964,11 @@ async function triggerEmailVerification(rawNumber) {
   let countryIso2 = null;
   let headers = null;
 
-  sharedPayloads = await WADetector.buildDualPayloads(String(rawNumber), { method: 'email' });
+  sharedPayloads = await WADetector.buildDualPayloads(String(rawNumber), {
+    method: 'email',
+    mode: 'write',
+    forceNewSession: false
+  });
   if (!sharedPayloads.success) throw new Error(sharedPayloads.error || 'Nomor tidak valid.');
   countryIso2 = resolveCountryIso2(sharedPayloads.phoneInfo);
   headers = buildHeaders(sharedPayloads.userAgent, countryIso2);
@@ -973,7 +988,11 @@ async function triggerEmailVerification(rawNumber) {
   );
 
   for (const method of methods) {
-    const payloads = await WADetector.buildDualPayloads(String(rawNumber), { method });
+    const payloads = await WADetector.buildDualPayloads(String(rawNumber), {
+      method,
+      mode: 'write',
+      forceNewSession: false
+    });
     if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid.');
 
     countryIso2 = resolveCountryIso2(payloads.phoneInfo);
