@@ -243,46 +243,101 @@ function buildChannel(seconds) {
   return { isCooldown: sec > 0, rawSeconds: sec, uiTimer: toShortTimer(sec), humanTime: toWaUiTimer(sec), formatted: toShortTimer(sec) };
 }
 
+function normalizeSignal(value) {
+  return String(value == null ? '' : value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function explicitTrue(value) {
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') return ['true', '1', 'yes'].includes(value.trim().toLowerCase());
+  return false;
+}
+
+function firstSignalValue(exist, code, keys) {
+  for (const source of [exist || {}, code || {}]) {
+    for (const key of keys) {
+      if (source[key] !== undefined && source[key] !== null && source[key] !== '') return source[key];
+    }
+  }
+  return null;
+}
+
+function explicitBanEvidence(exist, code) {
+  const status = normalizeSignal(firstSignalValue(exist, code, ['status', 'account_status']));
+  const reason = normalizeSignal(firstSignalValue(exist, code, ['reason', 'error_type']));
+  return (
+    explicitTrue(firstSignalValue(exist, code, ['is_banned', 'banned'])) ||
+    ['banned', 'account_banned', 'phone_number_banned', 'permanently_banned'].includes(status) ||
+    ['banned', 'account_banned', 'phone_number_banned', 'permanently_banned'].includes(reason)
+  );
+}
+
+function getCustomBlockText(exist, code) {
+  const values = [];
+  for (const source of [exist || {}, code || {}]) {
+    for (const key of ['custom_block_screen', 'block_screen']) {
+      const value = source[key];
+      if (typeof value === 'string') values.push(value);
+      else if (value && typeof value === 'object') {
+        for (const field of ['title', 'header', 'message', 'body', 'description', 'code']) {
+          if (typeof value[field] === 'string') values.push(value[field]);
+        }
+      }
+    }
+  }
+  return values.join(' ').toLowerCase();
+}
+
 function applyPatternLibrary(exist, code, timers) {
-  const reason = String(exist.reason || code.reason || '').toLowerCase();
-  const status = String(exist.status || code.status || '').toLowerCase();
+  const reason = normalizeSignal(firstSignalValue(exist, code, ['reason']));
+  const status = normalizeSignal(firstSignalValue(exist, code, ['status']));
   const hints = [];
   if (timers.is_wa_old_echo) hints.push('WA_OLD_ECHO');
   if (reason === 'temporarily_unavailable' || status === 'temporarily_unavailable') hints.push('TEMP_LOCK');
   if (reason.includes('too_many') || reason === 'too_recent') hints.push('RATE_LIMIT');
-  if (exist.high_sms_rereg_user || code.high_sms_rereg_user) hints.push('HIGH_REREG');
+  if (explicitTrue(firstSignalValue(exist, code, ['high_sms_rereg_user']))) hints.push('HIGH_REREG');
   if (reason === 'no_routes' || reason === 'no_route') hints.push('NO_ROUTES');
-  if (code.reason === 'method_not_allowed' && !timers.exist_no_routes && timers.sms === 0) hints.push('METHOD_NOT_ALLOWED_SOFT');
+  if (code && normalizeSignal(code.reason) === 'method_not_allowed' && !timers.exist_no_routes && timers.sms === 0) hints.push('METHOD_NOT_ALLOWED_SOFT');
   if (timers.is_code_sent && timers.sms === 0) hints.push('CODE_SENT_READY');
-  if (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal) hints.push('HARD_BAN');
+  if (explicitBanEvidence(exist, code)) hints.push('HARD_BAN');
   return hints;
 }
 
-function detectBanSignals(exist, code, parsed, patternHints) {
-  if (patternHints.includes('HARD_BAN')) return true;
-  if (parsed && parsed.isBanned === true && (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal)) return true;
-  return Boolean(
-    exist.status === 'banned' || code.status === 'banned' ||
-    exist.reason === 'banned' || code.reason === 'banned' ||
-    exist.violation_type || code.violation_type ||
-    exist.in_app_ban_appeal || code.in_app_ban_appeal
-  );
+function detectBanSignals(exist, code) {
+  // Metadata such as appeal_token or violation_type is not proof of a ban.
+  // Require an explicit account-ban flag or an exact ban status/reason.
+  return explicitBanEvidence(exist, code);
 }
 
-function detectCloneSignals(exist, code, parsed) {
-  if (parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) {
-    return { isCloneBlocked: true, isSecurityBlock: Boolean(parsed.isSecurityBlock) };
-  }
-  const blockScreen = String(exist.custom_block_screen || code.custom_block_screen || exist.block_screen || code.block_screen || '').toLowerCase();
-  const reason = String(exist.reason || code.reason || '').toLowerCase();
-  const status = String(exist.status || code.status || '').toLowerCase();
-  const textBlob = JSON.stringify({ exist, code }).toLowerCase();
-  const unofficial = blockScreen.includes('unofficial') || blockScreen.includes('clone') || reason.includes('unofficial');
-  const security =
-    blockScreen.includes('security') || reason.includes('security') || status.includes('security') ||
-    textBlob.includes('demi keamanan') || textBlob.includes('login not available right now') ||
-    textBlob.includes('tidak dapat masuk saat ini') || Boolean(parsed && parsed.isSecurityBlock);
-  return { isCloneBlocked: Boolean(unofficial), isSecurityBlock: Boolean(security) };
+function detectCloneSignals(exist, code) {
+  const reason = normalizeSignal(firstSignalValue(exist, code, ['reason']));
+  const status = normalizeSignal(firstSignalValue(exist, code, ['status', 'account_status']));
+  const blockText = getCustomBlockText(exist, code);
+  const explicitCloneFlag = explicitTrue(firstSignalValue(exist, code, [
+    'is_clone_blocked', 'clone_blocked', 'is_unofficial_app', 'unofficial_app_block'
+  ]));
+  const explicitSecurityFlag = explicitTrue(firstSignalValue(exist, code, [
+    'is_security_block', 'security_block', 'security_hold'
+  ]));
+  const cloneCodes = ['clone_blocked', 'unofficial_app', 'unofficial_app_block', 'unsupported_app', 'unsupported_client'];
+  const securityCodes = ['security_block', 'security_hold', 'login_security_hold'];
+  const unofficialText = [
+    'use the official whatsapp', 'use official whatsapp', 'download the official whatsapp',
+    'unofficial version of whatsapp', 'gunakan whatsapp resmi', 'unduh whatsapp resmi',
+    'aplikasi whatsapp resmi'
+  ];
+  const securityText = [
+    'for security reasons', 'demi keamanan', 'login not available right now',
+    'login is not available right now', 'tidak dapat masuk saat ini',
+    'login temporarily unavailable', 'unusual account activity', 'aktivitas akun yang tidak biasa'
+  ];
+  const isSecurityBlock = explicitSecurityFlag ||
+    securityCodes.includes(reason) || securityCodes.includes(status) ||
+    securityText.some((phrase) => blockText.includes(phrase));
+  const isCloneBlocked = explicitCloneFlag ||
+    cloneCodes.includes(reason) || cloneCodes.includes(status) ||
+    unofficialText.some((phrase) => blockText.includes(phrase));
+  return { isCloneBlocked: Boolean(isCloneBlocked && !isSecurityBlock), isSecurityBlock: Boolean(isSecurityBlock) };
 }
 
 function resolveSmsAvailability(exist, code) {
@@ -344,14 +399,14 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     email: buildChannel(timers.email), wa_old: buildChannel(timers.wa_old)
   };
   const engineCooldown = Boolean(parsed && parsed.isCooldown);
-  const engineClone = Boolean(parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock));
-  const engineSecurity = Boolean(parsed && parsed.isSecurityBlock);
+  // Do not use parser-level aggregate flags for security/clone/ban decisions:
+  // those flags may be inferred from ambiguous metadata in the bundled parser.
   const liveSmsWait = timers.sms;
   const hasLiveSms = liveSmsWait > 0;
   const hasLiveVoice = timers.voice > 15;
   const hasLiveWait = hasLiveSms || hasLiveVoice || timers.flash > 15 || timers.email > 15;
   const reasons = [];
-  let isBanned = detectBanSignals(existResponse, codeResponse, parsed, patternHints);
+  let isBanned = detectBanSignals(existResponse, codeResponse);
   if (isBanned && (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
     if (!patternHints.includes('HARD_BAN')) {
       const hard =
@@ -363,9 +418,9 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   }
   if (engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN') isBanned = false;
   if (isBanned) reasons.push('ban_signal');
-  const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
-  const isCloneBlocked = (cloneSig.isCloneBlocked || engineClone) && !isBanned;
-  const isSecurityBlock = (cloneSig.isSecurityBlock || engineSecurity) && !isBanned && !isCloneBlocked;
+  const cloneSig = detectCloneSignals(existResponse, codeResponse);
+  const isSecurityBlock = cloneSig.isSecurityBlock && !isBanned;
+  const isCloneBlocked = cloneSig.isCloneBlocked && !isBanned && !isSecurityBlock;
   if (isCloneBlocked) reasons.push('clone_or_unofficial');
   if (isSecurityBlock) reasons.push('security_block');
   if (hasLiveSms) reasons.push('exist_sms_wait:' + liveSmsWait);
@@ -487,23 +542,26 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
 
 function mergeConsensus(results) {
   if (!results || !results.length) return softFallback('', {}, null, null);
-  const score = { ready: 0, cooldown: 0, clone: 0, ban: 0, sms: 0 };
+  const score = { ready: 0, cooldown: 0, clone: 0, security: 0, ban: 0, sms: 0 };
   for (const r of results) {
-    const w = Number(r.confidence) || 0.5;
-    if (r.isBanned) score.ban += w;
-    else if (r.isCloneBlocked || r.isSecurityBlock) score.clone += w;
-    else if (r.anyCooldown) score.cooldown += w;
-    else if (r.smsOptionMissing) score.sms += w;
-    else if (r.isReady) score.ready += w;
-    else score.cooldown += w * 0.5;
+    const weight = Number(r.confidence) || 0.5;
+    if (r.isBanned === true || r.accountStatus === 'BANNED') score.ban += weight;
+    else if (r.isSecurityBlock === true || r.accountStatus === 'SECURITY_BLOCK') score.security += weight;
+    else if (r.isCloneBlocked === true || r.accountStatus === 'CLONE_BLOCKED') score.clone += weight;
+    else if (r.anyCooldown) score.cooldown += weight;
+    else if (r.smsOptionMissing) score.sms += weight;
+    else if (r.isReady) score.ready += weight;
+    else score.cooldown += weight * 0.5;
   }
-  let best = 'cooldown'; let bestVal = -1;
-  for (const k of Object.keys(score)) {
-    if (score[k] > bestVal) { bestVal = score[k]; best = k; }
+  let best = 'cooldown';
+  let bestVal = -1;
+  for (const key of Object.keys(score)) {
+    if (score[key] > bestVal) { bestVal = score[key]; best = key; }
   }
   const base = results.filter((r) => {
-    if (best === 'ban') return r.isBanned;
-    if (best === 'clone') return r.isCloneBlocked || r.isSecurityBlock;
+    if (best === 'ban') return r.isBanned === true || r.accountStatus === 'BANNED';
+    if (best === 'security') return r.isSecurityBlock === true || r.accountStatus === 'SECURITY_BLOCK';
+    if (best === 'clone') return r.isCloneBlocked === true || r.accountStatus === 'CLONE_BLOCKED';
     if (best === 'cooldown') return r.anyCooldown || r.softFallback;
     if (best === 'sms') return r.smsOptionMissing;
     if (best === 'ready') return r.isReady;
@@ -511,14 +569,11 @@ function mergeConsensus(results) {
   }).sort((a, b) => {
     const ta = (a.primaryTimer && a.primaryTimer.rawSeconds) || 0;
     const tb = (b.primaryTimer && b.primaryTimer.rawSeconds) || 0;
-    const stableA = ta > 0 ? 1 : 0;
-    const stableB = tb > 0 ? 1 : 0;
-    if (stableB !== stableA) return stableB - stableA;
+    if ((tb > 0) !== (ta > 0)) return (tb > 0 ? 1 : 0) - (ta > 0 ? 1 : 0);
     return (b.confidence || 0) - (a.confidence || 0);
   })[0] || results[0];
   return { ...base, confidence: Math.min(0.99, (base.confidence || 0) + 0.05), consensusVotes: bestVal, consensusRounds: results.length, needsRecheck: false };
 }
-
 function softFallback(rawNumber, payloads, countryIso2, lastError) {
   return {
     formattedNumber: normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null),
