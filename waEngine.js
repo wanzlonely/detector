@@ -2377,6 +2377,26 @@ var WADetector = (() => {
     const key = phoneSessionKey(cc, nationalNumber);
     const now = Date.now();
     const forceNew = Boolean(options.forceNewSession);
+    if (!forceNew && options.sessionRestore && options.sessionRestore.authkey) {
+      const session = options.sessionRestore;
+      const identity = {
+        platform: options.platform || "smb_ios",
+        version: options.version || DEFAULT_WA_BUSINESS_VERSION,
+        deviceModel: options.deviceModel || "iPhone_15_Pro",
+        mcc: session.mcc,
+        mnc: session.mnc,
+        lg: session.lg,
+        lc: session.lc,
+        authkey: session.authkey,
+        fdid: session.fdid,
+        expid: session.expid,
+        e_regid: session.e_regid,
+        id: session.id
+      };
+      SESSION_CACHE.set(key, { session, identity, ts: now });
+      IDENTITY_CACHE.set(key, { identity, ts: now });
+      return { session, identity, reused: true };
+    }
     const cached = SESSION_CACHE.get(key);
     if (!forceNew && cached && (now - cached.ts) < SESSION_TTL_MS) {
       cached.ts = now;
@@ -2878,7 +2898,8 @@ var WADetector = (() => {
       lc: (sticky && sticky.lc) || parsed.iso || "ID",
       mcc: (sticky && sticky.mcc) || parsed.mcc || "510",
       mnc: (sticky && sticky.mnc) || parsed.mnc || "010",
-      forceNewSession: Boolean(opts.forceNewSession)
+      forceNewSession: Boolean(opts.forceNewSession),
+      sessionRestore: opts.sessionRestore || null
     });
     const waToken = computeWAMobileToken(version, parsed.in, true);
     const commonExtraPairs = [
@@ -2925,7 +2946,8 @@ var WADetector = (() => {
         mnc: identity.mnc,
         fdid: identity.fdid,
         expid: identity.expid
-      }
+      },
+      sessionSnapshot: session
     };
   }
 
