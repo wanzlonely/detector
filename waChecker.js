@@ -564,7 +564,7 @@ function computeQualityScore(f) {
 function classifyFromResponses(payloads, existText, codeText, proxyMode, sessionTag, countryIso2, meta) {
   const existResponse = safeJson(existText);
   const codeResponse = safeJson(codeText);
-  const parsed = WADetector.parseDualResponse(payloads.phoneInfo, existText || '{}', codeText || '{}');
+  const parsed = WADetector.parseDualResponse(payloads.phoneInfo, existText || null, codeText || null);
   const timers = extractChannelTimers(existResponse, codeResponse);
   const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
 
@@ -682,6 +682,11 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
 
   let accountStatus = 'UNKNOWN';
   let description = (parsed && parsed.description) || '';
+  if (/NETWORK_OR_TRANSPORT|MALFORMED_JSON|gangguan transport/i.test(description)) {
+    if (isBanned || isCloneBlocked || isSecurityBlock || isCooldown || isReady || isUnregistered) {
+      description = '';
+    }
+  }
   if (isBanned) {
     accountStatus = 'BANNED';
     description = description || 'Nomor dibatasi / banned';
@@ -876,7 +881,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
 
   const payloads = await buildPayloadsForNumber(rawNumber, {
     mode: 'read',
-    forceNewSession: false
+    forceNewSession: Boolean(opts.forceRefresh)
   });
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
   payloads.rawNumber = String(rawNumber);
@@ -884,75 +889,116 @@ async function checkWhatsAppCooldown(rawNumber, options) {
   const headers = buildHeaders(payloads.userAgent, countryIso2);
 
   if (opts.forceRefresh || opts.wave === 'exist') {
-    try {
-      let probe = await runExistOnlyProbe(payloads, headers, countryIso2, { skipHealth: true });
-      let result = classifyFromResponses(
-        payloads,
+    const runExistClassify = async (pl, hdrs, cc, skipHealth) => {
+      const probe = await runExistOnlyProbe(pl, hdrs, cc, { skipHealth: Boolean(skipHealth) });
+      const result = classifyFromResponses(
+        pl,
         probe.existText,
         null,
         probe.proxyMode,
         probe.sessionTag,
-        countryIso2,
+        cc,
         { partial: true, existOnly: true }
       );
-      const badTransport = result && (
-        result.softFallback ||
-        result.needsRecheck ||
-        result.accountStatus === 'UNKNOWN' ||
-        /NETWORK_OR_TRANSPORT|incorrect|MALFORMED/i.test(String(result.description || ''))
-      );
-      if (badTransport || !probe.existText) {
-        try {
-          await redis.del('wasess:' + String(rawNumber || '').replace(/\D/g, ''));
-        } catch (_) {}
-        const retryPayloads = await buildPayloadsForNumber(rawNumber, {
-          mode: 'read',
-          forceNewSession: true
-        });
+      return { probe, result };
+    };
+
+    const isBad = (result, probe) => {
+      if (!result) return true;
+      if (!probe || !probe.existText) return true;
+      if (result.softFallback || result.needsRecheck) return true;
+      if (result.accountStatus === 'UNKNOWN') return true;
+      const d = String(result.description || '');
+      return /NETWORK_OR_TRANSPORT|incorrect|MALFORMED|gangguan transport/i.test(d);
+    };
+
+    try {
+      let { probe, result } = await runExistClassify(payloads, headers, countryIso2, true);
+      if (isBad(result, probe)) {
+        try { await redis.del('wasess:' + String(rawNumber || '').replace(/\D/g, '')); } catch (_) {}
+        const retryPayloads = await buildPayloadsForNumber(rawNumber, { mode: 'read', forceNewSession: true });
         if (retryPayloads.success) {
           retryPayloads.rawNumber = String(rawNumber);
-          const retryHeaders = buildHeaders(retryPayloads.userAgent, resolveCountryIso2(retryPayloads.phoneInfo));
-          probe = await runExistOnlyProbe(retryPayloads, retryHeaders, resolveCountryIso2(retryPayloads.phoneInfo), { skipHealth: false });
-          result = classifyFromResponses(
-            retryPayloads,
-            probe.existText,
-            null,
-            probe.proxyMode,
-            probe.sessionTag,
-            resolveCountryIso2(retryPayloads.phoneInfo),
-            { partial: true, existOnly: true }
-          );
-          payloads.sessionReused = false;
-          payloads.identity = retryPayloads.identity;
+          const cc = resolveCountryIso2(retryPayloads.phoneInfo);
+          const hdrs = buildHeaders(retryPayloads.userAgent, cc);
+          const second = await runExistClassify(retryPayloads, hdrs, cc, false);
+          if (!isBad(second.result, second.probe)) {
+            return {
+              ...second.result,
+              probeMode: 'exist_only_refresh_retry',
+              consensusRounds: 1,
+              decisionReasons: (second.result.decisionReasons || []).concat(['exist_retry_new_session']),
+              sessionReused: false
+            };
+          }
+          try {
+            const dual = await runDualProbe(retryPayloads, hdrs, cc, { skipHealth: false });
+            const dualResult = classifyFromResponses(
+              retryPayloads,
+              dual.existText,
+              dual.codeText,
+              dual.proxyMode,
+              dual.sessionTag,
+              cc,
+              { partial: dual.partial, existOnly: false }
+            );
+            if (dualResult && !isBad(dualResult, { existText: dual.existText })) {
+              return {
+                ...dualResult,
+                probeMode: 'refresh_dual_fallback',
+                consensusRounds: 1,
+                decisionReasons: (dualResult.decisionReasons || []).concat(['refresh_dual_fallback']),
+                sessionReused: false
+              };
+            }
+            result = dualResult || result;
+          } catch (_) {}
         }
+      } else {
+        return {
+          ...result,
+          probeMode: 'exist_only_refresh',
+          consensusRounds: 1,
+          decisionReasons: (result.decisionReasons || []).concat(['exist_only_no_code', 'read_model']),
+          sessionReused: Boolean(payloads.sessionReused),
+          clientIdentity: payloads.identity || null
+        };
       }
-      return {
-        ...result,
-        probeMode: 'exist_only_refresh',
-        consensusRounds: 1,
-        decisionReasons: (result.decisionReasons || []).concat(['exist_only_no_code', 'read_model']),
-        sessionReused: Boolean(payloads.sessionReused),
-        clientIdentity: payloads.identity || null
-      };
+      if (result && !isBad(result, probe)) {
+        return {
+          ...result,
+          probeMode: 'exist_only_refresh',
+          consensusRounds: 1,
+          decisionReasons: (result.decisionReasons || []).concat(['exist_only_no_code']),
+          sessionReused: false
+        };
+      }
+      return softFallback(rawNumber, payloads, countryIso2, new Error('Refresh gagal setelah retry'));
     } catch (err) {
-      try {
-        await redis.del('wasess:' + String(rawNumber || '').replace(/\D/g, ''));
-      } catch (_) {}
       try {
         const retryPayloads = await buildPayloadsForNumber(rawNumber, { mode: 'read', forceNewSession: true });
         if (retryPayloads.success) {
           retryPayloads.rawNumber = String(rawNumber);
           const cc = resolveCountryIso2(retryPayloads.phoneInfo);
-          const retryHeaders = buildHeaders(retryPayloads.userAgent, cc);
-          const probe = await runExistOnlyProbe(retryPayloads, retryHeaders, cc, { skipHealth: false });
-          const result = classifyFromResponses(retryPayloads, probe.existText, null, probe.proxyMode, probe.sessionTag, cc, { partial: true, existOnly: true });
-          return {
-            ...result,
-            probeMode: 'exist_only_refresh_retry',
-            consensusRounds: 1,
-            decisionReasons: (result.decisionReasons || []).concat(['exist_only_retry_new_session']),
-            sessionReused: false
-          };
+          const hdrs = buildHeaders(retryPayloads.userAgent, cc);
+          const dual = await runDualProbe(retryPayloads, hdrs, cc, { skipHealth: false });
+          const dualResult = classifyFromResponses(
+            retryPayloads,
+            dual.existText,
+            dual.codeText,
+            dual.proxyMode,
+            dual.sessionTag,
+            cc,
+            { partial: dual.partial, existOnly: false }
+          );
+          if (dualResult && dualResult.accountStatus !== 'UNKNOWN') {
+            return {
+              ...dualResult,
+              probeMode: 'refresh_dual_catch',
+              consensusRounds: 1,
+              sessionReused: false
+            };
+          }
         }
       } catch (_) {}
       return softFallback(rawNumber, payloads, countryIso2, err);
@@ -1128,7 +1174,7 @@ async function triggerEmailVerification(rawNumber) {
 
     const existObj = safeJson(probeExist);
     const codeObj = safeJson(probeCode);
-    const parsed = WADetector.parseDualResponse(payloads.phoneInfo, probeExist, probeCode) || {};
+    const parsed = WADetector.parseDualResponse(payloads.phoneInfo, probeExist || null, probeCode || null) || {};
 
     const extracted = extractEmail(existObj, codeObj, parsed);
     const eligibleFlag = Boolean(
