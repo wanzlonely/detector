@@ -1,0 +1,25 @@
+name: Isolated Telegram webhook checks
+
+on:
+  push:
+    branches:
+      - migration/telegram-webhook-isolated
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  webhook:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check isolated webhook syntax
+        working-directory: telegram-webhook
+        run: npm run check
