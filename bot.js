@@ -315,14 +315,16 @@ function buildProgressBar(pct) {
 }
 
 function formatCooldownSmallCaps(seconds) {
-  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+  const sec = Math.max(0, Math.ceil(Number(seconds) || 0));
   if (sec <= 0) return '0ᴅ';
 
-  // Keep the Telegram result compact: show seconds only below one minute.
+  // Show exact seconds below one minute. At one minute or more,
+  // round upward so the displayed wait never understates the remaining time.
   if (sec < 60) return sec + 'ᴅ';
 
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
+  const totalMinutes = Math.ceil(sec / 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
   const parts = [];
   if (h > 0) parts.push(h + 'ᴊ');
   if (m > 0) parts.push(m + 'ᴍ');
