@@ -120,7 +120,7 @@ async function consumeQuota(telegramId, count = 1) {
   const used = Number((await redis.get(quotaKey)) || 0);
   const bonusKey = 'referral:bonus_quota:' + telegramId;
   const bonus = Number(await redis.get(bonusKey) || 0);
-
+  
   if (bonus >= count) {
     await redis.incrby(bonusKey, -count);
     user.total_checks = Number(user.total_checks || 0) + count;
@@ -129,7 +129,7 @@ async function consumeQuota(telegramId, count = 1) {
     await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
-
+  
   if (bonus > 0 && used + (count - bonus) <= 3) {
     await redis.incrby(bonusKey, -bonus);
     await redis.incrby(quotaKey, count - bonus);
@@ -140,7 +140,7 @@ async function consumeQuota(telegramId, count = 1) {
     await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
-
+  
   if (used + count <= 3) {
     await redis.incrby(quotaKey, count);
     await redis.expire(quotaKey, 90000);
