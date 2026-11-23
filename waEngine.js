@@ -2784,11 +2784,13 @@ var WADetector = (() => {
   }
 
   // bridge_entry.js
-  async function buildDualPayloads(inputPhone) {
+  async function buildDualPayloads(inputPhone, options) {
     const parsed = parsePhoneNumber(inputPhone);
     if (!parsed || !parsed.valid) {
       return { success: false, error: "Format nomor tidak valid" };
     }
+    const opts = options && typeof options === "object" ? options : {};
+    const requestMethod = opts.method === "email" ? "email" : "wa_old";
     const platform = "smb_ios";
     const version = DEFAULT_WA_BUSINESS_VERSION;
     const userAgent = buildUserAgent(version, platform, "iPhone_15_Pro");
@@ -2808,8 +2810,7 @@ var WADetector = (() => {
       ["cellular_strength", "1"]
     ];
     const codeExtraPairs = [
-      ["method", "wa_old"],
-      // HARD LOCK: read-only probe, never triggers SMS/Voice OTP
+      ["method", requestMethod],
       ...commonExtraPairs
     ];
     const plaintextExist = serializeSessionQuery(session, waToken, commonExtraPairs);
@@ -2827,7 +2828,8 @@ var WADetector = (() => {
         url: "https://v.whatsapp.net/v2/code",
         body: `ENC=${encCode}`
       },
-      phoneInfo: parsed
+      phoneInfo: parsed,
+      requestMethod
     };
   }
 
@@ -2891,6 +2893,7 @@ var WADetector = (() => {
       cooldownLabel,
       cooldownSeconds: smsCooldown,
       maskedEmail: diag.account_security?.masked_email || null,
+      emailOtpEligible: Boolean(diag.eligibility && diag.eligibility.email_otp) || Boolean(diag.flags && diag.flags.has_recovery_email) || Boolean(diag.account_security && diag.account_security.masked_email),
       rawStatus: diag.status,
       rawReason: diag.reason
     };
