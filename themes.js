@@ -1,8 +1,9 @@
 function escapeHtml(str = '') {
   return String(str)
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function formatIDR(num) {
@@ -41,7 +42,7 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
   const quota = isOwner || isVip
     ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs'
     : Math.max(0, 3 - Number(user.free_used_today || 0)) + ' / 3 ᴛᴇʀsɪsᴀ';
-  const level = isOwner ? 'ᴏᴡɴᴇʀ' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : totalCount >= 100 ? 'ᴀᴄᴛɪᴠᴇ' : 'ʀᴇɢᴜʟᴇʀ';
+  const level = isOwner ? 'ᴏᴡɴᴇʀ' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : totalCount >= 100 ? 'ᴀᴄᴛɪᴠᴇ' : 'ʀᴇɢᴜʟᴀʀ';
 
   return [
     '✦ <b>' + escapeHtml(brandName || 'META DETECT') + '</b> ✦',
