@@ -416,7 +416,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
       if (!hard) isBanned = false;
     }
   }
-  if (engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN') isBanned = false;
+  if (!patternHints.includes('HARD_BAN') && (engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN')) isBanned = false;
   if (isBanned) reasons.push('ban_signal');
   const cloneSig = detectCloneSignals(existResponse, codeResponse);
   const isSecurityBlock = cloneSig.isSecurityBlock && !isBanned;
