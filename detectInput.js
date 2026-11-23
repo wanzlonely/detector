@@ -10,7 +10,10 @@ function parseDetectionInput(input, limit = 1) {
     return { ok: false, error: 'Masukkan minimal satu nomor.', valid: [], invalid: [], duplicates: [] };
   }
 
-  const maximum = Math.max(1, Math.min(30, Number(limit) || 1));
+  const requestedLimit = Number(limit);
+  const maximum = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(30, Math.floor(requestedLimit)))
+    : 1;
   if (entries.length > maximum) {
     return {
       ok: false,
