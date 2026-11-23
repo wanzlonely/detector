@@ -263,13 +263,14 @@ function firstSignalValue(exist, code, keys) {
 }
 
 function explicitBanEvidence(exist, code) {
-  const status = normalizeSignal(firstSignalValue(exist, code, ['status', 'account_status']));
-  const reason = normalizeSignal(firstSignalValue(exist, code, ['reason', 'error_type']));
-  return (
-    explicitTrue(firstSignalValue(exist, code, ['is_banned', 'banned'])) ||
-    ['banned', 'account_banned', 'phone_number_banned', 'permanently_banned'].includes(status) ||
-    ['banned', 'account_banned', 'phone_number_banned', 'permanently_banned'].includes(reason)
-  );
+  const banCodes = ['banned', 'account_banned', 'phone_number_banned', 'permanently_banned'];
+  for (const source of [exist || {}, code || {}]) {
+    if (['is_banned', 'banned'].some((key) => explicitTrue(source[key]))) return true;
+    const status = normalizeSignal(source.status || source.account_status);
+    const reason = normalizeSignal(source.reason || source.error_type);
+    if (banCodes.includes(status) || banCodes.includes(reason)) return true;
+  }
+  return false;
 }
 
 function getCustomBlockText(exist, code) {
@@ -289,36 +290,39 @@ function getCustomBlockText(exist, code) {
 }
 
 function applyPatternLibrary(exist, code, timers) {
-  const reason = normalizeSignal(firstSignalValue(exist, code, ['reason']));
-  const status = normalizeSignal(firstSignalValue(exist, code, ['status']));
+  const sources = [exist || {}, code || {}];
+  const reasons = sources.map((source) => normalizeSignal(source.reason));
+  const statuses = sources.map((source) => normalizeSignal(source.status));
   const hints = [];
   if (timers.is_wa_old_echo) hints.push('WA_OLD_ECHO');
-  if (reason === 'temporarily_unavailable' || status === 'temporarily_unavailable') hints.push('TEMP_LOCK');
-  if (reason.includes('too_many') || reason === 'too_recent') hints.push('RATE_LIMIT');
-  if (explicitTrue(firstSignalValue(exist, code, ['high_sms_rereg_user']))) hints.push('HIGH_REREG');
-  if (reason === 'no_routes' || reason === 'no_route') hints.push('NO_ROUTES');
-  if (code && normalizeSignal(code.reason) === 'method_not_allowed' && !timers.exist_no_routes && timers.sms === 0) hints.push('METHOD_NOT_ALLOWED_SOFT');
+  if (reasons.includes('temporarily_unavailable') || statuses.includes('temporarily_unavailable')) hints.push('TEMP_LOCK');
+  if (reasons.some((reason) => reason.includes('too_many') || reason === 'too_recent')) hints.push('RATE_LIMIT');
+  if (sources.some((source) => explicitTrue(source.high_sms_rereg_user))) hints.push('HIGH_REREG');
+  if (reasons.some((reason) => reason === 'no_routes' || reason === 'no_route')) hints.push('NO_ROUTES');
+  if (normalizeSignal(code && code.reason) === 'method_not_allowed' && !timers.exist_no_routes && timers.sms === 0) hints.push('METHOD_NOT_ALLOWED_SOFT');
   if (timers.is_code_sent && timers.sms === 0) hints.push('CODE_SENT_READY');
   if (explicitBanEvidence(exist, code)) hints.push('HARD_BAN');
   return hints;
 }
 
 function detectBanSignals(exist, code) {
-  // Metadata such as appeal_token or violation_type is not proof of a ban.
-  // Require an explicit account-ban flag or an exact ban status/reason.
+  // Appeal/violation metadata alone is not proof of a ban.
   return explicitBanEvidence(exist, code);
 }
 
 function detectCloneSignals(exist, code) {
-  const reason = normalizeSignal(firstSignalValue(exist, code, ['reason']));
-  const status = normalizeSignal(firstSignalValue(exist, code, ['status', 'account_status']));
+  const sources = [exist || {}, code || {}];
+  const reasons = sources.map((source) => normalizeSignal(source.reason));
+  const statuses = sources.map((source) => normalizeSignal(source.status || source.account_status));
   const blockText = getCustomBlockText(exist, code);
-  const explicitCloneFlag = explicitTrue(firstSignalValue(exist, code, [
-    'is_clone_blocked', 'clone_blocked', 'is_unofficial_app', 'unofficial_app_block'
-  ]));
-  const explicitSecurityFlag = explicitTrue(firstSignalValue(exist, code, [
-    'is_security_block', 'security_block', 'security_hold'
-  ]));
+  const explicitCloneFlag = sources.some((source) =>
+    ['is_clone_blocked', 'clone_blocked', 'is_unofficial_app', 'unofficial_app_block']
+      .some((key) => explicitTrue(source[key]))
+  );
+  const explicitSecurityFlag = sources.some((source) =>
+    ['is_security_block', 'security_block', 'security_hold']
+      .some((key) => explicitTrue(source[key]))
+  );
   const cloneCodes = ['clone_blocked', 'unofficial_app', 'unofficial_app_block', 'unsupported_app', 'unsupported_client'];
   const securityCodes = ['security_block', 'security_hold', 'login_security_hold'];
   const unofficialText = [
@@ -332,10 +336,12 @@ function detectCloneSignals(exist, code) {
     'login temporarily unavailable', 'unusual account activity', 'aktivitas akun yang tidak biasa'
   ];
   const isSecurityBlock = explicitSecurityFlag ||
-    securityCodes.includes(reason) || securityCodes.includes(status) ||
+    reasons.some((reason) => securityCodes.includes(reason)) ||
+    statuses.some((status) => securityCodes.includes(status)) ||
     securityText.some((phrase) => blockText.includes(phrase));
   const isCloneBlocked = explicitCloneFlag ||
-    cloneCodes.includes(reason) || cloneCodes.includes(status) ||
+    reasons.some((reason) => cloneCodes.includes(reason)) ||
+    statuses.some((status) => cloneCodes.includes(status)) ||
     unofficialText.some((phrase) => blockText.includes(phrase));
   return { isCloneBlocked: Boolean(isCloneBlocked && !isSecurityBlock), isSecurityBlock: Boolean(isSecurityBlock) };
 }
