@@ -1,30 +1,9 @@
-/**
- * 15-POINT ACCURACY STACK
- * 1  Exist-first triage (wave=exist)
- * 2  Dual-wave full for ambiguous
- * 3  wa_old echo filter ≤180s
- * 4  Soft-fallback never dibatasi
- * 5  Adaptive concurrency (bot)
- * 6  SMS-primary timer ground truth
- * 7  Confidence thresholds + existClear
- * 8  Multi-round consensus
- * 9  Hard-ban only for dibatasi
- * 10 Device path = siap diverifikasi
- * 11 Multi-signal confidence lock
- * 12 Sticky short-TTL cache (anti flip-flop)
- * 13 Proxy geo-match confidence boost
- * 14 Ban-borderline second dual opinion
- * 15 Cross-round timer consistency pick
- * + secondaryPath: device|ready|cooldown even when clone
- */
 const WADetector = require('./waEngine');
-const { applyPatternLibrary, detectBanSignals, detectCloneSignals } = require('./lib/statusSignals');
-const { normalize, detectRegistrationStatus, detectRouteStatus, detectDeviceStatus } = require('./lib/registrationSignals');
 const { executeWithProxyRotation, getHealth } = require('./proxyManager');
 
-const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 8000);
-const INTERNAL_RETRIES = Math.min(4, Math.max(2, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 3)));
-const CONSENSUS_ENABLED = String(process.env.WA_CONSENSUS || '1') !== '0';
+const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 4000);
+const INTERNAL_RETRIES = Math.min(2, Math.max(1, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 1)));
+const CONSENSUS_ENABLED = String(process.env.WA_CONSENSUS || '0') === '1';
 const LOW_CONFIDENCE_THRESHOLD = Number(process.env.WA_LOW_CONFIDENCE || 0.72);
 const EXIST_CLEAR_CONFIDENCE = Number(process.env.WA_EXIST_CLEAR || 0.82);
 const STICKY_TTL_MS = Number(process.env.WA_STICKY_TTL_MS || 45000);
@@ -124,6 +103,32 @@ async function postWithTimeout(url, body, headers, dispatcher) {
   }
 }
 
+// FITUR BARU: Proxy Health Check
+async function checkProxyHealth(dispatcher) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    // Tembak endpoint statis WA untuk cek IP reputation
+    const res = await fetch('https://www.whatsapp.com/', { 
+      method: 'GET', 
+      dispatcher, 
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+    // Jika 403 (Forbidden) atau 429 (Too Many Requests), IP proxy dianggap kotor
+    if (res.status === 403 || res.status === 429) {
+      throw new Error('PROXY_DIRTY_IP_BANNED');
+    }
+    return true;
+  } catch (err) {
+    if (err.message === 'PROXY_DIRTY_IP_BANNED') throw err;
+    // Timeout atau error jaringan lain, anggap proxy mati
+    throw new Error('PROXY_DEAD');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function safeJson(text) { try { return JSON.parse(text || '{}'); } catch (_) { return {}; } }
 function num(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; }
 
@@ -175,69 +180,109 @@ function resolveCountryIso2(phoneInfo) {
   return null;
 }
 
-function firstExplicitTimer(source, keys) {
-  const values = [];
-  let hasExplicitZero = false;
-  for (const key of keys) {
-    const value = source && source[key];
-    if (value === undefined || value === null || value === '') continue;
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed) || parsed < 0) continue;
-    const seconds = Math.floor(parsed);
-    if (seconds > 0) values.push(seconds);
-    else hasExplicitZero = true;
-  }
-  // Timer aliases can coexist; a zero in one alias must not hide a
-  // positive remaining wait in another. Use the shortest explicit wait.
-  if (values.length) return Math.min(...values);
-  return hasExplicitZero ? 0 : null;
-}
-
 function extractChannelTimers(existRaw, codeRaw) {
   const exist = existRaw || {};
   const code = codeRaw || {};
-  const noRouteCodes = ['no_routes', 'no_route', 'no_sms_route', 'sms_no_routes'];
-  const existNoRoutes = [exist.reason, exist.status, exist.route_status, exist.sms_route_status].some((value) => noRouteCodes.includes(normalize(value)));
-  const codeNoRoutes = [code.reason, code.status, code.route_status, code.sms_route_status].some((value) => noRouteCodes.includes(normalize(value)));
-  // Prefer the first explicit SMS timer field from /exist. Do not take the
-  // maximum across distinct fields or let a later /code response overwrite it.
-  const existSmsValue = existNoRoutes ? 0 : firstExplicitTimer(exist, ['sms_wait', 'send_sms_wait', 'sms_cooldown']);
-  const codeSmsValue = codeNoRoutes ? 0 : firstExplicitTimer(code, ['sms_wait', 'send_sms_wait', 'sms_cooldown']);
-  const existSms = existSmsValue === null ? 0 : existSmsValue;
-  const codeSmsRaw = codeSmsValue === null ? 0 : codeSmsValue;
+  const existNoRoutes = exist.reason === 'no_routes' || exist.reason === 'no_route';
+  const codeNoRoutes = code.reason === 'no_routes' || code.reason === 'no_route';
+  
+  const existSms = existNoRoutes ? 0 : Math.max(num(exist.sms_wait), num(exist.send_sms_wait), num(exist.sms_cooldown));
+  const codeSmsRaw = codeNoRoutes ? 0 : Math.max(num(code.sms_wait), num(code.send_sms_wait), num(code.sms_cooldown));
+  
   const existVoice = Math.max(num(exist.voice_wait), num(exist.voice_cooldown));
   const codeVoice = Math.max(num(code.voice_wait), num(code.voice_cooldown));
   const existFlash = Math.max(num(exist.flash_wait), num(exist.flash_cooldown));
   const codeFlash = Math.max(num(code.flash_wait), num(code.flash_cooldown));
   const existEmail = Math.max(num(exist.email_wait), num(exist.email_cooldown));
   const codeEmail = Math.max(num(code.email_wait), num(code.email_cooldown));
+  
   const waOldWait = Math.max(num(exist.wa_old_wait), num(exist.wa_old_cooldown), num(code.wa_old_wait), num(code.wa_old_cooldown));
   const existRetry = existNoRoutes ? 0 : num(exist.retry_after);
   const codeRetry = codeNoRoutes ? 0 : num(code.retry_after);
   const isCodeSent = code.status === 'sent' || code.status === 'ok';
+  
   const codeMethod = String(code.method || code.login_method || '').toLowerCase();
   const isWaOldMethod = codeMethod.includes('wa_old');
-  // The /code probe is explicitly sent with method=wa_old. Its method timer
-  // must not be mistaken for an SMS timer; SMS cooldown is sourced from /exist.
-  const isWaOldEcho = isWaOldMethod && codeSmsRaw > 0;
-  let smsSeconds = 0;
-  if (existSmsValue !== null) smsSeconds = existSms;
-  else if (!isWaOldMethod && codeSmsValue !== null) smsSeconds = codeSmsRaw;
+
+  const isWaOldEcho = existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 360 && (isCodeSent || isWaOldMethod || true);
+
+  let smsSeconds = existSms;
+  if (smsSeconds === 0 && !isWaOldEcho && !isCodeSent && codeSmsRaw >= 600) {
+    smsSeconds = codeSmsRaw;
+  }
+
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
   let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
   let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
+  
   if (voiceWait >= 240 && existVoice === 0 && isWaOldMethod) voiceWait = 0;
   if (flashWait >= 240 && existFlash === 0 && isWaOldMethod) flashWait = 0;
-  const deviceSignal = detectDeviceStatus(exist, code);
-  const waOldEligible = deviceSignal.status === 'ON_DEVICE' || deviceSignal.status === 'DEVICE_PATH';
-  const deviceName = deviceSignal.deviceName;
+  
+  const deviceName = pickDeviceName(exist, code);
+  const waOldEligible = Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1 || Boolean(deviceName);
+    
   return {
     sms: smsSeconds, voice: voiceWait, flash: flashWait, email: emailWait, wa_old: waOldWait,
     retry_after: Math.max(existRetry, codeRetry),
-    wa_old_eligible: waOldEligible, device_name: deviceName, device_status: deviceSignal.status, is_wa_old_echo: isWaOldEcho,
+    wa_old_eligible: waOldEligible, device_name: deviceName, is_wa_old_echo: isWaOldEcho,
     exist_no_routes: existNoRoutes, code_no_routes: codeNoRoutes, is_code_sent: isCodeSent,
     exist_sms: existSms, code_sms: codeSmsRaw
   };
+}
+
+function pickDeviceName(exist, code) {
+  const sources = [exist, code];
+  const keys = [
+    'wa_old_device_name', 'wa_old_device', 'device_name', 'old_device_name',
+    'wa_device_name', 'registered_device_name', 'phone_model',
+    'device_model', 'wa_old_model', 'last_device_name', 'device_os_name',
+    'os_name', 'device_board', 'marketing_name'
+  ];
+  for (const src of sources) {
+    if (!src || typeof src !== 'object') continue;
+    for (const k of keys) {
+      const v = src[k];
+      if (v == null) continue;
+      if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
+      if (typeof v === 'object') {
+        const nested = v.name || v.device_name || v.model || v.model_name || v.marketing_name || v.device || null;
+        if (nested && String(nested).trim()) return cleanDeviceName(nested);
+      }
+    }
+    for (const nestKey of ['account_security', 'security', 'device_info', 'wa_old', 'device', 'meta']) {
+      const nest = src[nestKey];
+      if (!nest || typeof nest !== 'object') continue;
+      for (const k of keys) {
+        const v = nest[k];
+        if (typeof v === 'string' && v.trim() && v.trim().length >= 2) return cleanDeviceName(v);
+      }
+    }
+  }
+  try {
+    const blob = JSON.stringify({ exist, code });
+    const patterns = [
+      /"wa_old_device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"old_device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"wa_device_name"\s*:\s*"([^"]{2,80})"/i,
+      /"marketing_name"\s*:\s*"([^"]{2,80})"/i,
+      /"model_name"\s*:\s*"([^"]{2,80})"/i
+    ];
+    for (const re of patterns) {
+      const m = blob.match(re);
+      if (m && m[1] && m[1].trim() && m[1].toLowerCase() !== 'null') return cleanDeviceName(m[1]);
+    }
+  } catch (_) {}
+  return null;
+}
+
+function cleanDeviceName(name) {
+  let s = String(name || '').trim();
+  if (!s) return null;
+  s = s.replace(/^[\s"']+|[\s"']+$/g, '');
+  if (!s || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined' || s === '-') return null;
+  if (s.length > 40) s = s.slice(0, 40).trim();
+  return s;
 }
 
 function buildChannel(seconds) {
@@ -245,29 +290,100 @@ function buildChannel(seconds) {
   return { isCooldown: sec > 0, rawSeconds: sec, uiTimer: toShortTimer(sec), humanTime: toWaUiTimer(sec), formatted: toShortTimer(sec) };
 }
 
-function resolveSmsAvailability(exist, code) {
+function applyPatternLibrary(exist, code, timers) {
+  const reason = String(exist.reason || code.reason || '').toLowerCase();
+  const status = String(exist.status || code.status || '').toLowerCase();
+  const hints = [];
+  if (timers.is_wa_old_echo) hints.push('WA_OLD_ECHO');
+  if (reason === 'temporarily_unavailable' || status === 'temporarily_unavailable') hints.push('TEMP_LOCK');
+  if (reason.includes('too_many') || reason === 'too_recent') hints.push('RATE_LIMIT');
+  if (exist.high_sms_rereg_user || code.high_sms_rereg_user) hints.push('HIGH_REREG');
+  if (reason === 'no_routes' || reason === 'no_route') hints.push('NO_ROUTES');
+  if (code.reason === 'method_not_allowed' && !timers.exist_no_routes && timers.sms === 0) hints.push('METHOD_NOT_ALLOWED_SOFT');
+  if (timers.is_code_sent && timers.sms === 0) hints.push('CODE_SENT_READY');
+  if (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal) hints.push('HARD_BAN');
+  return hints;
+}
+
+function detectBanSignals(exist, code, parsed, patternHints) {
+  if (patternHints.includes('HARD_BAN')) return true;
+  if (parsed && parsed.isBanned === true && (exist.violation_type || code.violation_type || exist.in_app_ban_appeal || code.in_app_ban_appeal)) return true;
+  return Boolean(
+    exist.status === 'banned' || code.status === 'banned' ||
+    exist.reason === 'banned' || code.reason === 'banned' ||
+    exist.violation_type || code.violation_type ||
+    exist.in_app_ban_appeal || code.in_app_ban_appeal
+  );
+}
+
+function detectCloneSignals(exist, code, parsed) {
+  if (parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) {
+    return { isCloneBlocked: true, isSecurityBlock: Boolean(parsed.isSecurityBlock) };
+  }
+  const rawBlock = exist.custom_block_screen || code.custom_block_screen || exist.block_screen || code.block_screen || null;
+  let blockScreen = '';
+  if (rawBlock && typeof rawBlock === 'object') {
+    blockScreen = JSON.stringify(rawBlock).toLowerCase();
+  } else {
+    blockScreen = String(rawBlock || '').toLowerCase();
+  }
+  const reason = String(exist.reason || code.reason || '').toLowerCase();
+  const status = String(exist.status || code.status || '').toLowerCase();
+  const textBlob = (blockScreen + ' ' + JSON.stringify({ exist: { reason: exist.reason, status: exist.status }, code: { reason: code.reason, status: code.status } })).toLowerCase();
+
+  const unofficial = (
+    blockScreen.includes('unofficial') ||
+    blockScreen.includes('clone') ||
+    blockScreen.includes('tidak resmi') ||
+    blockScreen.includes('aplikasi resmi') ||
+    blockScreen.includes('official whatsapp') ||
+    blockScreen.includes('whatsapp.com/download') ||
+    blockScreen.includes('unduh whatsapp') ||
+    blockScreen.includes('download whatsapp') ||
+    reason.includes('unofficial') ||
+    reason.includes('clone')
+  );
+  const security = (
+    blockScreen.includes('security') ||
+    blockScreen.includes('keamanan') ||
+    blockScreen.includes('demi keamanan') ||
+    blockScreen.includes('login not available') ||
+    blockScreen.includes('login is not available') ||
+    reason.includes('security') ||
+    status.includes('security') ||
+    textBlob.includes('tidak dapat masuk saat ini') ||
+    Boolean(parsed && parsed.isSecurityBlock)
+  );
+  if (!unofficial && rawBlock && typeof rawBlock === 'object') {
+    const title = String(rawBlock.title || rawBlock.header || '').toLowerCase();
+    if (title.includes('resmi') || title.includes('official') || title.includes('unduh') || title.includes('download')) {
+      return { isCloneBlocked: true, isSecurityBlock: false };
+    }
+  }
+  return { isCloneBlocked: Boolean(unofficial), isSecurityBlock: Boolean(security) && !unofficial };
+}
+
+function resolveSmsAvailability(exist, code, timers, patternHints) {
   const toBool = (v) => {
     if (typeof v === 'boolean') return v;
-    if (typeof v === 'number' && (v === 1 || v === 0)) return v === 1;
-    if (typeof v === 'string') {
-      const normalized = v.trim().toLowerCase();
-      if (normalized === '1' || normalized === 'true') return true;
-      if (normalized === '0' || normalized === 'false') return false;
-    }
+    if (v === 1 || v === '1') return true;
+    if (v === 0 || v === '0') return false;
     return null;
   };
   const eB = toBool(exist.send_sms_eligible);
   const cB = toBool(code.send_sms_eligible);
-  // Conflicting explicit flags are ambiguous. Never infer SMS eligibility
-  // from device, email, a sent response, or a non-SMS method timer.
-  if (eB !== null && cB !== null && eB !== cB) return null;
-  if (eB !== null) return eB;
-  if (cB !== null) return cB;
+  if (eB === true || cB === true) return true;
+  if (timers.wa_old_eligible || timers.sms > 0 || timers.is_code_sent) return true;
+  if (patternHints.includes('CODE_SENT_READY') || patternHints.includes('HIGH_REREG')) return true;
+  if (patternHints.includes('NO_ROUTES') && eB === false) return false;
+  if (eB === false && cB === false && timers.exist_no_routes) return false;
+  if (eB === false && timers.exist_no_routes && cB === null) return false;
   return null;
 }
 
 async function runExistOnlyProbe(payloads, headers, countryIso2) {
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
+    await checkProxyHealth(proxyCtx.dispatcher); // Cek proxy dulu
     const existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
     return { existText, codeText: null, partial: true };
   }, 2, countryIso2);
@@ -276,12 +392,13 @@ async function runExistOnlyProbe(payloads, headers, countryIso2) {
 
 async function runDualProbe(payloads, headers, countryIso2) {
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
+    await checkProxyHealth(proxyCtx.dispatcher); // Cek proxy dulu sebelum nembak WA
     let existText = null;
     let codeText = null;
     try {
       existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
     } catch (_) {}
-    await sleep(60);
+    await sleep(25);
     try {
       codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
     } catch (_) {}
@@ -291,195 +408,250 @@ async function runDualProbe(payloads, headers, countryIso2) {
   return { existText: data.existText || null, codeText: data.codeText || null, partial: Boolean(data.partial), proxyMode, sessionTag };
 }
 
+function computeQualityScore(f) {
+  let s = 50;
+  if (f.isBanned) return 5;
+  if (f.isCloneBlocked) return 15;
+  if (f.isSecurityBlock) return 20;
+  if (f.existNoRoutes) return 25;
+  if (f.isReady) s += 30;
+  if (f.hasDevicePath) s += 10;
+  if (f.maskedEmail) s += 8;
+  if (f.hasPassword) s += 5;
+  if (f.highRereg) s -= 15;
+  if (f.isCooldown) s -= 10;
+  return Math.max(0, Math.min(100, s));
+}
+
 function classifyFromResponses(payloads, existText, codeText, proxyMode, sessionTag, countryIso2, meta) {
   const existResponse = safeJson(existText);
   const codeResponse = safeJson(codeText);
   const parsed = WADetector.parseDualResponse(payloads.phoneInfo, existText || '{}', codeText || '{}');
   const timers = extractChannelTimers(existResponse, codeResponse);
-  const engineState = String((parsed && parsed.state) || '').toUpperCase();
   const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
-  const smsAvailable = resolveSmsAvailability(existResponse, codeResponse);
-  const registrationStatus = detectRegistrationStatus(existResponse, codeResponse);
-  const routeStatus = detectRouteStatus(existResponse, codeResponse);
-  const deviceSignal = detectDeviceStatus(existResponse, codeResponse);
-  const channels = {
-    sms: buildChannel(timers.sms), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash),
-    email: buildChannel(timers.email), wa_old: buildChannel(timers.wa_old)
-  };
-  const engineCooldown = Boolean(parsed && parsed.isCooldown);
-  // Do not use parser-level aggregate flags for security/clone/ban decisions:
-  // those flags may be inferred from ambiguous metadata in the bundled parser.
-  const liveSmsWait = timers.sms;
-  const hasLiveSms = liveSmsWait > 0;
-  const hasLiveVoice = timers.voice > 15;
-  const hasLiveWait = hasLiveSms || hasLiveVoice || timers.flash > 15 || timers.email > 15;
-  const reasons = [];
-  let isBanned = detectBanSignals(existResponse, codeResponse);
-  if (isBanned && (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
-    if (!patternHints.includes('HARD_BAN')) {
-      const hard =
-        existResponse.status === 'banned' || codeResponse.status === 'banned' ||
-        existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
-        existResponse.reason === 'blocked' || codeResponse.reason === 'blocked';
-      if (!hard) isBanned = false;
+
+  const reasonBlob = (
+    String(existResponse.reason || '') + ' ' + String(codeResponse.reason || '') + ' ' +
+    String(existResponse.status || '') + ' ' + String(codeResponse.status || '')
+  ).toLowerCase();
+  
+  const hasAppeal = Boolean(
+    existResponse.in_app_ban_appeal || codeResponse.in_app_ban_appeal ||
+    existResponse.appeal_token || codeResponse.appeal_token
+  );
+  const hasViolation = Boolean(existResponse.violation_type || codeResponse.violation_type);
+  const explicitBan =
+    existResponse.status === 'banned' || codeResponse.status === 'banned' ||
+    existResponse.reason === 'banned' || codeResponse.reason === 'banned' ||
+    /\bbanned\b/.test(reasonBlob);
+  const blockedHard =
+    (existResponse.reason === 'blocked' || codeResponse.reason === 'blocked') &&
+    (hasViolation || hasAppeal);
+  const hardBan = Boolean(explicitBan || blockedHard || (hasViolation && hasAppeal));
+  let isBanned = hardBan;
+
+  const isTempLock = reasonBlob.includes('temporarily_unavailable') ||
+    reasonBlob.includes('too_many') || reasonBlob.includes('too_recent') ||
+    reasonBlob.includes('rate_limit') || patternHints.includes('TEMP_LOCK') ||
+    patternHints.includes('RATE_LIMIT');
+
+  const cloneSig = detectCloneSignals(existResponse, codeResponse, parsed);
+  let isCloneBlocked = Boolean((parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock)) || cloneSig.isCloneBlocked);
+  let isSecurityBlock = Boolean((parsed && parsed.isSecurityBlock) || cloneSig.isSecurityBlock);
+  if (isBanned) { isCloneBlocked = false; isSecurityBlock = false; }
+  if (isCloneBlocked) isSecurityBlock = false;
+
+  const existNoRoutes = Boolean(
+    timers.exist_no_routes ||
+    existResponse.reason === 'no_routes' ||
+    existResponse.reason === 'no_route'
+  );
+  const existAnswered = Boolean(existText && String(existText).trim());
+
+  let smsSeconds = timers.sms;
+  const engineCd = Math.max(0, Number(parsed && parsed.cooldownSeconds) || 0);
+  const st = String((parsed && parsed.state) || '').toUpperCase();
+
+  if (smsSeconds === 0 && engineCd >= 600 && parsed && parsed.isCooldown && !parsed.isReady) {
+    smsSeconds = engineCd;
+  }
+
+  let isCooldown = false;
+  let isReady = false;
+
+  if (!isBanned) {
+    if (smsSeconds > 0) {
+      isCooldown = true;
+      isReady = false;
+    } else if (parsed && parsed.isReady) {
+      isReady = true;
+      isCooldown = false;
+    } else if (st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
+      isReady = true;
+      isCooldown = false;
+    } else if (existAnswered && !existNoRoutes) {
+      isReady = true;
+      isCooldown = false;
+    } else if (isTempLock && engineCd >= 600) {
+      isCooldown = true;
+      isReady = false;
+      smsSeconds = engineCd;
+    } else if (st === 'IN_COOLDOWN' || st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN') {
+      if (engineCd >= 600) {
+        isCooldown = true;
+        smsSeconds = engineCd;
+      } else if (parsed && parsed.isCooldown && engineCd > 0 && timers.exist_sms > 0) {
+        isCooldown = true;
+        smsSeconds = timers.exist_sms;
+      } else if (parsed && parsed.isReady) {
+        isReady = true;
+      } else {
+        isReady = true;
+      }
+    } else if (parsed && parsed.isCooldown && timers.exist_sms > 0) {
+      isCooldown = true;
+      smsSeconds = timers.exist_sms;
+    } else if (existAnswered) {
+      isReady = true;
     }
   }
-  if (!patternHints.includes('HARD_BAN') && (engineState === 'TEMP_LOCKED_COOLDOWN' || engineState === 'RATE_LIMITED_COOLDOWN' || engineState === 'IN_COOLDOWN')) isBanned = false;
-  if (isBanned) reasons.push('ban_signal');
-  const cloneSig = detectCloneSignals(existResponse, codeResponse);
-  const isSecurityBlock = cloneSig.isSecurityBlock && !isBanned;
-  const isCloneBlocked = cloneSig.isCloneBlocked && !isBanned && !isSecurityBlock;
-  if (isCloneBlocked) reasons.push('clone_or_unofficial');
-  if (isSecurityBlock) reasons.push('security_block');
-  if (hasLiveSms) reasons.push('exist_sms_wait:' + liveSmsWait);
-  else if (hasLiveVoice) reasons.push('voice_wait:' + timers.voice);
-  else if (hasLiveWait) reasons.push('other_channel_wait');
 
-  if (isBanned && !patternHints.includes('HARD_BAN')) {
-    isBanned = false;
-    reasons.push('ban_soft_cleared');
+  const hasDevicePath = Boolean(
+    timers.wa_old_eligible ||
+    timers.device_name ||
+    Number(existResponse.wa_old_eligible || codeResponse.wa_old_eligible || 0) === 1 ||
+    String((parsed && parsed.state) || '').toUpperCase() === 'REGISTERED_ON_DEVICE'
+  );
+
+  const channels = {
+    sms: buildChannel(smsSeconds),
+    voice: buildChannel(timers.voice),
+    flash: buildChannel(timers.flash),
+    email: buildChannel(timers.email),
+    wa_old: buildChannel(timers.wa_old)
+  };
+
+  if (!isBanned && isCloneBlocked) {
+    isReady = false;
   }
-
-  const hasDevicePath = deviceSignal.status === 'ON_DEVICE';
-  const hasDevicePathAvailable = hasDevicePath || deviceSignal.status === 'DEVICE_PATH';
-  const isNotRegistered = registrationStatus === 'NOT_REGISTERED';
-
-  // Only an explicit SMS timer creates the SMS cooldown category. Voice,
-  // email, wa_old and generic retry_after timers remain separate signals.
-  const meaningfulCooldown =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !isNotRegistered && hasLiveSms;
-
-  const hasOpenPath = smsAvailable === true && routeStatus !== 'NO_ROUTES' && routeStatus !== 'CONFLICT' && !timers.exist_no_routes && !timers.code_no_routes;
-
-  // READY means SMS is explicitly eligible now. Device-path, status=sent,
-  // HIGH-REREG and other methods are not proof that a fresh SMS OTP can be sent.
-  let isReady = false;
-  if (!isBanned && !isCloneBlocked && !isSecurityBlock &&
-      !isNotRegistered && smsAvailable === true && !hasLiveSms && routeStatus !== 'NO_ROUTES' && routeStatus !== 'CONFLICT' && !timers.exist_no_routes && !timers.code_no_routes) {
-    isReady = true;
-    reasons.push('explicit_sms_eligible');
+  if (!isBanned && isSecurityBlock) {
+    isReady = false;
   }
-
-  const effectiveCooldown = !isReady && meaningfulCooldown;
-
-  const isPartial = Boolean(meta && (meta.partial || meta.existOnly));
-  const anyChannelSignal =
-    timers.sms > 0 || timers.voice > 0 || timers.flash > 0 || timers.email > 0 ||
-    timers.wa_old > 0 || timers.is_code_sent || hasDevicePathAvailable;
-  const hasNoSmsRoute = routeStatus === 'NO_ROUTES';
-  const smsOptionMissing =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !isNotRegistered &&
-    !effectiveCooldown && !isReady && !isPartial &&
-    hasNoSmsRoute && smsAvailable !== true;
-  if (smsOptionMissing) reasons.push('sms_option_missing');
-  if (isReady) reasons.push('ready');
-  if (effectiveCooldown) reasons.push('cooldown');
-
-  let description = (parsed && parsed.description) || '';
-  if (isBanned) description = 'Nomor dibatasi / diblokir oleh WhatsApp.';
-  else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone).';
-  else if (isSecurityBlock) description = 'Demi keamanan: login sementara tidak tersedia.';
-  else if (isNotRegistered) description = 'Nomor tidak terdaftar pada layanan WhatsApp berdasarkan sinyal eksplisit respons.';
-  else if (routeStatus === 'CONFLICT') description = 'Status jalur SMS bertentangan antarrespons; hasil perlu diperiksa ulang.';
-  else if (effectiveCooldown) {
-    const ch = channels.sms;
-    const t = (ch && (ch.humanTime || ch.uiTimer)) || 'aktif';
-    description = 'Cooldown SMS · ' + t;
-  } else if (isReady) {
-    description = hasDevicePath && timers.device_name
-      ? 'SMS siap · perangkat terdaftar di ' + timers.device_name
-      : (hasDevicePath ? 'SMS siap · perangkat terdaftar' : 'SMS siap menerima OTP.');
-  } else if (smsOptionMissing) {
-    description = 'Jalur SMS tidak tersedia untuk nomor ini (no_routes).';
-  } else if (hasDevicePath) {
-    description = 'Informasi perangkat tersedia, tetapi kelayakan SMS belum terkonfirmasi.';
-  } else if (timers.is_code_sent) {
-    description = 'Respons menunjukkan proses verifikasi berjalan; kesiapan SMS baru belum terkonfirmasi.';
-  }
-  else description = 'Status SMS belum dapat dipastikan dari respons yang tersedia.';
 
   let accountStatus = 'UNKNOWN';
-  if (isBanned) accountStatus = 'BANNED';
-  else if (isCloneBlocked) accountStatus = 'CLONE_BLOCKED';
-  else if (isSecurityBlock) accountStatus = 'SECURITY_BLOCK';
-  else if (isNotRegistered) accountStatus = 'NOT_REGISTERED';
-  else if (routeStatus === 'CONFLICT') accountStatus = 'UNKNOWN';
-  else if (isReady && hasDevicePath) accountStatus = 'REGISTERED_ON_DEVICE';
-  else if (isReady) accountStatus = 'READY';
-  else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
-  else if (smsOptionMissing || (hasNoSmsRoute && !isPartial && registrationStatus !== 'NOT_REGISTERED')) accountStatus = 'NO_ROUTES';
+  let description = (parsed && parsed.description) || '';
+  if (isBanned) {
+    accountStatus = 'BANNED';
+    description = description || 'Nomor dibatasi / banned';
+  } else if (isCloneBlocked) {
+    accountStatus = 'CLONE_BLOCK';
+    description = description || 'Diblokir karena APK tidak resmi / clone';
+  } else if (isSecurityBlock) {
+    accountStatus = 'SECURITY_BLOCK';
+    description = description || 'Demi keamanan: tidak dapat masuk saat ini';
+  } else if (isCooldown) {
+    accountStatus = 'IN_COOLDOWN';
+    description = description || ('Cooldown SMS · ' + (channels.sms.uiTimer || '0s'));
+  } else if (isReady) {
+    accountStatus = hasDevicePath ? 'REGISTERED_ON_DEVICE' : 'READY';
+    description = description || (hasDevicePath ? 'Siap diverifikasi · perangkat terdaftar' : 'Siap diverifikasi');
+  } else if (existNoRoutes) {
+    accountStatus = 'NO_ROUTES';
+    description = description || 'Jalur SMS tidak tersedia';
+  }
 
-  // Confidence reflects account-response evidence only, never proxy geography
-  // or several correlated hints from the same response.
-  let confidence = 0.55;
-  if (isBanned && patternHints.includes('HARD_BAN')) confidence = 0.96;
-  else if (isBanned) confidence = 0.9;
-  else if (isCloneBlocked || isSecurityBlock) confidence = 0.88;
-  else if (effectiveCooldown && hasLiveSms) confidence = 0.93;
-  else if (isReady && smsAvailable === true) confidence = 0.86;
-  else if (isNotRegistered) confidence = 0.9;
-  else if (smsOptionMissing || routeStatus === 'NO_ROUTES') confidence = 0.82;
+  const maskedEmail = existResponse.email || codeResponse.email || (parsed && parsed.maskedEmail) || null;
+  const hasPassword = Boolean(
+    Number(existResponse.password_eligible || codeResponse.password_eligible || 0) === 1 ||
+    existResponse.security_code_set || codeResponse.security_code_set
+  );
+  const hasPasskey = Boolean(
+    existResponse.passkey_auth_challenge || existResponse.passkey_credential ||
+    codeResponse.passkey_auth_challenge || codeResponse.passkey_credential
+  );
+  const recommendedMethods = existResponse.recommended_method || codeResponse.recommended_method || [];
+  const fallbackMethods = existResponse.fallback_methods || codeResponse.fallback_methods || [];
+  const highRereg = Boolean(existResponse.high_sms_rereg_user || codeResponse.high_sms_rereg_user);
+  const wipeType = existResponse.wipe_type || codeResponse.wipe_type || null;
+  const wipeWait = Math.max(num(existResponse.wipe_wait), num(codeResponse.wipe_wait));
+  const flashType = existResponse.flash_type ?? codeResponse.flash_type ?? null;
+  const qualityScore = computeQualityScore({
+    isReady, isBanned, isCloneBlocked, isSecurityBlock, isCooldown,
+    hasDevicePath, maskedEmail, hasPassword, highRereg, existNoRoutes
+  });
 
-  if (meta && meta.partial) confidence = Math.max(0.4, confidence - 0.08);
-  if (meta && meta.existOnly) confidence = Math.min(confidence, 0.88);
+  const confidence = isBanned || isReady || isCooldown ? 0.94 : (existAnswered ? 0.5 : 0.3);
 
-  const ordered = [channels.sms, channels.voice, channels.flash, channels.email].filter((t) => t && t.rawSeconds > 0);
-  const primary = (hasLiveSms ? channels.sms : null) || ordered[0] || buildChannel(0);
-  const existClear = Boolean(meta && meta.existOnly && (isReady || (effectiveCooldown && hasLiveSms) || isBanned || isCloneBlocked) && confidence >= EXIST_CLEAR_CONFIDENCE);
-  const needsRecheck = Boolean(!existClear && (meta && meta.existOnly) && confidence < EXIST_CLEAR_CONFIDENCE);
-
-  let secondaryPath = null;
-  let secondarySeconds = 0;
-  if (hasDevicePathAvailable) {
-    secondaryPath = 'device';
-  } else if (hasLiveSms) {
-    secondaryPath = 'cooldown';
-    secondarySeconds = liveSmsWait;
-  } else if (isReady || hasOpenPath) {
-    secondaryPath = 'ready';
+  const rawDigits = String(payloads.rawNumber || '').replace(/\D/g, '');
+  const safeFmt = rawDigits ? ('+' + rawDigits) : String(payloads.rawNumber || '');
+  let formatted = normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone);
+  const shown = String(formatted || '').replace(/\D/g, '');
+  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) {
+    formatted = safeFmt;
   }
 
   return {
-    formattedNumber: normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone),
-    region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country)) || null,
-    accountStatus, registrationStatus, routeStatus, deviceStatus: deviceSignal.status,
-    isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
-    anyCooldown: effectiveCooldown, description, deviceName: deviceSignal.deviceName, waOldEligible: Boolean(timers.wa_old_eligible),
-    channels, primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
-    proxyInfo: proxyMode + ' · ' + sessionTag, proxyTag: sessionTag, proxyCountry: countryIso2,
-    confidence, existClear, needsRecheck, decisionReasons: reasons, patternHints,
-    softFallback: false, error: false, partialResponse: Boolean(meta && meta.partial),
-    secondaryPath: secondaryPath,
-    secondarySeconds: secondarySeconds
+    formattedNumber: formatted || safeFmt,
+    region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country || payloads.phoneInfo.iso)) || null,
+    accountStatus,
+    isBanned,
+    isCloneBlocked,
+    isSecurityBlock,
+    isReady: isReady && !isCloneBlocked && !isSecurityBlock && !isBanned,
+    smsAvailable: (isReady || isCooldown) && !isBanned,
+    smsOptionMissing: existNoRoutes,
+    anyCooldown: isCooldown && !isBanned && !isCloneBlocked && !isSecurityBlock,
+    description,
+    deviceName: timers.device_name || null,
+    waOldEligible: hasDevicePath,
+    channels,
+    primaryTimer: { rawSeconds: channels.sms.rawSeconds, uiTimer: channels.sms.uiTimer, humanTime: channels.sms.humanTime },
+    proxyInfo: String(proxyMode || '') + ' · ' + String(sessionTag || ''),
+    proxyTag: sessionTag,
+    proxyCountry: countryIso2,
+    confidence,
+    existClear: isReady || isCooldown || isBanned || isCloneBlocked || isSecurityBlock,
+    needsRecheck: accountStatus === 'UNKNOWN',
+    decisionReasons: [],
+    patternHints,
+    softFallback: false,
+    error: false,
+    partialResponse: Boolean(meta && meta.partial),
+    secondaryPath: isCooldown ? 'cooldown' : (hasDevicePath ? 'device' : (isReady ? 'ready' : null)),
+    secondarySeconds: smsSeconds,
+    engineState: (parsed && parsed.state) || null,
+    maskedEmail,
+    hasPassword,
+    hasPasskey,
+    recommendedMethods: Array.isArray(recommendedMethods) ? recommendedMethods : [],
+    fallbackMethods: Array.isArray(fallbackMethods) ? fallbackMethods : [],
+    highRereg,
+    wipeType,
+    wipeWait,
+    flashType,
+    qualityScore
   };
 }
 
 function mergeConsensus(results) {
   if (!results || !results.length) return softFallback('', {}, null, null);
-  const score = { ready: 0, cooldown: 0, clone: 0, security: 0, ban: 0, sms: 0, notRegistered: 0, noRoutes: 0 };
+  const score = { ready: 0, cooldown: 0, clone: 0, ban: 0, sms: 0 };
   for (const r of results) {
-    const weight = Number(r.confidence) || 0.5;
-    if (r.isBanned === true || r.accountStatus === 'BANNED') score.ban += weight;
-    else if (r.isSecurityBlock === true || r.accountStatus === 'SECURITY_BLOCK') score.security += weight;
-    else if (r.isCloneBlocked === true || r.accountStatus === 'CLONE_BLOCKED') score.clone += weight;
-    else if (r.registrationStatus === 'NOT_REGISTERED' || r.accountStatus === 'NOT_REGISTERED') score.notRegistered += weight;
-    else if (r.routeStatus === 'NO_ROUTES' || r.accountStatus === 'NO_ROUTES') score.noRoutes += weight;
-    else if (r.anyCooldown) score.cooldown += weight;
-    else if (r.smsOptionMissing) score.sms += weight;
-    else if (r.isReady) score.ready += weight;
-    else score.cooldown += weight * 0.5;
+    const w = Number(r.confidence) || 0.5;
+    if (r.isBanned) score.ban += w;
+    else if (r.isCloneBlocked || r.isSecurityBlock) score.clone += w;
+    else if (r.anyCooldown) score.cooldown += w;
+    else if (r.smsOptionMissing) score.sms += w;
+    else if (r.isReady) score.ready += w;
+    else score.cooldown += w * 0.5;
   }
-  let best = 'cooldown';
-  let bestVal = -1;
-  for (const key of Object.keys(score)) {
-    if (score[key] > bestVal) { bestVal = score[key]; best = key; }
+  let best = 'cooldown'; let bestVal = -1;
+  for (const k of Object.keys(score)) {
+    if (score[k] > bestVal) { bestVal = score[k]; best = k; }
   }
   const base = results.filter((r) => {
-    if (best === 'ban') return r.isBanned === true || r.accountStatus === 'BANNED';
-    if (best === 'security') return r.isSecurityBlock === true || r.accountStatus === 'SECURITY_BLOCK';
-    if (best === 'clone') return r.isCloneBlocked === true || r.accountStatus === 'CLONE_BLOCKED';
-    if (best === 'notRegistered') return r.registrationStatus === 'NOT_REGISTERED' || r.accountStatus === 'NOT_REGISTERED';
-    if (best === 'noRoutes') return r.routeStatus === 'NO_ROUTES' || r.accountStatus === 'NO_ROUTES';
+    if (best === 'ban') return r.isBanned;
+    if (best === 'clone') return r.isCloneBlocked || r.isSecurityBlock;
     if (best === 'cooldown') return r.anyCooldown || r.softFallback;
     if (best === 'sms') return r.smsOptionMissing;
     if (best === 'ready') return r.isReady;
@@ -487,19 +659,26 @@ function mergeConsensus(results) {
   }).sort((a, b) => {
     const ta = (a.primaryTimer && a.primaryTimer.rawSeconds) || 0;
     const tb = (b.primaryTimer && b.primaryTimer.rawSeconds) || 0;
-    if ((tb > 0) !== (ta > 0)) return (tb > 0 ? 1 : 0) - (ta > 0 ? 1 : 0);
+    const stableA = ta > 0 ? 1 : 0;
+    const stableB = tb > 0 ? 1 : 0;
+    if (stableB !== stableA) return stableB - stableA;
     return (b.confidence || 0) - (a.confidence || 0);
   })[0] || results[0];
   return { ...base, confidence: Math.min(0.99, (base.confidence || 0) + 0.05), consensusVotes: bestVal, consensusRounds: results.length, needsRecheck: false };
 }
+
 function softFallback(rawNumber, payloads, countryIso2, lastError) {
+  const rawDigits = String(rawNumber || '').replace(/\D/g, '');
+  const safeFmt = rawDigits ? ('+' + rawDigits) : String(rawNumber || '');
+  let formatted = normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null);
+  const shown = String(formatted || '').replace(/\D/g, '');
+  if (!shown || (rawDigits.length >= 10 && shown.length < rawDigits.length - 1) || (rawDigits.length >= 10 && shown && !rawDigits.endsWith(shown.slice(-8)))) {
+    formatted = safeFmt;
+  }
   return {
-    formattedNumber: normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null),
+    formattedNumber: formatted || safeFmt,
     region: null,
     accountStatus: 'UNKNOWN',
-    registrationStatus: 'UNKNOWN',
-    routeStatus: 'UNKNOWN',
-    deviceStatus: 'UNKNOWN',
     isBanned: false,
     isCloneBlocked: false,
     isSecurityBlock: false,
@@ -523,13 +702,24 @@ function softFallback(rawNumber, payloads, countryIso2, lastError) {
     patternHints: ['SOFT_FALLBACK'],
     error: false,
     secondaryPath: null,
-    secondarySeconds: 0
+    secondarySeconds: 0,
+    maskedEmail: null,
+    hasPassword: false,
+    hasPasskey: false,
+    recommendedMethods: [],
+    fallbackMethods: [],
+    highRereg: false,
+    wipeType: null,
+    wipeWait: 0,
+    flashType: null,
+    qualityScore: 40,
+    engineState: null
   };
 }
 
 async function checkWhatsAppCooldown(rawNumber, options) {
   const opts = options || {};
-  if (!opts.skipSticky && opts.wave !== 'exist') {
+  if (!opts.skipSticky && !opts.forceRefresh && opts.wave !== 'exist') {
     const cached = stickyGet(rawNumber);
     if (cached) {
       return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
@@ -578,7 +768,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
         }
       }
       if (CONSENSUS_ENABLED && attempt < INTERNAL_RETRIES) {
-        await sleep(120 + Math.floor(Math.random() * 180));
+        await sleep(200 + Math.floor(Math.random() * 300));
         continue;
       }
       if (rounds.length >= 2) {
@@ -590,7 +780,11 @@ async function checkWhatsAppCooldown(rawNumber, options) {
     } catch (err) {
       lastError = err;
       if (attempt < INTERNAL_RETRIES) {
-        await sleep(150 + Math.floor(Math.random() * 220));
+        const msg = String((err && err.message) || '');
+        const wait = /too_many|rate|timeout|network|transport|PROXY/i.test(msg)
+          ? (800 * attempt + Math.floor(Math.random() * 700))
+          : (300 + Math.floor(Math.random() * 400));
+        await sleep(wait);
         continue;
       }
     }
