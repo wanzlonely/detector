@@ -4,7 +4,7 @@ Telegram bot built with Telegraf, Node.js 24, Vercel Functions, and Upstash Redi
 
 ## Current supported behavior
 
-- Telegram start screen, account status, leaderboard, referral information, and referral reward redemption.
+- Telegram start screen, account status, leaderboard, referral information, and redemption of previously earned referral balances.
 - Premium package catalog and owner-managed Premium activation.
 - User-to-admin contact flow, owner replies, and broadcast.
 - `/detect` accepts phone-number input for **format validation only**: international normalization, invalid-entry reporting, and duplicate removal.
@@ -39,7 +39,7 @@ npm install
 npm run check
 ```
 
-The check command validates JavaScript syntax and runs phone-input parser tests.
+The check command validates JavaScript syntax, phone-input parsing, and the disabled state of retired network modules.
 
 ## Local polling mode
 
