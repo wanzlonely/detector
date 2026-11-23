@@ -654,7 +654,12 @@ async function processDetection(ctx, numbers, detectOpts) {
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
       groups.restricted.push(num);
     } else if (r.isCloneBlocked || r.accountStatus === 'CLONE_BLOCK') {
-      groups.clone.push(num + ' ' + dev);
+      const cloneSecs = Math.max(0, Number((r.primaryTimer && r.primaryTimer.rawSeconds) || r.secondarySeconds || 0));
+      if (cloneSecs > 0) {
+        groups.clone.push(num + ' ⦂ ' + formatCooldownSmallCaps(cloneSecs) + ' ' + dev);
+      } else {
+        groups.clone.push(num + ' ' + dev);
+      }
     } else if (r.isSecurityBlock || r.accountStatus === 'SECURITY_BLOCK') {
       groups.security.push(num + ' ' + dev);
     } else if (r.accountStatus === 'NO_ROUTES') {
@@ -1035,10 +1040,10 @@ bot.on('text', async (ctx, next) => {
         if (res.maskedEmail) textResp += '▸ ᴇᴍᴀɪʟ ⦂ <b>' + res.maskedEmail + '</b>\n';
         textResp += '▸ sᴛᴀᴛᴜs ⦂ <b>AKTIF</b>\n';
         textResp += '──────────────────────────────\n';
-        textResp += 'ʙᴜᴋᴀ ᴜʟᴀɴɢ ᴀᴘʟɪᴋᴀsɪ ᴡʜᴀᴛsᴀᴘᴘ → ʟᴀʏᴀʀ ᴠᴇʀɪꜰɪᴋᴀsɪ ɴᴏᴍᴏʀ.\nᴏᴘsɪ ᴇᴍᴀɪʟ sᴇʜᴀʀᴜsɴʏᴀ sᴜᴅᴀʜ ᴍᴜɴᴄᴜʟ.\nᴊɪᴋᴀ ʙᴇʟᴜᴍ, ᴛᴜᴛᴜᴘ ᴀᴘʟɪᴋᴀsɪ sᴇᴘᴇɴᴜʜɴʏᴀ ʟᴀʟᴜ ʙᴜᴋᴀ ʟᴀɢɪ.';
+        textResp += '<blockquote>ʙᴜᴋᴀ ᴜʟᴀɴɢ ᴀᴘʟɪᴋᴀsɪ ᴡʜᴀᴛsᴀᴘᴘ → ʟᴀʏᴀʀ ᴠᴇʀɪꜰɪᴋᴀsɪ ɴᴏᴍᴏʀ.\nᴏᴘsɪ ᴇᴍᴀɪʟ sᴇʜᴀʀᴜsɴʏᴀ sᴜᴅᴀʜ ᴍᴜɴᴄᴜʟ.\nᴊɪᴋᴀ ʙᴇʟᴜᴍ, ᴛᴜᴛᴜᴘ ᴀᴘʟɪᴋᴀsɪ sᴇᴘᴇɴᴜʜɴʏᴀ ʟᴀʟᴜ ʙᴜᴋᴀ ʟᴀɢɪ.</blockquote>';
         await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, textResp, { parse_mode: 'HTML' });
       } else {
-        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✦ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ</b>\n──────────────────────────────\nsᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ ᴛɪᴅᴀᴋ ᴍᴇɴʏᴇᴅɪᴀᴋᴀɴ ᴏᴘsɪ ᴏᴛᴘ ᴇᴍᴀɪʟ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.\n\n◈ ᴘᴇɴʏᴇʙᴀʙ ᴜᴍᴜᴍ ⦂\n  ▸ ᴀᴋᴜɴ ʙᴇʟᴜᴍ ᴍᴇɴᴀᴜᴛᴋᴀɴ ᴀʟᴀᴍᴀᴛ ᴇᴍᴀɪʟ.\n  ▸ ᴀᴋᴜɴ ᴛɪᴅᴀᴋ sᴇᴅᴀɴɢ ᴅᴀʟᴀᴍ sᴇsɪ ᴠᴇʀɪꜰɪᴋᴀsɪ.\n──────────────────────────────', { parse_mode: 'HTML' });
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✦ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ</b>\n──────────────────────────────\n<blockquote>sᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ ᴛɪᴅᴀᴋ ᴍᴇɴʏᴇᴅɪᴀᴋᴀɴ ᴏᴘsɪ ᴏᴛᴘ ᴇᴍᴀɪʟ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.\n\n◈ ᴘᴇɴʏᴇʙᴀʙ ᴜᴍᴜᴍ ⦂\n  ▸ ᴀᴋᴜɴ ʙᴇʟᴜᴍ ᴍᴇɴᴀᴜᴛᴋᴀɴ ᴀʟᴀᴍᴀᴛ ᴇᴍᴀɪʟ.\n  ▸ ᴀᴋᴜɴ ᴛɪᴅᴀᴋ sᴇᴅᴀɴɢ ᴅᴀʟᴀᴍ sᴇsɪ ᴠᴇʀɪꜰɪᴋᴀsɪ.</blockquote>\n──────────────────────────────', { parse_mode: 'HTML' });
       }
     } catch (err) {
       console.error('[email verify]', err);
