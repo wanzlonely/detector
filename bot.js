@@ -28,7 +28,7 @@ async function stopActiveDetection(ctx) {
 bot.use(async (ctx, next) => {
   const messageText = ctx.message && typeof ctx.message.text === 'string' ? ctx.message.text.trim() : '';
   const callbackData = (ctx.callbackQuery && ctx.callbackQuery.data) || '';
-  const navigationText = /^(⌖\s*DETECT|✧\s*BELI\s*PREMIUM|◈\s*STATUS|♛\s*LEADERBOARD|♧\s*REFERRAL|✉︎?\s*HUBUNGI\s*ADMIN|♛\s*OWNER\s*CONSOLE|✚\s*AKTIVASI\s*PREMIUM|▤\s*BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
+  const navigationText = /^(⌖\s*DETECT|✉\s*VERIFIKASI\s*EMAIL|✧\s*BELI\s*PREMIUM|◈\s*STATUS|♛\s*LEADERBOARD|♧\s*REFERRAL|✉︎?\s*HUBUNGI\s*ADMIN|♛\s*OWNER\s*CONSOLE|✚\s*AKTIVASI\s*PREMIUM|▤\s*BROADCAST|\/start(?:@\w+)?(?:\s.*)?|\/store(?:@\w+)?|\/detect(?:@\w+)?|\/admin(?:@\w+)?)$/i.test(messageText);
   const navigationCallback = /^(store:|pkg:|buy:|referral:|contact:(?!reply:))/.test(callbackData);
   if (navigationText || navigationCallback) {
     try {
@@ -37,6 +37,7 @@ bot.use(async (ctx, next) => {
         await Promise.all([
           redis.del('detect:mode:' + ctx.from.id),
           redis.del('contact:state:' + ctx.from.id),
+          redis.del('email:mode:' + ctx.from.id),
           redis.del('owner:action:' + ctx.from.id),
           redis.del('owner:contact:target:' + ctx.from.id)
         ]);
@@ -57,14 +58,14 @@ function styledCallback(text, data, style) {
 }
 
 const USER_KEYBOARD = Markup.keyboard([
-  ['⌖ DETECT'],
+  ['⌖ DETECT', '✉ VERIFIKASI EMAIL'],
   ['✧ BELI PREMIUM', '◈ STATUS'],
   ['♛ LEADERBOARD', '♧ REFERRAL'],
   ['✉︎ HUBUNGI ADMIN']
 ]).resize().placeholder('Pilih menu…');
 
 const OWNER_KEYBOARD = Markup.keyboard([
-  ['⌖ DETECT'],
+  ['⌖ DETECT', '✉ VERIFIKASI EMAIL'],
   ['✧ BELI PREMIUM', '◈ STATUS'],
   ['♛ LEADERBOARD', '♧ REFERRAL'],
   ['✉︎ HUBUNGI ADMIN'],
@@ -94,6 +95,7 @@ async function handleCancel(ctx) {
     await Promise.all([
       redis.del('detect:mode:' + uid),
       redis.del('contact:state:' + uid),
+      redis.del('email:mode:' + uid),
       redis.del('owner:action:' + uid),
       redis.del('owner:contact:target:' + uid)
     ]);
@@ -106,8 +108,6 @@ async function handleCancel(ctx) {
 bot.command('cancel', handleCancel);
 bot.hears(/^\/?cancel$/i, handleCancel);
 bot.hears(/^batal$/i, handleCancel);
-
-bot.use((ctx, next) => next());
 
 async function getEffectiveUser(ctx) {
   const user = await getOrCreateUser(ctx.from);
@@ -324,6 +324,13 @@ bot.action('detect:cancel_prompt', async (ctx) => {
   return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 });
 
+async function startEmailVerify(ctx) {
+  await redis.set('email:mode:' + ctx.from.id, 'waiting_number', { ex: 300 });
+  return ctx.reply('✉ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴠɪᴀ ᴇᴍᴀɪʟ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ᴜɴᴛᴜᴋ ᴍᴇᴍᴜɴᴄᴜʟᴋᴀɴ ᴏᴘsɪ ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ.\n\n<blockquote>sɪsᴛᴇᴍ ᴀᴋᴀɴ ᴍᴇɴɢɪʀɪᴍ ᴘᴇʀᴍɪɴᴛᴀᴀɴ ʀᴇᴀʟ-ᴛɪᴍᴇ ᴋᴇ sᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ ᴜɴᴛᴜᴋ ᴍᴇɴɢᴇᴄᴇᴋ ᴊᴀʟᴜʀ ᴇᴍᴀɪʟ.</blockquote>', { parse_mode: 'HTML' });
+}
+bot.hears('✉ VERIFIKASI EMAIL', startEmailVerify);
+bot.command('email', startEmailVerify);
+
 bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
   await ctx.answerCbQuery('Memperbarui status real-time…').catch(() => {});
   const userId = ctx.from && ctx.from.id;
@@ -365,9 +372,6 @@ bot.action('detect:info', async (ctx) => {
     '⊘ ɴᴏ ʀᴏᴜᴛᴇs',
     '  └ ᴊᴀʟᴜʀ ᴏᴛᴘ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.',
     '',
-    '✉ ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ',
-    '  └ ᴋʟɪᴋ ᴛᴏᴍʙᴏʟ ᴇᴍᴀɪʟ ᴜɴᴛᴜᴋ ᴍᴇʟɪʜᴀᴛ ᴇᴍᴀɪʟ ʏᴀɴɢ ᴛᴇʀsɪᴍᴘᴀɴ.',
-    '',
     '──────────────────────────────',
     '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ  ⦂ ᴋᴏᴅᴇ ᴍᴀsᴜᴋ ᴋᴇ ᴀᴘʟɪᴋᴀsɪ ᴡᴀ ʟᴀᴍᴀ.',
     '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʙɪsᴀ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴛᴇʟᴇᴘᴏɴ.',
@@ -405,79 +409,6 @@ bot.action(/^detect:export_detail:(.+)$/, async (ctx) => {
   }
 });
 
-bot.action(/^detect:email:(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery('Memuat data email…').catch(() => {});
-  const jobId = ctx.match[1];
-  const userId = ctx.from && ctx.from.id;
-  const resultKey = 'detect:results:' + userId + ':' + jobId;
-  let payload = null;
-  try {
-    const raw = await redis.get(resultKey);
-    payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  } catch (_) {}
-
-  if (!payload || !payload.detailMap) {
-    return ctx.reply('✕ <b>ᴅᴀᴛᴀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.</blockquote>', { parse_mode: 'HTML' });
-  }
-
-  const entries = Object.entries(payload.detailMap).filter(([_, r]) => r && r.maskedEmail);
-  if (!entries.length) {
-    return ctx.reply('✦ <b>ᴛɪᴅᴀᴋ ᴀᴅᴀ ᴇᴍᴀɪʟ ᴛᴇʀsɪᴍᴘᴀɴ</b>\n\n<blockquote>ɴᴏᴍᴏʀ-ɴᴏᴍᴏʀ ᴘᴀᴅᴀ ʜᴀsɪʟ ɪɴɪ ᴛɪᴅᴀᴋ ᴍᴇᴍɪʟɪᴋɪ ᴊᴀʟᴜʀ ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ ʏᴀɴɢ ᴀᴋᴛɪꜰ.</blockquote>', { parse_mode: 'HTML' });
-  }
-
-  const lines = [];
-  lines.push('✉ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴠɪᴀ ᴇᴍᴀɪʟ</b>');
-  lines.push('──────────────────────');
-  lines.push('ᴛᴏᴛᴀʟ ⦂ <b>' + entries.length + '</b> ɴᴏᴍᴏʀ');
-  lines.push('');
-  entries.forEach(([num, r], i) => {
-    const st = String(r.accountStatus || 'UNKNOWN');
-    const dot = st === 'READY' || st === 'REGISTERED_ON_DEVICE' ? '✧'
-      : st === 'IN_COOLDOWN' ? '◐'
-      : st === 'BANNED' ? '✕'
-      : '·';
-    lines.push((i + 1) + '. ' + dot + ' <code>' + escapeHtml(num) + '</code>');
-    lines.push('   └ <b>' + escapeHtml(String(r.maskedEmail)) + '</b>');
-  });
-  lines.push('──────────────────────');
-  lines.push('ⓘ Email tersamarkan sesuai respons WhatsApp. Salin manual ke aplikasi WhatsApp untuk verifikasi.');
-
-  return ctx.reply(lines.join('\n'), {
-    parse_mode: 'HTML',
-    ...Markup.inlineKeyboard([
-      [styledCallback('⇩ EXPORT EMAIL (.txt)', 'detect:email_export:' + jobId, 'success')]
-    ])
-  }).catch(() => {});
-});
-
-bot.action(/^detect:email_export:(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery('Menyiapkan file…').catch(() => {});
-  const jobId = ctx.match[1];
-  const userId = ctx.from && ctx.from.id;
-  const resultKey = 'detect:results:' + userId + ':' + jobId;
-  let payload = null;
-  try {
-    const raw = await redis.get(resultKey);
-    payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  } catch (_) {}
-  if (!payload || !payload.detailMap) {
-    return ctx.reply('✕ ᴛɪᴅᴀᴋ ᴀᴅᴀ ᴅᴀᴛᴀ.', { parse_mode: 'HTML' });
-  }
-  const entries = Object.entries(payload.detailMap).filter(([_, r]) => r && r.maskedEmail);
-  if (!entries.length) {
-    return ctx.reply('✕ ᴛɪᴅᴀᴋ ᴀᴅᴀ ᴇᴍᴀɪʟ.', { parse_mode: 'HTML' });
-  }
-  const txt = entries.map(([n, r], i) => `${i + 1}. ${n} | ${r.accountStatus || '-'} | ${r.maskedEmail}`).join('\n');
-  try {
-    await ctx.replyWithDocument(
-      { source: Buffer.from('VERIFIKASI EMAIL — ' + new Date().toISOString() + '\n\n' + txt, 'utf8'), filename: 'email_verify_' + jobId + '.txt' },
-      { caption: '✉ <b>ᴇxᴘᴏʀᴛ ᴇᴍᴀɪʟ</b>\n▸ ᴛᴏᴛᴀʟ ⦂ <b>' + entries.length + '</b> ɴᴏᴍᴏʀ', parse_mode: 'HTML' }
-    );
-  } catch (_) {
-    return ctx.reply('✕ ɢᴀɢᴀʟ ᴋɪʀɪᴍ ғɪʟᴇ.', { parse_mode: 'HTML' });
-  }
-});
-
 function buildProgressBar(pct) {
   const filled = Math.round(pct / 10);
   return '●'.repeat(filled) + '○'.repeat(10 - filled);
@@ -505,13 +436,13 @@ function toSmallCapsDevice(name) {
   };
   return String(name).toLowerCase().replace(/[a-z]/g, (ch) => map[ch] || ch);
 }
+
 function deviceLabel(r) {
   if (r && (r.deviceName || r.waOldEligible)) return '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ';
   return '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ';
 }
 
 const PROGRESS_SPINNERS = ['◐', '◓', '◑', '◒'];
-let progressSpinIdx = 0;
 
 function buildProgressText(processed, total, stageLabel, currentNumber) {
   const safeTotal = total > 0 ? total : 1;
@@ -757,8 +688,6 @@ async function processDetection(ctx, numbers, detectOpts) {
     return (a.secs || 0) - (b.secs || 0);
   });
 
-  const emailCount = Object.values(detailMap).filter(r => r && r.maskedEmail).length;
-
   const lines = [];
   lines.push('✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ');
   lines.push('');
@@ -772,7 +701,6 @@ async function processDetection(ctx, numbers, detectOpts) {
   lines.push('△ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
   lines.push('✕ ʙᴀɴ ⦂ <b>' + groups.restricted.length + '</b>');
   if (groups.noroutes.length) lines.push('⊘ ɴᴏ ʀᴏᴜᴛᴇs ⦂ <b>' + groups.noroutes.length + '</b>');
-  if (emailCount) lines.push('✉ ᴇᴍᴀɪʟ ⦂ <b>' + emailCount + '</b>');
   if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
   lines.push('──────────────────────');
   lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
@@ -811,6 +739,7 @@ async function processDetection(ctx, numbers, detectOpts) {
     lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
     groups.other.forEach((n) => lines.push(n));
   }
+
   try {
     const user = await getEffectiveUser(ctx);
     const checkedCount = results.filter((r) => r && !r.cancelled).length || total;
@@ -835,9 +764,6 @@ async function processDetection(ctx, numbers, detectOpts) {
       styledCallback('ⓘ INFO', 'detect:info', 'primary')
     ]
   ];
-  if (emailCount > 0) {
-    keyboardRows.push([styledCallback('✉ VERIFIKASI EMAIL (' + emailCount + ')', 'detect:email:' + jobId, 'primary')]);
-  }
   if (Object.keys(detailMap).length > 0) {
     keyboardRows.push([styledCallback('⇩ EXPORT DETAIL', 'detect:export_detail:' + jobId, 'success')]);
   }
@@ -970,7 +896,7 @@ bot.action(/^referral:redeem:(quota_3|vip_1|vip_3|vip_7)$/, async (ctx) => {
 
 bot.on('text', async (ctx, next) => {
   const text = (ctx.message && ctx.message.text) || '';
-  if (/^(⌖\s*DETECT|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
+  if (/^(⌖\s*DETECT|✉\s*VERIFIKASI|✧\s*BELI|◈\s*STATUS|♛|♧|✉)/i.test(text)) return next();
 
   if (isOwner(ctx)) {
     const replyTarget = await redis.get('owner:contact:target:' + ctx.from.id);
@@ -1086,6 +1012,38 @@ bot.on('text', async (ctx, next) => {
       console.error('[contact forward]', err && err.message || err);
       return ctx.reply('✕ <b>ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ ᴘᴇsᴀɴ</b>\n\n<blockquote>' + escapeHtml(String(err.message || err).slice(0, 120)) + '</blockquote>', { parse_mode: 'HTML' });
     }
+  }
+
+  const emailMode = await redis.get('email:mode:' + ctx.from.id);
+  if (emailMode === 'waiting_number') {
+    await redis.del('email:mode:' + ctx.from.id);
+    const phones = extractPhoneCandidates(text);
+    if (!phones.length) {
+      return ctx.reply('✦ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴠᴀʟɪᴅ</b>\n\n<blockquote>ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.</blockquote>', { parse_mode: 'HTML' });
+    }
+    
+    const target = phones[0];
+    const loadingMsg = await ctx.reply('⏳ <b>ᴍᴇᴍᴘʀᴏsᴇs ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ...</b>\n\n<blockquote>ᴍᴇɴɢɪʀɪᴍ ᴘᴇʀᴍɪɴᴛᴀᴀɴ ᴋᴇ sᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ sᴇᴄᴀʀᴀ ʀᴇᴀʟ-ᴛɪᴍᴇ.</blockquote>', { parse_mode: 'HTML' });
+    
+    try {
+      const res = await waChecker.triggerEmailVerification(target);
+      if (res.isBanned) {
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✕ <b>ɴᴏᴍᴏʀ ᴅɪʙᴀɴ</b>\n\n<blockquote>ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴇᴍᴜɴᴄᴜʟᴋᴀɴ ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ.</blockquote>', { parse_mode: 'HTML' });
+      } else if (res.maskedEmail || res.emailOtpEligible) {
+        let textResp = '✉ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴠɪᴀ ᴇᴍᴀɪʟ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n──────────────────────\n';
+        textResp += '▸ ɴᴏᴍᴏʀ ⦂ <code>' + target + '</code>\n';
+        if (res.maskedEmail) textResp += '▸ ᴇᴍᴀɪʟ ⦂ <b>' + res.maskedEmail + '</b>\n';
+        textResp += '▸ sᴛᴀᴛᴜs ⦂ <b>AKTIF</b>\n──────────────────────\n';
+        textResp += '<blockquote>sɪʟᴀᴋᴀɴ ʙᴜᴋᴀ ᴀᴘʟɪᴋᴀsɪ ᴡʜᴀᴛsᴀᴘᴘ ᴀɴᴅᴀ ᴜɴᴛᴜᴋ ᴍᴇʟɪʜᴀᴛ ᴏᴘsɪ ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ.</blockquote>';
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, textResp, { parse_mode: 'HTML' });
+      } else {
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✦ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ</b>\n\n<blockquote>sɪsᴛᴇᴍ ᴍᴇɴɢɪʀɪᴍ ᴘᴇʀᴍɪɴᴛᴀᴀɴ, ɴᴀᴍᴜɴ sᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ ᴛɪᴅᴀᴋ ᴍᴇɴɢᴇᴍʙᴀʟɪᴋᴀɴ ᴏᴘsɪ ᴇᴍᴀɪʟ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.</blockquote>', { parse_mode: 'HTML' });
+      }
+    } catch (err) {
+      console.error('[email verify]', err);
+      await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✕ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴘʀᴏsᴇs</b>\n\n<blockquote>ᴛᴇʀᴊᴀᴅɪ ᴋᴇsᴀʟᴀʜᴀɴ ᴊᴀʀɪɴɢᴀɴ ᴀᴛᴀᴜ ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴠᴀʟɪᴅ.</blockquote>', { parse_mode: 'HTML' });
+    }
+    return;
   }
 
   const mode = await redis.get('detect:mode:' + ctx.from.id);
