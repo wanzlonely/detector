@@ -185,7 +185,7 @@ bot.start(async (ctx) => {
       try {
         const registered = await registerReferral(ctx.from.id, payload.slice(4));
         if (registered) {
-          await ctx.reply('♧ Kamu bergabung melalui tautan undangan. Selesaikan 3 pemeriksaan pertama agar pengundang memperoleh 5 koin referral.');
+          await ctx.reply('♧ Tautan referral berhasil dicatat. Pengumpulan koin referral baru sedang ditangguhkan; saldo koin lama tetap dapat ditukar.');
         }
       } catch (refErr) {
         console.error('[start/ref]', refErr && refErr.message || refErr);
