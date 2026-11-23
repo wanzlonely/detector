@@ -238,6 +238,46 @@ function renderPaymentMaintenanceCard({ user, pkg }) {
   ].join('\n');
 }
 
+function renderAccountDetail(r) {
+  if (!r) return '✕ ᴅᴀᴛᴀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ';
+  const num = r.formattedNumber || '-';
+  const st = r.accountStatus || '-';
+  const dev = r.deviceName || (r.waOldEligible ? 'ᴛᴇʀᴅᴀғᴛᴀʀ' : '-');
+  const email = r.maskedEmail || '-';
+  const methods = [].concat(r.recommendedMethods || [], r.fallbackMethods || []);
+  const methodStr = methods.length ? methods.slice(0, 6).join(', ') : '-';
+  const ch = r.channels || {};
+  const chLine = (name, c) => {
+    if (!c) return name + ' ⦂ -';
+    const sec = Number(c.rawSeconds || 0);
+    return name + ' ⦂ ' + (sec > 0 ? (c.uiTimer || sec + 's') : 'ᴛᴇʀʙᴜᴋᴀ');
+  };
+  const lines = [
+    '◈ <b>ᴅᴇᴛᴀɪʟ ᴀᴋᴜɴ</b>',
+    '──────────────────────',
+    '▸ ɴᴏᴍᴏʀ ⦂ <code>' + num + '</code>',
+    '▸ sᴛᴀᴛᴜs ⦂ <b>' + st + '</b>',
+    '▸ sᴋᴏʀ ⦂ <b>' + (r.qualityScore != null ? r.qualityScore : '-') + '/100</b>',
+    '▸ ᴘᴇʀᴀɴɢᴋᴀᴛ ⦂ <b>' + escapeHtml(String(dev)) + '</b>',
+    '▸ ᴇᴍᴀɪʟ ⦂ <b>' + escapeHtml(String(email)) + '</b>',
+    '▸ 2ғᴀ ᴘᴀssᴡᴏʀᴅ ⦂ <b>' + (r.hasPassword ? 'ᴀᴋᴛɪғ' : 'ᴛɪᴅᴀᴋ') + '</b>',
+    '▸ ᴘᴀssᴋᴇʏ ⦂ <b>' + (r.hasPasskey ? 'ᴀᴋᴛɪғ' : 'ᴛɪᴅᴀᴋ') + '</b>',
+    '▸ ʜɪɢʜ ʀᴇ-ʀᴇɢ ⦂ <b>' + (r.highRereg ? 'ʏᴀ' : 'ᴛɪᴅᴀᴋ') + '</b>',
+    '──────────────────────',
+    '♛ <b>ᴄʜᴀɴɴᴇʟ ᴏᴛᴘ</b>',
+    '▸ ' + chLine('sᴍs', ch.sms),
+    '▸ ' + chLine('ᴠᴏɪᴄᴇ', ch.voice),
+    '▸ ' + chLine('ғʟᴀsʜ', ch.flash),
+    '▸ ' + chLine('ᴇᴍᴀɪʟ', ch.email),
+    '▸ ' + chLine('ᴡᴀ ᴏʟᴅ', ch.wa_old),
+    '──────────────────────',
+    '▸ ᴍᴇᴛᴏᴅᴇ ⦂ <b>' + escapeHtml(String(methodStr)) + '</b>',
+    r.wipeType ? ('▸ ᴡɪᴘᴇ ⦂ <b>' + escapeHtml(String(r.wipeType)) + '</b>') : null,
+    '▸ ᴋᴇᴛ ⦂ ' + escapeHtml(String(r.description || '-'))
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
 function renderDetectionSummary() { return ''; }
 function renderCooldownCard() { return ''; }
 
@@ -254,5 +294,6 @@ module.exports = {
   renderPackageDetailCard,
   renderPaymentMaintenanceCard,
   renderCooldownCard,
+  renderAccountDetail,
   renderDetectionSummary
 };
