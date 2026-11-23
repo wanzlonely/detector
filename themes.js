@@ -39,9 +39,7 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
   const totalCount = Number(user.total_checks || 0);
   const total = totalCount.toLocaleString('id-ID');
   const access = isOwner ? 'ᴏᴡɴᴇʀ ᴀᴄᴄᴇss' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : 'ғʀᴇᴇ ᴍᴇᴍʙᴇʀ';
-  const quota = isOwner || isVip
-    ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs'
-    : Math.max(0, 3 - Number(user.free_used_today || 0)) + ' / 3 ᴛᴇʀsɪsᴀ';
+  const quota = 'ᴛɪᴅᴀᴋ ᴅɪᴘᴏᴛᴏɴɢ ᴜɴᴛᴜᴋ ᴠᴀʟɪᴅᴀsɪ ғᴏʀᴍᴀᴛ';
   const level = isOwner ? 'ᴏᴡɴᴇʀ' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : totalCount >= 100 ? 'ᴀᴄᴛɪᴠᴇ' : 'ʀᴇɢᴜʟᴀʀ';
 
   return [
@@ -54,7 +52,7 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
     '▸ ɪᴅ ⦂ <code>' + user.telegram_id + '</code>',
     '▸ ᴀᴋsᴇs ⦂ <b>' + access + '</b>',
     '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + escapeHtml(quota) + '</b>',
-    '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + total + ' ᴅᴇᴛᴇᴋsɪ</b>',
+    '▸ ʀɪᴡᴀʏᴀᴛ ⦂ <b>' + total + ' ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ʟᴀᴍᴀ</b>',
     '▸ ʟᴇᴠᴇʟ ⦂ <b>' + level + '</b>',
     '',
     '<blockquote>ᴘɪʟɪʜ ᴍᴇɴᴜ ᴜɴᴛᴜᴋ ᴠᴀʟɪᴅᴀsɪ ғᴏʀᴍᴀᴛ ɴᴏᴍᴏʀ, ᴍᴇʟɪʜᴀᴛ sᴛᴀᴛᴜs ᴀᴋᴜɴ, ᴀᴛᴀᴜ ᴍᴇɴɢᴇʟᴏʟᴀ ʀᴇғᴇʀʀᴀʟ.</blockquote>',
@@ -64,7 +62,6 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
 }
 
 function renderStatus({ user, isVip, isOwner = false, referralStats }) {
-  const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
   const expiry = isOwner ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : isVip ? formatDateWIB(user.vip_until) : 'ʙᴇʟᴜᴍ ʙᴇʀʟᴀɴɢɢᴀɴᴀɴ';
   const refTotal = Number((referralStats && referralStats.total) || 0);
   const refRewarded = Number((referralStats && referralStats.rewarded) || 0);
@@ -78,8 +75,8 @@ function renderStatus({ user, isVip, isOwner = false, referralStats }) {
     '▸ ɴᴀᴍᴀ ⦂ <b>' + escapeHtml(user.full_name || 'Pengguna') + '</b>',
     '▸ ɪᴅ ⦂ <code>' + user.telegram_id + '</code>',
     '▸ ᴀᴋsᴇs ⦂ <b>' + (isOwner ? 'ᴏᴡɴᴇʀ ᴀᴄᴄᴇss' : isVip ? 'ᴘʀᴇᴍɪᴜᴍ' : 'ғʀᴇᴇ ᴍᴇᴍʙᴇʀ') + '</b>',
-    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip || isOwner ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3 ᴛᴇʀsɪsᴀ') + '</b>',
-    '▸ ᴛᴏᴛᴀʟ ⦂ <b>' + Number(user.total_checks || 0).toLocaleString('id-ID') + ' ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>',
+    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>ᴛɪᴅᴀᴋ ᴅɪᴘᴏᴛᴏɴɢ ᴜɴᴛᴜᴋ ᴠᴀʟɪᴅᴀsɪ</b>',
+    '▸ ʀɪᴡᴀʏᴀᴛ ⦂ <b>' + Number(user.total_checks || 0).toLocaleString('id-ID') + ' ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ʟᴀᴍᴀ</b>',
     '▸ ᴍᴀsᴀ ᴀᴋᴛɪғ ⦂ <b>' + escapeHtml(expiry) + '</b>',
     '',
     '♧ <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀᴀʟ</b>',
@@ -108,7 +105,7 @@ function renderLeaderboard(rows, myRank) {
     : '—';
 
   return [
-    '✦ <b>ᴛᴏᴘ 10 ᴅᴇᴛᴇᴄᴛᴏʀ · ᴍᴇᴛᴀᴅᴇᴛᴇᴄᴛ</b>',
+    '✦ <b>ᴛᴏᴘ 10 · ʀɪᴡᴀʏᴀᴛ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ</b>',
     '──────────────────────',
     lines,
     '──────────────────────',
@@ -169,7 +166,7 @@ function renderReferralExchange(stats) {
     '   └ ᴀᴋsᴇs ᴘᴇɴᴜʜ 7 ʜᴀʀɪ',
     '',
     '──────────────────────',
-    '<blockquote>1 ʀᴇғᴇʀʀᴀʟ sᴜᴋsᴇs = 5 ᴋᴏɪɴ (sᴇᴛᴇʟᴀʜ ᴛᴇᴍᴀɴ sᴇʟᴇsᴀɪ 3 ᴄᴇᴋ).</blockquote>',
+    '<blockquote>Perolehan koin referral baru sedang ditangguhkan. Saldo lama tetap dapat ditukar.</blockquote>',
     'ᴘɪʟɪʜ ᴘᴀᴋᴇᴛ ᴅɪ ʙᴀᴡᴀʜ ᴜɴᴛᴜᴋ ᴍᴇɴᴜᴋᴀʀ.'
   ].join('\n');
 }
