@@ -174,13 +174,21 @@ function resolveCountryIso2(phoneInfo) {
 }
 
 function firstExplicitTimer(source, keys) {
+  const values = [];
+  let hasExplicitZero = false;
   for (const key of keys) {
     const value = source && source[key];
     if (value === undefined || value === null || value === '') continue;
     const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed >= 0) return Math.floor(parsed);
+    if (!Number.isFinite(parsed) || parsed < 0) continue;
+    const seconds = Math.floor(parsed);
+    if (seconds > 0) values.push(seconds);
+    else hasExplicitZero = true;
   }
-  return null;
+  // Timer aliases can coexist; a zero in one alias must not hide a
+  // positive remaining wait in another. Use the shortest explicit wait.
+  if (values.length) return Math.min(...values);
+  return hasExplicitZero ? 0 : null;
 }
 
 function extractChannelTimers(existRaw, codeRaw) {
@@ -206,16 +214,12 @@ function extractChannelTimers(existRaw, codeRaw) {
   const isCodeSent = code.status === 'sent' || code.status === 'ok';
   const codeMethod = String(code.method || code.login_method || '').toLowerCase();
   const isWaOldMethod = codeMethod.includes('wa_old');
-  const isWaOldEcho =
-    existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 180 &&
-    (isCodeSent || isWaOldMethod ||
-      (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 5) ||
-      (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 5 && num(code.send_sms_wait) === 0));
-  // SMS cooldown comes only from explicit SMS fields. retry_after is a
-  // generic request/method timer and must never be relabelled as SMS cooldown.
+  // The /code probe is explicitly sent with method=wa_old. Its method timer
+  // must not be mistaken for an SMS timer; SMS cooldown is sourced from /exist.
+  const isWaOldEcho = isWaOldMethod && codeSmsRaw > 0;
   let smsSeconds = 0;
   if (existSmsValue !== null) smsSeconds = existSms;
-  else if (!isWaOldEcho && codeSmsValue !== null) smsSeconds = codeSmsRaw;
+  else if (!isWaOldMethod && codeSmsValue !== null) smsSeconds = codeSmsRaw;
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
   let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
   let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
@@ -284,8 +288,12 @@ function detectCloneSignals(exist, code, parsed) {
 function resolveSmsAvailability(exist, code) {
   const toBool = (v) => {
     if (typeof v === 'boolean') return v;
-    if (v === 1 || v === '1') return true;
-    if (v === 0 || v === '0') return false;
+    if (typeof v === 'number' && (v === 1 || v === 0)) return v === 1;
+    if (typeof v === 'string') {
+      const normalized = v.trim().toLowerCase();
+      if (normalized === '1' || normalized === 'true') return true;
+      if (normalized === '0' || normalized === 'false') return false;
+    }
     return null;
   };
   const eB = toBool(exist.send_sms_eligible);
