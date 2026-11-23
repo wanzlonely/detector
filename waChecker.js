@@ -335,7 +335,6 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     sms: buildChannel(timers.sms), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash),
     email: buildChannel(timers.email), wa_old: buildChannel(timers.wa_old)
   };
-  const engineReady = Boolean(parsed && parsed.isReady);
   const engineCooldown = Boolean(parsed && parsed.isCooldown);
   const engineClone = Boolean(parsed && (parsed.isCloneBlocked || parsed.isUnofficialAppBlock));
   const engineSecurity = Boolean(parsed && parsed.isSecurityBlock);
@@ -343,7 +342,6 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const hasLiveSms = liveSmsWait > 0;
   const hasLiveVoice = timers.voice > 15;
   const hasLiveWait = hasLiveSms || hasLiveVoice || timers.flash > 15 || timers.email > 15;
-  const existSmsOpenEarly = timers.exist_sms === 0 && !timers.exist_no_routes;
   const reasons = [];
   let isBanned = detectBanSignals(existResponse, codeResponse, parsed, patternHints);
   if (isBanned && (hasLiveWait || engineCooldown || patternHints.includes('TEMP_LOCK') || patternHints.includes('RATE_LIMIT'))) {
@@ -371,7 +369,6 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     reasons.push('ban_soft_cleared');
   }
 
-  const existSmsOpen = timers.exist_sms === 0 && !timers.exist_no_routes;
   const hasDevicePath = Boolean(timers.wa_old_eligible || timers.device_name || engineState === 'REGISTERED_ON_DEVICE');
 
   // Only an explicit SMS timer creates the SMS cooldown category. Voice,
@@ -415,7 +412,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (effectiveCooldown) {
     const ch = channels.sms;
     const t = (ch && (ch.humanTime || ch.uiTimer)) || 'aktif';
-    description = t.startsWith('Coba lagi') ? ('Cooldown SMS · ' + t) : ('Cooldown SMS · ' + t);
+    description = 'Cooldown SMS · ' + t;
   } else if (isReady) {
     description = hasDevicePath && timers.device_name
       ? 'SMS siap · perangkat terdaftar di ' + timers.device_name
@@ -425,7 +422,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   } else if (timers.is_code_sent) {
     description = 'Respons menunjukkan proses verifikasi berjalan; kesiapan SMS baru belum terkonfirmasi.';
   } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
-  else if (!description) description = 'Status SMS belum dapat dipastikan dari respons yang tersedia.';
+  else description = 'Status SMS belum dapat dipastikan dari respons yang tersedia.';
 
   let accountStatus = 'UNKNOWN';
   if (isBanned) accountStatus = 'BANNED';
