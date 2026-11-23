@@ -66,6 +66,9 @@ function renderDashboard({ user, isVip, isOwner = false, brandName }) {
 function renderStatus({ user, isVip, isOwner = false, referralStats }) {
   const remaining = Math.max(0, 3 - Number(user.free_used_today || 0));
   const expiry = isOwner ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : isVip ? formatDateWIB(user.vip_until) : 'ʙᴇʟᴜᴍ ʙᴇʀʟᴀɴɢɢᴀɴᴀɴ';
+  const refTotal = Number((referralStats && referralStats.total) || 0);
+  const refRewarded = Number((referralStats && referralStats.rewarded) || 0);
+  const refCoins = Number((referralStats && referralStats.coins) || 0);
 
   return [
     '◈ <b>ʀɪɴɢᴋᴀsᴀɴ sᴛᴀᴛᴜs ᴀᴋᴜɴ</b> ◈',
@@ -80,8 +83,9 @@ function renderStatus({ user, isVip, isOwner = false, referralStats }) {
     '▸ ᴍᴀsᴀ ᴀᴋᴛɪғ ⦂ <b>' + escapeHtml(expiry) + '</b>',
     '',
     '♧ <b>ᴘʀᴏɢʀᴀᴍ ʀᴇғᴇʀᴀʟ</b>',
-    '▸ ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ⦂ <b>' + Number((referralStats && referralStats.total) || 0).toLocaleString('id-ID') + '</b>',
-    '▸ ʜᴀᴅɪᴀʜ ᴅɪᴛᴇʀɪᴍᴀ ⦂ <b>' + Number((referralStats && referralStats.rewarded) || 0) + ' ʜᴀʀɪ ᴘʀᴇᴍɪᴜᴍ</b>',
+    '▸ ᴛᴇᴍᴀɴ ʙᴇʀɢᴀʙᴜɴɢ ⦂ <b>' + refTotal.toLocaleString('id-ID') + '</b>',
+    '▸ ʀᴇғᴇʀʀᴀʟ ʙᴇʀʜᴀsɪʟ ⦂ <b>' + refRewarded.toLocaleString('id-ID') + '</b>',
+    '▸ ᴋᴏɪɴ ᴛᴇʀsɪsᴀ ⦂ <b>' + refCoins.toLocaleString('id-ID') + '</b>',
     '',
     '◈ sɪsᴛᴇᴍ ᴀᴋᴛɪꜰ'
   ].join('\n');
@@ -355,11 +359,14 @@ function renderExportDetail(detailMap) {
   out += '       META DETECT - EXPORT DETAIL      \n';
   out += '▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n\n';
 
+  const emailCount = Object.values(detailMap).filter(r => r && r.maskedEmail).length;
+
   out += `Total Nomor : ${keys.length}\n`;
   out += `✧ Siap      : ${groups.ready.length}\n`;
   out += `◐ Cooldown  : ${groups.cooldown.length}\n`;
   out += `△ Clone     : ${groups.clone.length}\n`;
   out += `✕ Banned    : ${groups.banned.length}\n`;
+  if (emailCount) out += `✉ Email     : ${emailCount}\n`;
   if (groups.other.length) out += `· Lainnya   : ${groups.other.length}\n`;
   out += '\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n';
 
@@ -432,8 +439,43 @@ function renderExportDetail(detailMap) {
   return out;
 }
 
-function renderDetectionSummary() { return ''; }
-function renderCooldownCard() { return ''; }
+function renderDetectionSummary({ groups, total, emailCount } = {}) {
+  const g = groups || {};
+  const lines = [];
+  lines.push('✦ <b>ʀɪɴɢᴋᴀsᴀɴ ᴅᴇᴛᴇᴋsɪ</b>');
+  lines.push('──────────────────────');
+  if (total != null) lines.push('ᴛᴏᴛᴀʟ ⦂ <b>' + Number(total) + '</b> ɴᴏᴍᴏʀ');
+  lines.push('✧ sɪᴀᴘ ⦂ <b>' + ((g.ready && g.ready.length) || 0) + '</b>');
+  lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + ((g.cooldown && g.cooldown.length) || 0) + '</b>');
+  lines.push('◈ sᴇᴄᴜʀɪᴛʏ ⦂ <b>' + ((g.security && g.security.length) || 0) + '</b>');
+  lines.push('△ ᴄʟᴏɴᴇ ⦂ <b>' + ((g.clone && g.clone.length) || 0) + '</b>');
+  lines.push('✕ ʙᴀɴ ⦂ <b>' + ((g.restricted && g.restricted.length) || 0) + '</b>');
+  if (g.noroutes && g.noroutes.length) lines.push('⊘ ɴᴏ ʀᴏᴜᴛᴇs ⦂ <b>' + g.noroutes.length + '</b>');
+  if (emailCount) lines.push('✉ ᴇᴍᴀɪʟ ⦂ <b>' + Number(emailCount) + '</b>');
+  if (g.other && g.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + g.other.length + '</b>');
+  return lines.join('\n');
+}
+
+function renderCooldownCard({ number, channel, seconds } = {}) {
+  if (!number) return '';
+  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const parts = [];
+  if (h) parts.push(h + 'ᴊ');
+  if (m) parts.push(m + 'ᴍ');
+  if (s || !parts.length) parts.push(s + 'ᴅ');
+  return [
+    '◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>',
+    '──────────────────────',
+    '▸ ɴᴏᴍᴏʀ ⦂ <code>' + escapeHtml(String(number)) + '</code>',
+    '▸ ᴄʜᴀɴɴᴇʟ ⦂ <b>' + escapeHtml(String(channel || 'sᴍs')) + '</b>',
+    '▸ ᴛɪᴍᴇʀ ⦂ <b>' + parts.join(' ') + '</b>',
+    '──────────────────────',
+    'ⓘ ᴛᴜɴɢɢᴜ sᴇsᴜᴀɪ ᴛɪᴍᴇʀ ᴜɴᴛᴜᴋ ᴍᴇɴɢɪʀɪᴍ ᴋᴏᴅᴇ ʙᴀʀᴜ.'
+  ].join('\n');
+}
 
 module.exports = {
   escapeHtml,
