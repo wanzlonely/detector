@@ -829,38 +829,74 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       return { ...cached, fromSticky: true, decisionReasons: (cached.decisionReasons || []).concat(['sticky_cache']) };
     }
   }
+
   const payloads = await WADetector.buildDualPayloads(String(rawNumber));
   if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid untuk diperiksa.');
   payloads.rawNumber = String(rawNumber);
   const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
   const headers = buildHeaders(payloads.userAgent, countryIso2);
-  if (opts.wave === 'exist') {
+
+  if (opts.forceRefresh || opts.wave === 'exist') {
     try {
       const probe = await runExistOnlyProbe(payloads, headers, countryIso2);
-      return classifyFromResponses(payloads, probe.existText, null, probe.proxyMode, probe.sessionTag, countryIso2, { partial: true, existOnly: true });
+      const result = classifyFromResponses(
+        payloads,
+        probe.existText,
+        null,
+        probe.proxyMode,
+        probe.sessionTag,
+        countryIso2,
+        { partial: true, existOnly: true }
+      );
+      return {
+        ...result,
+        probeMode: 'exist_only_refresh',
+        consensusRounds: 1,
+        decisionReasons: (result.decisionReasons || []).concat(['exist_only_no_code'])
+      };
     } catch (err) {
       return softFallback(rawNumber, payloads, countryIso2, err);
     }
   }
+
   if (!(opts.wave === 'full' || opts.wave === 'dual')) {
     try {
       const existProbe = await runExistOnlyProbe(payloads, headers, countryIso2);
-      const existResult = classifyFromResponses(payloads, existProbe.existText, null, existProbe.proxyMode, existProbe.sessionTag, countryIso2, { partial: true, existOnly: true });
-      if (existResult.existClear && !existResult.needsRecheck && (existResult.isBanned || existResult.isCloneBlocked || existResult.isSecurityBlock || existResult.anyCooldown || existResult.isReady)) {
-        if (!(opts.forceRefresh && existResult.isReady && !existResult.anyCooldown)) {
-          const outClear = { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
-          if (!opts.forceRefresh) stickySet(rawNumber, outClear);
-          return outClear;
-        }
+      const existResult = classifyFromResponses(
+        payloads,
+        existProbe.existText,
+        null,
+        existProbe.proxyMode,
+        existProbe.sessionTag,
+        countryIso2,
+        { partial: true, existOnly: true }
+      );
+      if (
+        existResult.existClear &&
+        !existResult.needsRecheck &&
+        (existResult.isBanned || existResult.isCloneBlocked || existResult.isSecurityBlock || existResult.anyCooldown)
+      ) {
+        const outClear = { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
+        stickySet(rawNumber, outClear);
+        return outClear;
       }
     } catch (_) {}
   }
+
   const rounds = [];
   let lastError = null;
   for (let attempt = 1; attempt <= INTERNAL_RETRIES; attempt++) {
     try {
       const dual = await runDualProbe(payloads, headers, countryIso2);
-      const result = classifyFromResponses(payloads, dual.existText, dual.codeText, dual.proxyMode, dual.sessionTag, countryIso2, { partial: dual.partial, existOnly: false });
+      const result = classifyFromResponses(
+        payloads,
+        dual.existText,
+        dual.codeText,
+        dual.proxyMode,
+        dual.sessionTag,
+        countryIso2,
+        { partial: dual.partial, existOnly: false }
+      );
       rounds.push(result);
       if (!result.needsRecheck && result.accountStatus !== 'UNKNOWN') {
         if (!CONSENSUS_ENABLED || result.confidence >= LOW_CONFIDENCE_THRESHOLD) {
@@ -868,52 +904,11 @@ async function checkWhatsAppCooldown(rawNumber, options) {
             await sleep(100);
             continue;
           }
-          let out = { ...result, probeMode: 'dual', consensusRounds: rounds.length };
-          if (result.deviceName && !opts.skipDeviceReplay) {
-            try {
-              const replayPayloads = await WADetector.buildDualPayloads(String(rawNumber), {
-                method: 'wa_old',
-                deviceName: result.deviceName
-              });
-              if (replayPayloads.success) {
-                replayPayloads.rawNumber = String(rawNumber);
-                const replayHeaders = buildHeaders(replayPayloads.userAgent, countryIso2);
-                const replayDual = await runDualProbe(replayPayloads, replayHeaders, countryIso2);
-                const replayResult = classifyFromResponses(
-                  replayPayloads,
-                  replayDual.existText,
-                  replayDual.codeText,
-                  replayDual.proxyMode,
-                  replayDual.sessionTag,
-                  countryIso2,
-                  { partial: replayDual.partial, existOnly: false }
-                );
-                if (replayResult && !replayResult.needsRecheck && replayResult.accountStatus !== 'UNKNOWN') {
-                  replayResult.deviceName = replayResult.deviceName || result.deviceName;
-                  replayResult.waOldEligible = true;
-                  const existSmsKeep = Number(result.secondarySeconds || 0);
-                  const replaySms = Number(replayResult.secondarySeconds || 0);
-                  if (existSmsKeep > 0 && (replaySms === 0 || Math.abs(existSmsKeep - replaySms) > 45)) {
-                    replayResult.anyCooldown = result.anyCooldown;
-                    replayResult.channels = result.channels;
-                    replayResult.primaryTimer = result.primaryTimer;
-                    replayResult.secondarySeconds = result.secondarySeconds;
-                    replayResult.isReady = result.isReady;
-                    replayResult.accountStatus = result.accountStatus;
-                    replayResult.description = result.description;
-                  }
-                  out = { ...replayResult, probeMode: 'dual_device_replay', consensusRounds: rounds.length + 1, deviceReplayed: true };
-                } else {
-                  out.deviceName = result.deviceName;
-                  out.waOldEligible = true;
-                }
-              }
-            } catch (_) {
-              out.deviceName = result.deviceName;
-              out.waOldEligible = Boolean(result.deviceName || result.waOldEligible);
-            }
+          const out = { ...result, probeMode: 'dual', consensusRounds: rounds.length };
+          if (result.deviceName) {
+            out.waOldEligible = true;
           }
-          if (!opts.forceRefresh) stickySet(rawNumber, out);
+          stickySet(rawNumber, out);
           return out;
         }
       }
@@ -923,7 +918,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       }
       if (rounds.length >= 2) {
         const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
-        if (!opts.forceRefresh) stickySet(rawNumber, mc);
+        stickySet(rawNumber, mc);
         return mc;
       }
       return { ...result, probeMode: 'dual', consensusRounds: rounds.length };
@@ -939,6 +934,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       }
     }
   }
+
   if (rounds.length >= 2) {
     const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
     stickySet(rawNumber, mc);
@@ -953,56 +949,115 @@ async function checkWhatsAppCooldown(rawNumber, options) {
 async function triggerEmailVerification(rawNumber) {
   const methods = ['email', 'email_otp'];
   let lastParsed = {};
-  let lastProbe = null;
+  let sharedPayloads = null;
   let countryIso2 = null;
+  let headers = null;
+
+  sharedPayloads = await WADetector.buildDualPayloads(String(rawNumber), { method: 'email' });
+  if (!sharedPayloads.success) throw new Error(sharedPayloads.error || 'Nomor tidak valid.');
+  countryIso2 = resolveCountryIso2(sharedPayloads.phoneInfo);
+  headers = buildHeaders(sharedPayloads.userAgent, countryIso2);
+
+  let existText = null;
+  try {
+    const existProbe = await runExistOnlyProbe(sharedPayloads, headers, countryIso2);
+    existText = existProbe.existText;
+  } catch (_) {}
+
+  const existObjEarly = safeJson(existText);
+  const earlyEligible = Boolean(
+    Number(existObjEarly.email_otp_eligible || existObjEarly.email_eligible || 0) === 1 ||
+    String(existObjEarly.recommended_method || '').toLowerCase().includes('email') ||
+    (Array.isArray(existObjEarly.recommended_method) && existObjEarly.recommended_method.some((m) => String(m).toLowerCase().includes('email'))) ||
+    extractEmail(existObjEarly, {}, null)
+  );
 
   for (const method of methods) {
     const payloads = await WADetector.buildDualPayloads(String(rawNumber), { method });
     if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid.');
 
     countryIso2 = resolveCountryIso2(payloads.phoneInfo);
-    const headers = buildHeaders(payloads.userAgent, countryIso2);
-    const probe = await runDualProbe(payloads, headers, countryIso2);
-    lastProbe = probe;
+    headers = buildHeaders(payloads.userAgent, countryIso2);
 
-    const existObj = safeJson(probe.existText);
-    const codeObj = safeJson(probe.codeText);
-    const parsed = WADetector.parseDualResponse(payloads.phoneInfo, probe.existText, probe.codeText) || {};
+    let probeExist = existText;
+    let probeCode = null;
+    try {
+      const { data } = await executeWithProxyRotation(async (proxyCtx) => {
+        await checkProxyHealth(proxyCtx.dispatcher);
+        let eText = probeExist;
+        if (!eText) {
+          try {
+            eText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
+          } catch (_) {}
+        }
+        await sleep(40);
+        let cText = null;
+        try {
+          cText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
+        } catch (_) {}
+        if (!eText && !cText) throw new Error('Email probe gagal: jaringan');
+        return { existText: eText, codeText: cText };
+      }, 3, countryIso2);
+      probeExist = data.existText || probeExist;
+      probeCode = data.codeText;
+      if (probeExist) existText = probeExist;
+    } catch (err) {
+      lastParsed = {
+        isBanned: false,
+        maskedEmail: null,
+        emailOtpEligible: false,
+        emailTriggered: false,
+        error: String(err && err.message || err).slice(0, 160)
+      };
+      continue;
+    }
+
+    const existObj = safeJson(probeExist);
+    const codeObj = safeJson(probeCode);
+    const parsed = WADetector.parseDualResponse(payloads.phoneInfo, probeExist, probeCode) || {};
 
     const extracted = extractEmail(existObj, codeObj, parsed);
     const eligibleFlag = Boolean(
+      earlyEligible ||
       parsed.emailOtpEligible ||
       Number(existObj.email_otp_eligible || codeObj.email_otp_eligible || 0) === 1 ||
       Number(existObj.email_eligible || codeObj.email_eligible || 0) === 1 ||
-      String(codeObj.method || '').toLowerCase().includes('email') ||
+      String(codeObj.method || codeObj.login_method || '').toLowerCase().includes('email') ||
       String(existObj.recommended_method || '').toLowerCase().includes('email') ||
       (Array.isArray(existObj.recommended_method) && existObj.recommended_method.some((m) => String(m).toLowerCase().includes('email'))) ||
-      (Array.isArray(codeObj.recommended_method) && codeObj.recommended_method.some((m) => String(m).toLowerCase().includes('email')))
+      (Array.isArray(codeObj.recommended_method) && codeObj.recommended_method.some((m) => String(m).toLowerCase().includes('email'))) ||
+      (Array.isArray(existObj.fallback_methods) && existObj.fallback_methods.some((m) => String(m).toLowerCase().includes('email'))) ||
+      (Array.isArray(codeObj.fallback_methods) && codeObj.fallback_methods.some((m) => String(m).toLowerCase().includes('email')))
     );
 
     const maskedEmail = extracted || parsed.maskedEmail || null;
-    const emailOtpEligible = eligibleFlag || Boolean(maskedEmail);
     const codeSentEmail = (
       (codeObj.status === 'sent' || codeObj.status === 'ok') &&
       String(codeObj.method || codeObj.login_method || '').toLowerCase().includes('email')
+    );
+    const emailWait = Math.max(
+      Number(existObj.email_wait || existObj.email_cooldown || existObj.email_otp_wait || 0),
+      Number(codeObj.email_wait || codeObj.email_cooldown || codeObj.email_otp_wait || 0)
     );
 
     lastParsed = {
       ...parsed,
       maskedEmail,
-      emailOtpEligible: emailOtpEligible || codeSentEmail,
-      emailTriggered: codeSentEmail || emailOtpEligible,
+      emailOtpEligible: eligibleFlag || Boolean(maskedEmail) || codeSentEmail || emailWait > 0,
+      emailTriggered: codeSentEmail || eligibleFlag || Boolean(maskedEmail),
       isBanned: Boolean(parsed.isBanned),
       requestMethod: method,
       rawCodeStatus: codeObj.status || null,
-      rawCodeMethod: codeObj.method || codeObj.login_method || null
+      rawCodeMethod: codeObj.method || codeObj.login_method || null,
+      rawExistReason: existObj.reason || null,
+      emailWaitSeconds: emailWait
     };
 
     if (lastParsed.emailOtpEligible || lastParsed.maskedEmail || codeSentEmail) {
       return lastParsed;
     }
 
-    await sleep(120);
+    await sleep(150);
   }
 
   return lastParsed;
