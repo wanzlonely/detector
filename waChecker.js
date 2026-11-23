@@ -173,18 +173,19 @@ function extractChannelTimers(existRaw, codeRaw) {
   const isCodeSent = code.status === 'sent' || code.status === 'ok';
   const codeMethod = String(code.method || code.login_method || '').toLowerCase();
   const isWaOldMethod = codeMethod.includes('wa_old');
-  // Echo wa_old: exist SMS open tapi code mengembalikan timer pendek dari method wa_old
+  // Echo wa_old: probe method=wa_old sering balikin ~120–300s palsu
+  // Aturan ketat: jika exist SMS open (0), timer code <= 6 menit SELALU dianggap echo
   const isWaOldEcho =
     existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 360 &&
-    (isCodeSent || isWaOldMethod ||
-      (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 15) ||
-      (existVoice > 0 && Math.abs(codeSmsRaw - existVoice) <= 15 && num(code.send_sms_wait) === 0));
-  // SMS CD hanya dari exist.* — code sms_wait sering echo wa_old (2–5 menit) palsu
+    (isCodeSent || isWaOldMethod || true);
+  // SMS CD HANYA dari exist.* (sumber kebenaran UI WhatsApp)
+  // JANGAN pakai code.sms_wait / retry_after dari probe wa_old
   let smsSeconds = 0;
   if (existSms > 0) {
     smsSeconds = existSms;
-  } else if (!isWaOldEcho && codeSmsRaw > 0 && !isWaOldMethod && !isCodeSent) {
-    // code CD hanya dipakai jika BUKAN probe wa_old / status sent
+  }
+  // code SMS hanya jika exist gagal total DAN timer panjang (>10 menit) DAN bukan wa_old
+  if (smsSeconds === 0 && !isWaOldEcho && !isWaOldMethod && !isCodeSent && codeSmsRaw >= 600) {
     smsSeconds = codeSmsRaw;
   }
   // JANGAN pakai existRetry sebagai SMS CD — sering retry_after wa_old (~120–300s)
@@ -438,14 +439,15 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const existSms = Math.max(0, Number(timers.exist_sms) || 0);
   const existAnswered = Boolean(existText && String(existText).trim());
 
-  let smsSeconds = 0;
-  if (existSms > 0) {
-    smsSeconds = existSms;
-  }
-  // Fallback: engine cooldown HANYA jika panjang (>6 menit) dan exist tidak menjawab open
-  // Hindari false 5m dari wa_old echo
+  // Sumber kebenaran SMS CD: HANYA exist.sms_wait / send_sms_wait
+  // Timer 2–5 menit dari probe wa_old = PALSU, diabaikan total
+  let smsSeconds = existSms > 0 ? existSms : 0;
   const engineCd = Math.max(0, Number(parsed && parsed.cooldownSeconds) || 0);
-  if (smsSeconds === 0 && existSms === 0 && engineCd >= 360 && parsed && parsed.isCooldown && !parsed.isReady) {
+  const st = String((parsed && parsed.state) || '').toUpperCase();
+
+  // Engine sudah filter wa_old echo. Jika engine bilang ready & exist SMS 0 → siap
+  // Engine CD hanya dipercaya jika >= 10 menit (bukan echo 125s/300s)
+  if (smsSeconds === 0 && engineCd >= 600 && parsed && parsed.isCooldown && !parsed.isReady) {
     smsSeconds = engineCd;
   }
 
@@ -455,32 +457,45 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
 
   if (!isBanned) {
     if (smsSeconds > 0) {
-      // SMS CD nyata dari exist — sumber kebenaran
+      // CD SMS nyata dari exist
       isCooldown = true;
       isReady = false;
-    } else if (isTempLock && engineCd > 0) {
-      // Temporary lock / rate limit → cooldown, bukan ban
-      isCooldown = true;
-      isReady = false;
-      if (smsSeconds <= 0) smsSeconds = engineCd;
-    } else if (existAnswered && !existNoRoutes) {
-      // exist bilang SMS open (wait=0) → SIAP diverifikasi
+    } else if (parsed && parsed.isReady) {
+      // Engine: OTP ready (sudah buang wa_old echo)
       isReady = true;
       isCooldown = false;
-    } else {
-      // exist tidak jelas — ikut engine dengan hati-hati
-      const st = String((parsed && parsed.state) || '').toUpperCase();
-      if (parsed && parsed.isReady) {
-        isReady = true;
-      } else if (parsed && parsed.isCooldown && engineCd >= 120) {
+    } else if (st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
+      isReady = true;
+      isCooldown = false;
+    } else if (existAnswered && !existNoRoutes) {
+      // exist menjawab & SMS open → SIAP (abaikan code timer palsu)
+      isReady = true;
+      isCooldown = false;
+    } else if (isTempLock && engineCd >= 600) {
+      // Temp lock hanya jika timer panjang nyata
+      isCooldown = true;
+      isReady = false;
+      smsSeconds = engineCd;
+    } else if (st === 'IN_COOLDOWN' || st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN') {
+      // State CD dari engine — tapi buang timer pendek gimmick
+      if (engineCd >= 600) {
         isCooldown = true;
         smsSeconds = engineCd;
-      } else if (st === 'AVAILABLE_READY' || st === 'REGISTERED_ON_DEVICE') {
-        isReady = true;
-      } else if (st === 'IN_COOLDOWN' || st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN') {
+      } else if (parsed && parsed.isCooldown && engineCd > 0 && existSms > 0) {
         isCooldown = true;
-        if (engineCd > 0) smsSeconds = engineCd;
+        smsSeconds = existSms;
+      } else if (parsed && parsed.isReady) {
+        isReady = true;
+      } else {
+        // Timer pendek tanpa exist SMS → anggap siap (bukan CD palsu)
+        isReady = true;
       }
+    } else if (parsed && parsed.isCooldown && existSms > 0) {
+      isCooldown = true;
+      smsSeconds = existSms;
+    } else if (existAnswered) {
+      // Default aman: exist jawab tanpa CD → siap
+      isReady = true;
     }
   }
 
