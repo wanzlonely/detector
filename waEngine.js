@@ -2790,7 +2790,8 @@ var WADetector = (() => {
       return { success: false, error: "Format nomor tidak valid" };
     }
     const opts = options && typeof options === "object" ? options : {};
-    const requestMethod = opts.method === "email" ? "email" : "wa_old";
+    const rawMethod = String(opts.method || "").toLowerCase();
+    const requestMethod = (rawMethod === "email" || rawMethod === "email_otp") ? rawMethod : "wa_old";
     const platform = "smb_ios";
     const version = DEFAULT_WA_BUSINESS_VERSION;
     const userAgent = buildUserAgent(version, platform, "iPhone_15_Pro");
