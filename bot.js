@@ -373,10 +373,7 @@ bot.action('detect:info', async (ctx) => {
   return ctx.reply(infoText, { parse_mode: 'HTML' });
 });
 
-bot.action(/^detect:detail:([^:]+):(\d+)$/, async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  const jobId = ctx.match[1];
-  const digits = ctx.match[2];
+async function showDetailPage(ctx, jobId, page, edit = false) {
   const userId = ctx.from && ctx.from.id;
   const resultKey = 'detect:results:' + userId + ':' + jobId;
   let payload = null;
@@ -387,19 +384,51 @@ bot.action(/^detect:detail:([^:]+):(\d+)$/, async (ctx) => {
   if (!payload || !payload.detailMap) {
     return ctx.reply('✦ ᴅᴀᴛᴀ ᴅᴇᴛᴀɪʟ ᴋᴇᴅᴀʟᴜᴡᴀʀsᴀ. ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.', { parse_mode: 'HTML' });
   }
-  const map = payload.detailMap;
-  let found = null;
-  for (const k of Object.keys(map)) {
-    if (String(k).replace(/\D/g, '') === digits || String(k).endsWith(digits)) {
-      found = map[k];
-      break;
-    }
-  }
-  if (!found) {
-    return ctx.reply('✦ ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ ᴅɪ ʜᴀsɪʟ ɪɴɪ.', { parse_mode: 'HTML' });
-  }
+  const keys = Object.keys(payload.detailMap);
+  if (!keys.length) return ctx.reply('✦ ᴛɪᴅᴀᴋ ᴀᴅᴀ ᴅᴀᴛᴀ ᴅᴇᴛᴀɪʟ.', { parse_mode: 'HTML' });
+
+  page = Math.max(0, Math.min(page, keys.length - 1));
+  const numKey = keys[page];
+  const found = payload.detailMap[numKey];
+
   const text = require('./themes').renderAccountDetail(found);
-  return ctx.reply(text, { parse_mode: 'HTML' });
+
+  const navButtons = [];
+  if (page > 0) navButtons.push(styledCallback('◀ ᴘʀᴇᴠ', 'detect:detail_page:' + jobId + ':' + (page - 1), 'primary'));
+  if (page < keys.length - 1) navButtons.push(styledCallback('ɴᴇxᴛ ▶', 'detect:detail_page:' + jobId + ':' + (page + 1), 'primary'));
+
+  const keyboardRows = [];
+  if (navButtons.length) keyboardRows.push(navButtons);
+  keyboardRows.push([styledCallback('✕ ᴛᴜᴛᴜᴘ', 'detect:detail_close:' + jobId, 'danger')]);
+
+  const keyboard = Markup.inlineKeyboard(keyboardRows);
+  const pageIndicator = '\n\n<i>Halaman ' + (page + 1) + ' / ' + keys.length + '</i>';
+  const finalText = text + pageIndicator;
+
+  if (edit && ctx.editMessageText) {
+    return ctx.editMessageText(finalText, { parse_mode: 'HTML', ...keyboard }).catch(() => {
+       return ctx.reply(finalText, { parse_mode: 'HTML', ...keyboard });
+    });
+  } else {
+    return ctx.reply(finalText, { parse_mode: 'HTML', ...keyboard });
+  }
+}
+
+bot.action(/^detect:detail_menu:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return showDetailPage(ctx, ctx.match[1], 0, false);
+});
+
+bot.action(/^detect:detail_page:([^:]+):(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  return showDetailPage(ctx, ctx.match[1], parseInt(ctx.match[2], 10), true);
+});
+
+bot.action(/^detect:detail_close:(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery('Ditutup').catch(() => {});
+  if (ctx.editMessageText) {
+    return ctx.editMessageText('✕ <b>ᴅᴇᴛᴀɪʟ ᴅɪᴛᴜᴛᴜᴘ</b>', { parse_mode: 'HTML' }).catch(() => {});
+  }
 });
 
 bot.action(/^detect:export:(.+)$/, async (ctx) => {
@@ -672,7 +701,6 @@ async function processDetection(ctx, numbers, detectOpts) {
     detailMap[num] = r;
 
     const dev = deviceLabel(r);
-    const score = r.qualityScore != null ? (' · ' + r.qualityScore) : '';
 
     if (r.isBanned === true || r.accountStatus === 'BANNED') {
       groups.restricted.push(num);
@@ -683,7 +711,7 @@ async function processDetection(ctx, numbers, detectOpts) {
     } else if (r.accountStatus === 'NO_ROUTES') {
       groups.noroutes.push(num);
     } else if (r.isReady && !r.isBanned) {
-      groups.ready.push({ line: num + ' ' + dev + score, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num, score: r.qualityScore || 0 });
+      groups.ready.push({ line: num + ' ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num, score: r.qualityScore || 0 });
     } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
       let secs = 0;
       if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
@@ -691,15 +719,7 @@ async function processDetection(ctx, numbers, detectOpts) {
       else if (r.secondarySeconds > 0) secs = Number(r.secondarySeconds) || 0;
       if (secs > 0 && secs <= 360 && (Number(r.confidence) || 0) < 0.9 && r.isReady) secs = 0;
       const dur = formatCooldownSmallCaps(secs);
-      let chHint = '';
-      if (r.channels) {
-        const parts = [];
-        if (r.channels.sms && r.channels.sms.rawSeconds > 0) parts.push('sᴍs');
-        if (r.channels.voice && r.channels.voice.rawSeconds > 0) parts.push('ᴠᴏɪᴄᴇ');
-        if (r.channels.flash && r.channels.flash.rawSeconds > 0) parts.push('ғʟᴀsʜ');
-        if (parts.length) chHint = ' · ' + parts.join('/');
-      }
-      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' ' + dev + chHint, secs: secs, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num });
+      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' ' + dev, secs: secs, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num });
     } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
       const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
       groups.other.push(num + note);
@@ -787,14 +807,9 @@ async function processDetection(ctx, numbers, detectOpts) {
   } catch (_) {}
 
   const detailBtns = [];
-  const allNums = Object.keys(detailMap).slice(0, 6);
-  for (let di = 0; di < allNums.length; di += 2) {
-    const row = [];
-    row.push(styledCallback('◈ ' + allNums[di].slice(-6), 'detect:detail:' + jobId + ':' + allNums[di].replace(/\D/g, ''), 'primary'));
-    if (allNums[di + 1]) {
-      row.push(styledCallback('◈ ' + allNums[di + 1].slice(-6), 'detect:detail:' + jobId + ':' + allNums[di + 1].replace(/\D/g, ''), 'primary'));
-    }
-    detailBtns.push(row);
+  const allNumsCount = Object.keys(detailMap).length;
+  if (allNumsCount > 0) {
+    detailBtns.push([styledCallback('◈ DETAIL AKUN (' + allNumsCount + ')', 'detect:detail_menu:' + jobId, 'primary')]);
   }
 
   const keyboardRows = [
