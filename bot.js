@@ -2,16 +2,14 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const {
   redis, getPackagesByTier, getPackageById, getOrCreateUser, isUserVip,
-  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, getUserRank, redeemReferralReward,
-  consumeQuota, addCheckLog, getCachedCheckResult, setCachedCheckResult, qualifyReferral,
-  incrementUserChecks
-} = require('./database');
+  getGlobalStats, activateVip, registerReferral, getReferralStats, getLeaderboard, getUserRank, redeemReferralReward
+} = require('./database');} = require('./database');
 const {
   escapeHtml, formatIDR, formatDateWIB, renderDashboard, renderStoreCatalog,
   renderPackageDetailCard, renderPaymentMaintenanceCard, renderCooldownCard, renderDetectionSummary, renderExportDetail
 } = require('./themes');
-const waChecker = require('./waChecker');
-const checkWhatsAppCooldown = waChecker.checkWhatsAppCooldown;
+
+const { parseDetectionInput } = require('./detectInput');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
@@ -247,73 +245,20 @@ bot.hears('♛ LEADERBOARD', showLeaderboard);
 bot.hears('♧ REFERRAL', showReferral);
 bot.hears('✧ BELI PREMIUM', (ctx) => showStore(ctx, false));
 
-function extractPhoneCandidates(text) {
-  if (!text) return [];
-  const raw = String(text);
-  const phones = [];
-  const seen = new Set();
-
-  function pushDigits(digits) {
-    if (!digits) return;
-    digits = String(digits).replace(/\D/g, '');
-    if (digits.startsWith('00')) digits = digits.slice(2);
-    if (digits.startsWith('08') && digits.length >= 10 && digits.length <= 13) {
-      digits = '62' + digits.slice(1);
-    }
-    if (digits.length < 8 || digits.length > 15) return;
-    if (/^(19|20)\d{2}$/.test(digits)) return;
-    if (seen.has(digits)) return;
-    seen.add(digits);
-    phones.push('+' + digits);
-  }
-
-  const lines = raw.split(/[\n,;]+/).map((l) => l.trim()).filter(Boolean);
-  for (const line of lines) {
-    const m = line.match(/(?:\+|00)?\d[\d\s\-().]{6,18}\d/);
-    if (m) pushDigits(m[0]);
-    else pushDigits(line);
-  }
-
-  if (!phones.length) {
-    const pattern = /(?:\+|00)?\d(?:[\d\-().]{6,18})\d/g;
-    let match;
-    while ((match = pattern.exec(raw)) !== null) {
-      pushDigits(match[0]);
-    }
-  }
-
-  return phones;
-}
-
 async function startDetect(ctx) {
   const user = await getEffectiveUser(ctx);
-  const isVip = isOwner(ctx) || isUserVip(user);
-  const remaining = isVip ? 999 : Math.max(0, 3 - Number(user.free_used_today || 0));
-  if (!isVip && remaining <= 0) {
-    return ctx.reply(
-      '✦ <b>ᴋᴜᴏᴛᴀ ʜᴀʀɪᴀɴ ʜᴀʙɪs</b>\n\n<blockquote>ᴀɴᴅᴀ ᴛᴇʟᴀʜ ᴍᴇɴɢɢᴜɴᴀᴋᴀɴ 3 ᴋᴜᴏᴛᴀ ɢʀᴀᴛɪs ʜᴀʀɪ ɪɴɪ.\nᴜᴘɢʀᴀᴅᴇ ᴋᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ᴛᴀɴᴘᴀ ʙᴀᴛᴀs.</blockquote>',
-      { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]]) }
-    );
-  }
-  await redis.set('detect:mode:' + ctx.from.id, 'waiting_numbers', { ex: 300 });
-  const limitHint = isVip ? 'ᴍᴀᴋsɪᴍᴀʟ 30 ɴᴏᴍᴏʀ / ᴋɪʀɪᴍᴀɴ' : '1 ɴᴏᴍᴏʀ (ғʀᴇᴇ)';
+  const premium = isOwner(ctx) || isUserVip(user);
+  const configuredLimit = Number(user.bulk_limit) || 30;
+  const limit = premium ? Math.max(1, Math.min(30, configuredLimit)) : 1;
+  await redis.set('detect:mode:' + ctx.from.id, String(limit), { ex: 300 });
   return ctx.reply(
-    '⌖ <b>ᴅᴇᴛᴇᴋsɪ ɴᴏᴍᴏʀ ᴡʜᴀᴛsᴀᴘᴘ</b>\n\n' +
-    'ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ʏᴀɴɢ ɪɴɢɪɴ ᴅɪᴘᴇʀɪᴋsᴀ.\n' +
-    '· ᴘɪsᴀʜᴋᴀɴ ᴅᴇɴɢᴀɴ ʙᴀʀɪs ʙᴀʀᴜ ᴀᴛᴀᴜ ᴋᴏᴍᴀ\n' +
-    '· sɪsᴛᴇᴍ ᴏᴛᴏᴍᴀᴛɪs ᴍᴇɴɢᴇᴋsᴛʀᴀᴋ ᴀɴɢᴋᴀ\n\n' +
-    'ᴄᴏɴᴛᴏʜ ⦂\n' +
-    '<code>+6281234567890</code>\n' +
-    '<code>+6281234567890 (Low) · Jul 2024</code>\n\n' +
-    '▸ ᴋᴜᴏᴛᴀ ⦂ <b>' + (isVip ? 'ᴛᴀɴᴘᴀ ʙᴀᴛᴀs' : remaining + ' / 3') + '</b>\n' +
-    '▸ ʟɪᴍɪᴛ ⦂ <b>' + limitHint + '</b>\n\n' +
-    'ᴋʟɪᴋ ᴅɪ ʙᴀᴡᴀʜ ɪɴɪ ᴜɴᴛᴜᴋ ᴍᴇᴍʙᴀᴛᴀʟᴋᴀɴ.',
-    {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [styledCallback('Batal', 'detect:cancel_prompt', 'danger')]
-      ])
-    }
+    '⌖ <b>ᴠᴀʟɪᴅᴀsɪ ɴᴏᴍᴏʀ</b>\n\n' +
+    'Kirim nomor milikmu yang ingin divalidasi, satu nomor per baris atau dipisahkan koma.\n' +
+    'Batas input: <b>' + limit + ' nomor</b> · ' + (premium ? 'Premium' : 'Free') + '\n\n' +
+    'Contoh: <code>+6281234567890</code>\n\n' +
+    '<blockquote>Untuk saat ini bot hanya memvalidasi format, normalisasi, dan duplikasi. Bot tidak memeriksa status akun WhatsApp, tidak mengirim OTP, dan tidak memotong kuota.</blockquote>\n' +
+    'Ketik /cancel untuk membatalkan.',
+    { parse_mode: 'HTML', ...Markup.inlineKeyboard([[styledCallback('BATAL', 'detect:cancel_prompt', 'danger')]]) }
   );
 }
 bot.hears('⌖ DETECT', startDetect);
@@ -321,475 +266,18 @@ bot.command('detect', startDetect);
 bot.action('detect:cancel_prompt', async (ctx) => {
   await ctx.answerCbQuery('Dibatalkan').catch(() => {});
   await redis.del('detect:mode:' + ctx.from.id);
-  return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+  return ctx.reply('✕ <b>ᴠᴀʟɪᴅᴀsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
 });
 
 async function startEmailVerify(ctx) {
-  await redis.set('email:mode:' + ctx.from.id, 'waiting_number', { ex: 300 });
-  return ctx.reply('✉ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴠɪᴀ ᴇᴍᴀɪʟ</b>\n\nᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴛᴀʀɢᴇᴛ ᴜɴᴛᴜᴋ ᴍᴇᴍᴜɴᴄᴜʟᴋᴀɴ ᴏᴘsɪ ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ.\n\n<blockquote>sɪsᴛᴇᴍ ᴀᴋᴀɴ ᴍᴇɴɢɪʀɪᴍ ᴘᴇʀᴍɪɴᴛᴀᴀɴ ʀᴇᴀʟ-ᴛɪᴍᴇ ᴋᴇ sᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ ᴜɴᴛᴜᴋ ᴍᴇɴɢᴇᴄᴇᴋ ᴊᴀʟᴜʀ ᴇᴍᴀɪʟ.</blockquote>', { parse_mode: 'HTML' });
+  return ctx.reply(
+    '✉ <b>ᴠᴇʀɪғɪᴋᴀsɪ ᴇᴍᴀɪʟ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ</b>\n\n' +
+    '<blockquote>Bot tidak dapat memicu atau mengirim kode verifikasi ke nomor. Gunakan proses pemulihan resmi di aplikasi WhatsApp.</blockquote>',
+    { parse_mode: 'HTML' }
+  );
 }
 bot.hears('✉ VERIFIKASI EMAIL', startEmailVerify);
 bot.command('email', startEmailVerify);
-
-bot.action(/^detect:refresh:(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery('Memperbarui status real-time…').catch(() => {});
-  const userId = ctx.from && ctx.from.id;
-  const jobId = ctx.match[1];
-  if (!userId || !jobId) return;
-  const key = 'detect:refresh:' + userId + ':' + jobId;
-  let numbers = null;
-  try {
-    const raw = await redis.get(key);
-    if (raw) numbers = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  } catch (_) {}
-  if (!Array.isArray(numbers) || !numbers.length) {
-    return ctx.reply('✦ <b>ᴅᴀᴛᴀ ʀᴇғʀᴇsʜ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>sɪʟᴀᴋᴀɴ ᴊᴀʟᴀɴᴋᴀɴ ᴅᴇᴛᴇᴋsɪ ʙᴀʀᴜ.</blockquote>', { parse_mode: 'HTML' });
-  }
-  return processDetection(ctx, numbers, { forceRefresh: true });
-});
-
-bot.action('detect:info', async (ctx) => {
-  await ctx.answerCbQuery().catch(() => {});
-  const infoText = [
-    'ⓘ ᴋᴇᴛᴇʀᴀɴɢᴀɴ ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ',
-    '──────────────────────────────',
-    '',
-    '✧ sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ',
-    '  └ ɴᴏᴍᴏʀ ᴀᴍᴀɴ & sɪᴀᴘ ᴛᴇʀɪᴍᴀ ᴋᴏᴅᴇ ᴏᴛᴘ.',
-    '',
-    '◐ ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ',
-    '  └ ᴊᴇᴅᴀ ᴠᴇʀɪꜰɪᴋᴀsɪ sᴍs, ᴛᴜɴɢɢᴜ ᴛɪᴍᴇʀ sᴇʟᴇsᴀɪ.',
-    '',
-    '◎ sᴇᴅᴀɴɢ ᴠᴇʀɪꜰɪᴋᴀsɪ (ᴍɪᴅ-ᴠᴇʀɪꜰʏ)',
-    '  └ ɴᴏᴍᴏʀ ᴅᴀʟᴀᴍ sᴇsɪ ᴠᴇʀɪꜰɪᴋᴀsɪ ᴀᴋᴛɪғ ᴅɪ sᴇʀᴠᴇʀ ᴡᴀ.',
-    '',
-    '◈ sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ',
-    '  └ ᴅɪᴛᴀʜᴀɴ sɪsᴛᴇᴍ ("ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴀsᴜᴋ sᴀᴀᴛ ɪɴɪ").',
-    '',
-    '△ ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ',
-    '  └ ᴡᴀᴊɪʙ ʟᴏɢɪɴ ᴍᴇɴɢɢᴜɴᴀᴋᴀɴ ᴡʜᴀᴛsᴀᴘᴘ ʀᴇsᴍɪ.',
-    '',
-    '✕ ᴅɪʙᴀɴ',
-    '  └ ɴᴏᴍᴏʀ ᴛᴇʀʙʟᴏᴋɪʀ ᴀᴋɪʙᴀᴛ ᴘᴇʟᴀɴɢɢᴀʀᴀɴ.',
-    '',
-    '⊘ ɴᴏ ʀᴏᴜᴛᴇs',
-    '  └ ᴊᴀʟᴜʀ ᴏᴛᴘ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.',
-    '',
-    '──────────────────────────────',
-    '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ · ᴋᴜᴀᴛ  ⦂ ᴊᴇᴊᴀᴋ ᴅᴇᴠɪᴄᴇ ʟᴀᴍᴀ ᴋᴜᴀᴛ ᴅɪ sᴇʀᴠᴇʀ.',
-    '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ · ʟᴇᴍᴀʜ ⦂ ᴇʟɪɢɪʙʟᴇ ᴛᴀɴᴘᴀ ɴᴀᴍᴀ ᴅᴇᴠɪᴄᴇ ᴊᴇʟᴀs.',
-    '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ ⦂ ʙɪsᴀ ʟᴀɴɢsᴜɴɢ ᴘɪʟɪʜ sᴍs / ᴛᴇʟᴇᴘᴏɴ.',
-    '✉ ᴇᴍᴀɪʟ ⦂ ᴀᴋᴜɴ ᴘᴜɴʏᴀ ᴇᴍᴀɪʟ ᴘᴇᴍᴜʟɪʜᴀɴ.',
-    '⚠ ʜɪɢʜ-ʀᴇʀᴇɢ ⦂ ʀɪsɪᴋᴏ ᴅᴀғᴛᴀʀ ᴜʟᴀɴɢ / ᴡɪᴘᴇ ᴛɪɴɢɢɪ.',
-    '🔐 ᴘᴀssᴋᴇʏ / 2ғᴀ / sᴇᴄ-ᴄᴏᴅᴇ ⦂ ɢᴇʀʙᴀɴɢ ᴋᴇᴀᴍᴀɴᴀɴ ᴀᴋᴜɴ.',
-    '──────────────────────────────',
-    '⇩ ᴇxᴘᴏʀᴛ ᴅᴇᴛᴀɪʟ ⦂ ᴜɴᴅᴜʜ sᴇᴍᴜᴀ ʜᴀsɪʟ (.ᴛxᴛ)'
-  ].join('\n');
-  return ctx.reply(infoText, { parse_mode: 'HTML' });
-});
-
-bot.action(/^detect:export_detail:(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery('Menyiapkan file…').catch(() => {});
-  const jobId = ctx.match[1];
-  const userId = ctx.from && ctx.from.id;
-  const resultKey = 'detect:results:' + userId + ':' + jobId;
-  let payload = null;
-  try {
-    const raw = await redis.get(resultKey);
-    payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  } catch (_) {}
-
-  if (!payload || !payload.detailMap || Object.keys(payload.detailMap).length === 0) {
-    return ctx.reply('✕ ᴛɪᴅᴀᴋ ᴀᴅᴀ ᴅᴀᴛᴀ ᴜɴᴛᴜᴋ ᴅɪᴇxᴘᴏʀᴛ.', { parse_mode: 'HTML' });
-  }
-
-  const textContent = renderExportDetail(payload.detailMap);
-  const filename = 'detail_detect_' + jobId + '.txt';
-
-  try {
-    await ctx.replyWithDocument(
-      { source: Buffer.from(textContent, 'utf8'), filename: filename },
-      { caption: '⇩ <b>ᴇxᴘᴏʀᴛ ᴅᴇᴛᴀɪʟ</b>\n▸ ᴊᴜᴍʟᴀʜ ⦂ <b>' + Object.keys(payload.detailMap).length + '</b> ɴᴏᴍᴏʀ', parse_mode: 'HTML' }
-    );
-  } catch (err) {
-    return ctx.reply('✕ ɢᴀɢᴀʟ ᴍᴇɴɢɪʀɪᴍ ғɪʟᴇ ᴅᴇᴛᴀɪʟ.', { parse_mode: 'HTML' });
-  }
-});
-
-function buildProgressBar(pct) {
-  const filled = Math.round(pct / 10);
-  return '●'.repeat(filled) + '○'.repeat(10 - filled);
-}
-
-function formatCooldownSmallCaps(seconds) {
-  const sec = Math.max(0, Math.floor(Number(seconds) || 0));
-  if (sec <= 0) return '0ᴅ';
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  const parts = [];
-  if (h > 0) parts.push(h + 'ᴊ');
-  if (m > 0) parts.push(m + 'ᴍ');
-  if (s > 0 || parts.length === 0) parts.push(s + 'ᴅ');
-  return parts.join(' ');
-}
-
-function toSmallCapsDevice(name) {
-  if (!name) return 'ᴜɴᴋɴᴏᴡɴ';
-  const map = {
-    a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ', j: 'ᴊ',
-    k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'ǫ', r: 'ʀ', s: 's', t: 'ᴛ',
-    u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', x: 'x', y: 'ʏ', z: 'ᴢ'
-  };
-  return String(name).toLowerCase().replace(/[a-z]/g, (ch) => map[ch] || ch);
-}
-
-function deviceLabel(r) {
-  if (r && (r.deviceName || r.waOldEligible)) return '◉ ᴏɴ-ᴅᴇᴠɪᴄᴇ';
-  return '○ ᴏꜰꜰ-ᴅᴇᴠɪᴄᴇ';
-}
-
-const PROGRESS_SPINNERS = ['◐', '◓', '◑', '◒'];
-
-function buildProgressText(processed, total, stageLabel, currentNumber) {
-  const safeTotal = total > 0 ? total : 1;
-  const safeProcessed = Math.min(Math.max(0, processed), safeTotal);
-  const pct = Math.round((safeProcessed / safeTotal) * 100);
-  const isDone = safeProcessed >= safeTotal;
-  const title = isDone
-    ? '✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ'
-    : '◔  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ ʙᴇʀᴊᴀʟᴀɴ';
-  let currentLine;
-  if (isDone) {
-    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ <b>sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ</b>';
-  } else {
-    const spin = PROGRESS_SPINNERS[Math.floor(safeProcessed) % PROGRESS_SPINNERS.length];
-    const num = currentNumber || '-';
-    currentLine = 'sᴀᴀᴛ ɪɴɪ ⦂ ' + spin + ' <code>' + num + '</code>';
-  }
-  return (
-    title + '\n\n' +
-    buildProgressBar(pct) + '  <b>' + pct + '%</b>\n' +
-    'ᴘʀᴏɢʀᴇs ⦂ <b>' + safeProcessed + '</b> / <b>' + safeTotal + '</b> ɴᴏᴍᴏʀ\n' +
-    currentLine + '\n' +
-    '──────────────────────'
-  );
-}
-
-async function processDetection(ctx, numbers, detectOpts) {
-  if (typeof checkWhatsAppCooldown !== 'function') {
-    return ctx.reply('✕ <b>ᴋᴇsᴀʟᴀʜᴀɴ sɪsᴛᴇᴍ</b>\n\n<blockquote>Fungsi detektor tidak ditemukan. Pastikan file waChecker.js sudah benar dan di-restart.</blockquote>', { parse_mode: 'HTML' });
-  }
-  detectOpts = detectOpts || {};
-  const userId = ctx.from.id;
-  const jobId = Date.now().toString(36);
-  await redis.set('detect:active:' + userId, jobId, { ex: 600 });
-  await redis.del('detect:mode:' + userId);
-  const total = numbers.length;
-  const results = new Array(total);
-  let progressMsg;
-  let currentStageLabel = 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
-  let stageProcessed = 0;
-  let stageTotal = total;
-  let currentNumber = '-';
-  const inFlight = new Set();
-  let lastProgressEdit = 0;
-  let progressTimer = null;
-  try {
-    progressMsg = await ctx.reply(buildProgressText(0, stageTotal, currentStageLabel, currentNumber), { parse_mode: 'HTML' });
-  } catch (_) {}
-  function pickCurrentNumber() {
-    if (inFlight.size === 0) return currentNumber || '-';
-    return inFlight.values().next().value || currentNumber || '-';
-  }
-  async function updateProgress(force) {
-    if (!progressMsg) return;
-    const now = Date.now();
-    if (!force && now - lastProgressEdit < 600) {
-      if (!progressTimer) {
-        progressTimer = setTimeout(() => {
-          progressTimer = null;
-          updateProgress(true).catch(() => {});
-        }, 450 - (now - lastProgressEdit));
-      }
-      return;
-    }
-    lastProgressEdit = now;
-    currentNumber = pickCurrentNumber();
-    try {
-      await ctx.telegram.editMessageText(
-        progressMsg.chat.id,
-        progressMsg.message_id,
-        undefined,
-        buildProgressText(stageProcessed, stageTotal, currentStageLabel, currentNumber),
-        { parse_mode: 'HTML' }
-      );
-    } catch (_) {}
-  }
-  function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
-  function preserveNumber(raw, result) {
-    const digits = String(raw || '').replace(/\D/g, '');
-    const fallback = digits ? ('+' + digits) : String(raw || '');
-    if (!result) return fallback;
-    const shown = String(result.formattedNumber || '').replace(/\D/g, '');
-    if (!shown || (digits.length >= 10 && shown.length < digits.length - 1) || (digits.length >= 10 && !digits.endsWith(shown.slice(-8)))) {
-      result.formattedNumber = fallback;
-    } else if (!String(result.formattedNumber || '').startsWith('+') && digits) {
-      result.formattedNumber = '+' + shown;
-    }
-    return result.formattedNumber || fallback;
-  }
-  async function checkOne(raw, waveOpts) {
-    const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
-    if (stop) return { cancelled: true };
-    const digits = String(raw || '').replace(/\D/g, '');
-    const safeNumber = digits ? ('+' + digits) : String(raw || '');
-    const opts = Object.assign({ skipSticky: true, forceRefresh: Boolean(detectOpts.forceRefresh), wave: detectOpts.forceRefresh ? 'exist' : undefined }, waveOpts || {});
-    let last = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      const stop2 = await redis.get('detect:stop:' + userId + ':' + jobId);
-      if (stop2) return { cancelled: true };
-      try {
-        let result = await checkWhatsAppCooldown(raw, opts);
-        if (result && !result.cancelled) {
-          preserveNumber(raw, result);
-          const isNetFail = result.softFallback || result.needsRecheck ||
-            (result.description && /transport|network|too_many|timeout|ECONN|unstable/i.test(String(result.description)));
-          if (isNetFail && attempt < 2) {
-            last = result;
-            await sleep(180 * attempt + Math.floor(Math.random() * 120));
-            continue;
-          }
-          if (result.softFallback && (result.isReady || result.anyCooldown) && !result.isBanned) {
-            result.softFallback = false;
-            result.needsRecheck = false;
-          }
-          if (result.isBanned && (result.softFallback || result.needsRecheck || (result.confidence || 0) < 0.8)) {
-            result.isBanned = false;
-            result.accountStatus = 'UNKNOWN';
-            result.needsRecheck = true;
-            result.softFallback = true;
-          }
-          if (!result.error && !result.softFallback) {
-            await addCheckLog(userId, result.formattedNumber || safeNumber, result.accountStatus || result.description || '-', result.proxyTag || result.proxyInfo || '-').catch(() => {});
-          }
-          return result;
-        }
-      } catch (err) {
-        const errMsg = String((err && err.message) || 'network');
-        last = {
-          formattedNumber: safeNumber,
-          isBanned: false, isCloneBlocked: false, isReady: false, anyCooldown: false,
-          accountStatus: 'UNKNOWN', error: false, softFallback: true, confidence: 0.2,
-          needsRecheck: true,
-          description: errMsg.includes('not a function') ? 'Kesalahan sistem detektor' : errMsg.slice(0, 120)
-        };
-        await sleep(200 * attempt + Math.floor(Math.random() * 150));
-      }
-    }
-    if (last) {
-      preserveNumber(raw, last);
-      return last;
-    }
-    return {
-      formattedNumber: safeNumber, isBanned: false, isCloneBlocked: false, isReady: false,
-      anyCooldown: false, accountStatus: 'UNKNOWN', error: false, softFallback: true,
-      confidence: 0.2, needsRecheck: true, description: 'Respons tidak stabil · coba ulang'
-    };
-  }
-  async function runPool(indexes, waveOpts) {
-    let cursor = 0;
-    stageProcessed = 0;
-    stageTotal = indexes.length || 1;
-    let conc;
-    if (indexes.length >= 20) conc = 6;
-    else if (indexes.length >= 12) conc = 5;
-    else if (indexes.length >= 6) conc = 4;
-    else conc = Math.min(3, indexes.length || 1);
-    const CONCURRENCY_SAFE = Math.max(1, conc);
-    async function worker(workerId) {
-      if (workerId > 0) await sleep(workerId * 25);
-      while (cursor < indexes.length) {
-        const stop = await redis.get('detect:stop:' + userId + ':' + jobId);
-        if (stop) return;
-        const pos = cursor++;
-        if (pos >= indexes.length) return;
-        const i = indexes[pos];
-        const rawNum = numbers[i];
-        const digs = String(rawNum || '').replace(/\D/g, '');
-        const displayNum = digs ? ('+' + digs) : String(rawNum || '-');
-        inFlight.add(displayNum);
-        currentNumber = pickCurrentNumber();
-        await updateProgress(false);
-        try {
-          results[i] = await checkOne(numbers[i], waveOpts);
-        } finally {
-          inFlight.delete(displayNum);
-        }
-        stageProcessed += 1;
-        currentNumber = pickCurrentNumber();
-        await updateProgress(stageProcessed === stageTotal);
-      }
-    }
-    await Promise.all(Array.from({ length: CONCURRENCY_SAFE }, (_, id) => worker(id)));
-    stageProcessed = stageTotal;
-    await updateProgress();
-  }
-  const allIdx = Array.from({ length: total }, (_, i) => i);
-  currentStageLabel = total > 1 ? 'ᴍᴇᴍᴘʀᴏsᴇs ' + total + ' ɴᴏᴍᴏʀ' : 'ᴍᴇᴍᴘʀᴏsᴇs ᴛᴀʀɢᴇᴛ';
-  await runPool(allIdx, { wave: 'full' });
-  const stopped = await redis.get('detect:stop:' + userId + ':' + jobId);
-  await redis.del('detect:active:' + userId);
-  await redis.del('detect:stop:' + userId + ':' + jobId);
-  if (stopped) return ctx.reply('✕ <b>ᴅᴇᴛᴇᴋsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
-
-  const groups = { ready: [], cooldown: [], security: [], clone: [], restricted: [], noroutes: [], other: [] };
-  const detailMap = {};
-  for (let gi = 0; gi < results.length; gi++) {
-    const r = results[gi];
-    if (!r || r.cancelled) continue;
-    const origDigits = String(numbers[gi] || '').replace(/\D/g, '');
-    const origNum = origDigits ? ('+' + origDigits) : null;
-    let num = origNum || r.formattedNumber || '-';
-    const shownDigits = String(num).replace(/\D/g, '');
-    if (origDigits && shownDigits && shownDigits !== origDigits) num = origNum;
-    r.formattedNumber = num;
-    detailMap[num] = r;
-
-    const dev = deviceLabel(r);
-
-    if (r.isBanned === true || r.accountStatus === 'BANNED') {
-      groups.restricted.push(num);
-    } else if (r.isCloneBlocked || r.accountStatus === 'CLONE_BLOCK') {
-      const cloneSecs = Math.max(0, Number((r.primaryTimer && r.primaryTimer.rawSeconds) || r.secondarySeconds || 0));
-      if (cloneSecs > 0) {
-        groups.clone.push(num + ' ⦂ ' + formatCooldownSmallCaps(cloneSecs) + ' ' + dev);
-      } else {
-        groups.clone.push(num + ' ' + dev);
-      }
-    } else if (r.isSecurityBlock || r.accountStatus === 'SECURITY_BLOCK') {
-      groups.security.push(num + ' ' + dev);
-    } else if (r.accountStatus === 'NO_ROUTES') {
-      groups.noroutes.push(num);
-    } else if (r.accountStatus === 'NOT_REGISTERED') {
-      groups.other.push(num + ' · tidak terdaftar di WhatsApp');
-    } else if (r.isReady && !r.isBanned) {
-      groups.ready.push({ line: num + ' ' + dev, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num, score: r.qualityScore || 0 });
-    } else if (r.anyCooldown || r.accountStatus === 'IN_COOLDOWN') {
-      let secs = 0;
-      if (r.primaryTimer && r.primaryTimer.rawSeconds > 0) secs = Number(r.primaryTimer.rawSeconds) || 0;
-      else if (r.channels && r.channels.sms && r.channels.sms.rawSeconds > 0) secs = Number(r.channels.sms.rawSeconds) || 0;
-      else if (r.secondarySeconds > 0) secs = Number(r.secondarySeconds) || 0;
-      if (secs > 0 && secs <= 360 && (Number(r.confidence) || 0) < 0.9 && r.isReady) secs = 0;
-      const dur = formatCooldownSmallCaps(secs);
-      groups.cooldown.push({ line: num + ' ⦂ ' + dur + ' ' + dev, secs: secs, rank: (r.deviceName || r.waOldEligible) ? 0 : 1, num: num });
-    } else if (r.softFallback || r.needsRecheck || r.accountStatus === 'UNKNOWN') {
-      const note = r.description ? (' · ' + r.description) : ' · respons tidak stabil';
-      groups.other.push(num + note);
-    } else {
-      const note = r.description ? (' · ' + r.description) : '';
-      groups.other.push(num + note);
-    }
-  }
-
-  groups.ready.sort((a, b) => (a.rank || 0) - (b.rank || 0) || (b.score || 0) - (a.score || 0));
-  groups.cooldown.sort((a, b) => {
-    const ra = a.rank != null ? a.rank : 1;
-    const rb = b.rank != null ? b.rank : 1;
-    if (ra !== rb) return ra - rb;
-    return (a.secs || 0) - (b.secs || 0);
-  });
-
-  const lines = [];
-  lines.push('✦  ᴘᴇᴍᴇʀɪᴋsᴀᴀɴ sᴇʟᴇsᴀɪ');
-  lines.push('');
-  lines.push(buildProgressBar(100) + '  100%');
-  lines.push('ᴘʀᴏɢʀᴇs ⦂ <b>' + total + '</b> / <b>' + total + '</b> ɴᴏᴍᴏʀ');
-  lines.push('sᴀᴀᴛ ɪɴɪ ⦂ sᴇᴍᴜᴀ ɴᴏᴍᴏʀ sᴇʟᴇsᴀɪ');
-  lines.push('──────────────────────');
-  lines.push('✧ sɪᴀᴘ ⦂ <b>' + groups.ready.length + '</b>');
-  lines.push('◐ ᴄᴏᴏʟᴅᴏᴡɴ ⦂ <b>' + groups.cooldown.length + '</b>');
-  lines.push('◈ sᴇᴄᴜʀɪᴛʏ ⦂ <b>' + groups.security.length + '</b>');
-  lines.push('△ ᴄʟᴏɴᴇ ⦂ <b>' + groups.clone.length + '</b>');
-  lines.push('✕ ʙᴀɴ ⦂ <b>' + groups.restricted.length + '</b>');
-  if (groups.noroutes.length) lines.push('⊘ ɴᴏ ʀᴏᴜᴛᴇs ⦂ <b>' + groups.noroutes.length + '</b>');
-  if (groups.other.length) lines.push('· ʟᴀɪɴɴʏᴀ ⦂ <b>' + groups.other.length + '</b>');
-  lines.push('──────────────────────');
-  lines.push('⌖ <b>ʜᴀsɪʟ ᴅᴇᴛᴇᴋsɪ</b>');
-  if (groups.ready.length) {
-    lines.push('');
-    lines.push('✧ <b>sɪᴀᴘ ᴅɪᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
-    groups.ready.forEach((n) => lines.push(n.line || n));
-  }
-  if (groups.cooldown.length) {
-    lines.push('');
-    lines.push('◐ <b>ᴄᴏᴏʟᴅᴏᴡɴ ᴡʜᴀᴛsᴀᴘᴘ</b>');
-    groups.cooldown.forEach((n) => lines.push(n.line || n));
-  }
-  if (groups.midverify.length) {
-    lines.push('');
-    lines.push('◎ <b>sᴇᴅᴀɴɢ ᴠᴇʀɪꜰɪᴋᴀsɪ</b>');
-    groups.midverify.forEach((n) => lines.push(n));
-  }
-  if (groups.security.length) {
-    lines.push('');
-    lines.push('◈ <b>sᴇᴄᴜʀɪᴛʏ ʜᴏʟᴅ</b>');
-    groups.security.forEach((n) => lines.push(n));
-  }
-  if (groups.clone.length) {
-    lines.push('');
-    lines.push('△ <b>ᴄʟᴏɴᴇ / ᴜɴᴏғғɪᴄɪᴀʟ</b>');
-    groups.clone.forEach((n) => lines.push(n));
-  }
-  if (groups.restricted.length) {
-    lines.push('');
-    lines.push('✕ <b>ᴅɪʙᴀɴ</b>');
-    groups.restricted.forEach((n) => lines.push(n));
-  }
-  if (groups.noroutes.length) {
-    lines.push('');
-    lines.push('⊘ <b>ɴᴏ ʀᴏᴜᴛᴇs</b>');
-    groups.noroutes.forEach((n) => lines.push(n));
-  }
-  if (groups.other.length) {
-    lines.push('');
-    lines.push('· <b>ʟᴀɪɴɴʏᴀ</b>');
-    groups.other.forEach((n) => lines.push(n));
-  }
-
-  try {
-    const user = await getEffectiveUser(ctx);
-    const checkedCount = results.filter((r) => r && !r.cancelled).length || total;
-    if (!isOwner(ctx) && !isUserVip(user)) {
-      await consumeQuota(ctx.from.id, Math.min(checkedCount, 1));
-    } else {
-      await incrementUserChecks(ctx.from.id, checkedCount);
-    }
-  } catch (e) { console.error('[quota/leaderboard]', e && e.message || e); }
-
-  const resultKey = 'detect:results:' + userId + ':' + jobId;
-  const siapList = groups.ready.map((x) => x.num || String(x.line || '').split(' ')[0]).filter(Boolean);
-  try {
-    const refreshKey = 'detect:refresh:' + userId + ':' + jobId;
-    await redis.set(refreshKey, JSON.stringify(numbers), { ex: 3600 });
-    await redis.set(resultKey, JSON.stringify({ results: results.filter(Boolean), siapList, detailMap }), { ex: 3600 });
-  } catch (_) {}
-
-  const keyboardRows = [
-    [
-      styledCallback('↻ UPDATE', 'detect:refresh:' + jobId, 'success'),
-      styledCallback('ⓘ INFO', 'detect:info', 'primary')
-    ]
-  ];
-  if (Object.keys(detailMap).length > 0) {
-    keyboardRows.push([styledCallback('⇩ EXPORT DETAIL', 'detect:export_detail:' + jobId, 'success')]);
-  }
-
-  return ctx.reply(lines.join('\n'), {
-    parse_mode: 'HTML',
-    ...Markup.inlineKeyboard(keyboardRows)
-  });
-}
 
 bot.hears('♛ OWNER CONSOLE', async (ctx) => {
   if (!isOwner(ctx)) return ctx.reply('✕ ᴀᴋsᴇs ᴅɪᴛᴏʟᴀᴋ', { parse_mode: 'HTML' });
@@ -932,8 +420,8 @@ bot.on('text', async (ctx, next) => {
       const parts = text.trim().split(/\s+/);
       const targetId = Number(parts[0]);
       const days = Number(parts[1] || 30);
-      if (!targetId || !days) {
-        return ctx.reply('✕ ғᴏʀᴍᴀᴛ sᴀʟᴀʜ. ᴄᴏɴᴛᴏʜ: <code>123456789 30</code>', { parse_mode: 'HTML' });
+      if (!Number.isSafeInteger(targetId) || targetId <= 0 || !Number.isSafeInteger(days) || days < 1 || days > 3650 || parts.length > 2) {
+        return ctx.reply('✕ ғᴏʀᴍᴀᴛ sᴀʟᴀʜ. Gunakan <code>user_id hari</code> dengan durasi 1–3650 hari.', { parse_mode: 'HTML' });
       }
       try {
         await activateVip(targetId, days, 'OWNER');
@@ -1032,61 +520,47 @@ bot.on('text', async (ctx, next) => {
   }
 
   const emailMode = await redis.get('email:mode:' + ctx.from.id);
-  if (emailMode === 'waiting_number') {
+  if (emailMode) {
     await redis.del('email:mode:' + ctx.from.id);
-    const phones = extractPhoneCandidates(text);
-    if (!phones.length) {
-      return ctx.reply('✦ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴠᴀʟɪᴅ</b>\n\n<blockquote>ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.</blockquote>', { parse_mode: 'HTML' });
-    }
-    
-    const target = phones[0];
-    const loadingMsg = await ctx.reply('⏳ <b>ᴍᴇᴍᴘʀᴏsᴇs ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ...</b>\n\n<blockquote>ᴍᴇɴɢɪʀɪᴍ ᴘᴇʀᴍɪɴᴛᴀᴀɴ ᴋᴇ sᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ sᴇᴄᴀʀᴀ ʀᴇᴀʟ-ᴛɪᴍᴇ.</blockquote>', { parse_mode: 'HTML' });
-    
-    try {
-      const res = await waChecker.triggerEmailVerification(target);
-      if (res.isBanned) {
-        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✕ <b>ɴᴏᴍᴏʀ ᴅɪʙᴀɴ</b>\n\n<blockquote>ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴇᴍᴜɴᴄᴜʟᴋᴀɴ ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ.</blockquote>', { parse_mode: 'HTML' });
-      } else if (res.maskedEmail || res.emailOtpEligible || res.emailTriggered) {
-        let textResp = '✉ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴠɪᴀ ᴇᴍᴀɪʟ ᴅɪᴀᴋᴛɪғᴋᴀɴ</b>\n──────────────────────────────\n';
-        textResp += '▸ ɴᴏᴍᴏʀ ⦂ <code>' + target + '</code>\n';
-        if (res.maskedEmail) textResp += '▸ ᴇᴍᴀɪʟ ⦂ <b>' + res.maskedEmail + '</b>\n';
-        textResp += '▸ sᴛᴀᴛᴜs ⦂ <b>AKTIF</b>\n';
-        textResp += '──────────────────────────────\n';
-        textResp += '<blockquote>ʙᴜᴋᴀ ᴜʟᴀɴɢ ᴀᴘʟɪᴋᴀsɪ ᴡʜᴀᴛsᴀᴘᴘ → ʟᴀʏᴀʀ ᴠᴇʀɪꜰɪᴋᴀsɪ ɴᴏᴍᴏʀ.\nᴏᴘsɪ ᴇᴍᴀɪʟ sᴇʜᴀʀᴜsɴʏᴀ sᴜᴅᴀʜ ᴍᴜɴᴄᴜʟ.\nᴊɪᴋᴀ ʙᴇʟᴜᴍ, ᴛᴜᴛᴜᴘ ᴀᴘʟɪᴋᴀsɪ sᴇᴘᴇɴᴜʜɴʏᴀ ʟᴀʟᴜ ʙᴜᴋᴀ ʟᴀɢɪ.</blockquote>';
-        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, textResp, { parse_mode: 'HTML' });
-      } else {
-        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✦ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ</b>\n──────────────────────────────\n<blockquote>sᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ ᴛɪᴅᴀᴋ ᴍᴇɴʏᴇᴅɪᴀᴋᴀɴ ᴏᴘsɪ ᴏᴛᴘ ᴇᴍᴀɪʟ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.\n\n◈ ᴘᴇɴʏᴇʙᴀʙ ᴜᴍᴜᴍ ⦂\n  ▸ ᴀᴋᴜɴ ʙᴇʟᴜᴍ ᴍᴇɴᴀᴜᴛᴋᴀɴ ᴀʟᴀᴍᴀᴛ ᴇᴍᴀɪʟ.\n  ▸ ᴀᴋᴜɴ ᴛɪᴅᴀᴋ sᴇᴅᴀɴɢ ᴅᴀʟᴀᴍ sᴇsɪ ᴠᴇʀɪꜰɪᴋᴀsɪ.</blockquote>\n──────────────────────────────', { parse_mode: 'HTML' });
-      }
-    } catch (err) {
-      console.error('[email verify]', err);
-      await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✕ <b>ɢᴀɢᴀʟ ᴍᴇᴍᴘʀᴏsᴇs</b>\n\n<blockquote>ᴛᴇʀᴊᴀᴅɪ ᴋᴇsᴀʟᴀʜᴀɴ ᴊᴀʀɪɴɢᴀɴ ᴀᴛᴀᴜ ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴠᴀʟɪᴅ.</blockquote>', { parse_mode: 'HTML' });
-    }
-    return;
-  }
-
-  const mode = await redis.get('detect:mode:' + ctx.from.id);
-  if (mode !== 'waiting_numbers') return next();
-  const phones = extractPhoneCandidates(text);
-  if (!phones.length) {
-    return ctx.reply('✦ <b>ɴᴏᴍᴏʀ ᴛɪᴅᴀᴋ ᴅɪᴛᴇᴍᴜᴋᴀɴ</b>\n\n<blockquote>ᴋɪʀɪᴍ ɴᴏᴍᴏʀ ᴅᴇɴɢᴀɴ ғᴏʀᴍᴀᴛ ʏᴀɴɢ ʙᴇɴᴀʀ.\nᴄᴏɴᴛᴏʜ ⦂ +6281234567890</blockquote>', { parse_mode: 'HTML' });
-  }
-  const user = await getEffectiveUser(ctx);
-  const isVip = isOwner(ctx) || isUserVip(user);
-  const max = isVip ? 30 : 1;
-  const list = phones.slice(0, max);
-  if (!isVip && phones.length > 1) {
     return ctx.reply(
-      '✦ <b>ʟɪᴍɪᴛ ᴀᴋᴜɴ ɢʀᴀᴛɪs</b>\n\n' +
-      '<blockquote>ᴀᴋᴜɴ ɢʀᴀᴛɪs ʜᴀɴʏᴀ ʙɪsᴀ ᴄᴇᴋ <b>1 ɴᴏᴍᴏʀ</b> ᴘᴇʀ ᴋɪʀɪᴍᴀɴ.\n' +
-      'ᴋᴀᴍᴜ ᴋɪʀɪᴍ <b>' + phones.length + '</b> ɴᴏᴍᴏʀ — ʜᴀɴʏᴀ ʏᴀɴɢ ᴘᴇʀᴛᴀᴍᴀ ʏᴀɴɢ ᴅɪᴘʀᴏsᴇs.\n' +
-      'ᴜᴘɢʀᴀᴅᴇ ᴘʀᴇᴍɪᴜᴍ ᴜɴᴛᴜᴋ ʙᴜʟᴋ ʜɪɴɢɢᴀ 30 ɴᴏᴍᴏʀ.</blockquote>',
-      {
-        parse_mode: 'HTML',
-        ...Markup.inlineKeyboard([[styledCallback('✧ BELI PREMIUM', 'store:premium', 'success')]])
-      }
+      '✉ <b>ᴠᴇʀɪғɪᴋᴀsɪ ᴇᴍᴀɪʟ ᴅɪɴᴏɴᴀᴋᴛɪғᴋᴀɴ</b>\n\n' +
+      '<blockquote>Bot tidak mengirim kode verifikasi. Lanjutkan hanya melalui aplikasi WhatsApp resmi.</blockquote>',
+      { parse_mode: 'HTML' }
     );
   }
-  return processDetection(ctx, list);
+
+  const detectLimit = await redis.get('detect:mode:' + ctx.from.id);
+  if (!detectLimit) return next();
+  if (text === '/cancel' || text.toUpperCase() === 'BATAL') {
+    await redis.del('detect:mode:' + ctx.from.id);
+    return ctx.reply('✕ <b>ᴠᴀʟɪᴅᴀsɪ ᴅɪʙᴀᴛᴀʟᴋᴀɴ</b>', { parse_mode: 'HTML' });
+  }
+
+  const parsed = parseDetectionInput(text, Number(detectLimit));
+  if (!parsed.ok) {
+    return ctx.reply(
+      '⚠️ <b>ɪɴᴘᴜᴛ ʙᴇʟᴜᴍ ᴠᴀʟɪᴅ</b>\n\n' +
+      escapeHtml(parsed.error) + '\n\nKirim ulang input atau /cancel.',
+      { parse_mode: 'HTML' }
+    );
+  }
+
+  await redis.del('detect:mode:' + ctx.from.id);
+  const lines = [
+    '⌖ <b>ʜᴀsɪʟ ᴠᴀʟɪᴅᴀsɪ ɪɴᴘᴜᴛ</b>',
+    '',
+    '✓ Nomor valid: <b>' + parsed.valid.length + '</b>',
+    '↺ Duplikat dihapus: <b>' + parsed.duplicates.length + '</b>',
+    '✕ Format tidak valid: <b>' + parsed.invalid.length + '</b>',
+    '',
+    ...parsed.valid.map((number, index) => (index + 1) + '. <code>' + escapeHtml(number) + '</code>'),
+    '',
+    '⚠️ <b>Status WhatsApp/cooldown tidak diperiksa.</b>',
+    'Tidak ada OTP yang dikirim dan kuota tidak dipotong.'
+  ];
+  if (parsed.invalid.length) lines.push('', '<b>Format tidak valid:</b>', ...parsed.invalid.map((value) => '• <code>' + escapeHtml(value) + '</code>'));
+  if (parsed.duplicates.length) lines.push('', '<b>Duplikat:</b>', ...parsed.duplicates.map((value) => '• <code>' + escapeHtml(value) + '</code>'));
+  return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 });
 
 if (require.main === module) {
