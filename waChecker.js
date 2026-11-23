@@ -1,5 +1,5 @@
 const WADetector = require('./waEngine');
-const { executeWithProxyRotation, getHealth } = require('./proxyManager');
+const { executeWithProxyRotation, getHealth, markDirtySession } = require('./proxyManager');
 
 const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 4000);
 const INTERNAL_RETRIES = Math.min(2, Math.max(1, Number(process.env.WA_CHECK_INTERNAL_RETRIES || 1)));
@@ -102,6 +102,11 @@ async function postWithTimeout(url, body, headers, dispatcher) {
   try {
     const res = await fetch(url, { method: 'POST', headers, body, dispatcher, signal: controller.signal });
     const text = await res.text();
+    if (res.status === 403 || res.status === 429 || res.status === 451) {
+      const err = new Error('PROXY_DIRTY_IP_BANNED');
+      err.status = res.status;
+      throw err;
+    }
     if (!res.ok) {
       const err = new Error('WhatsApp HTTP ' + res.status + ': ' + text.slice(0, 180));
       err.status = res.status;
@@ -110,6 +115,7 @@ async function postWithTimeout(url, body, headers, dispatcher) {
     if (!text || !String(text).trim()) throw new Error('WhatsApp mengembalikan respons kosong.');
     return text;
   } catch (err) {
+    if (err && err.message === 'PROXY_DIRTY_IP_BANNED') throw err;
     const cause = err && err.cause;
     const detail = cause && (cause.code || cause.message) ? ' [' + (cause.code || cause.message) + ']' : '';
     const out = new Error(((err && err.message) || 'Permintaan jaringan gagal') + detail);
@@ -122,17 +128,18 @@ async function postWithTimeout(url, body, headers, dispatcher) {
 
 async function checkProxyHealth(dispatcher) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3000);
+  const timer = setTimeout(() => controller.abort(), 3500);
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9'
+  };
   try {
     const res = await fetch('https://www.whatsapp.com/', {
       method: 'GET',
       dispatcher,
       signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9'
-      }
+      headers
     });
     if (res.status === 403 || res.status === 429 || res.status === 451) {
       throw new Error('PROXY_DIRTY_IP_BANNED');
@@ -143,6 +150,10 @@ async function checkProxyHealth(dispatcher) {
     return true;
   } catch (err) {
     if (err && err.message === 'PROXY_DIRTY_IP_BANNED') throw err;
+    const msg = String(err && err.message || err || '').toLowerCase();
+    if (msg.includes('403') || msg.includes('429') || msg.includes('451')) {
+      throw new Error('PROXY_DIRTY_IP_BANNED');
+    }
     throw new Error('PROXY_DEAD');
   } finally {
     clearTimeout(timer);
@@ -870,24 +881,61 @@ async function checkWhatsAppCooldown(rawNumber, options) {
 }
 
 async function triggerEmailVerification(rawNumber) {
-  const payloads = await WADetector.buildDualPayloads(String(rawNumber), { method: 'email' });
-  if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid.');
+  const methods = ['email', 'email_otp'];
+  let lastParsed = {};
+  let lastProbe = null;
+  let countryIso2 = null;
 
-  const countryIso2 = resolveCountryIso2(payloads.phoneInfo);
-  const headers = buildHeaders(payloads.userAgent, countryIso2);
+  for (const method of methods) {
+    const payloads = await WADetector.buildDualPayloads(String(rawNumber), { method });
+    if (!payloads.success) throw new Error(payloads.error || 'Nomor tidak valid.');
 
-  const probe = await runDualProbe(payloads, headers, countryIso2);
-  const parsed = WADetector.parseDualResponse(payloads.phoneInfo, probe.existText, probe.codeText) || {};
+    countryIso2 = resolveCountryIso2(payloads.phoneInfo);
+    const headers = buildHeaders(payloads.userAgent, countryIso2);
+    const probe = await runDualProbe(payloads, headers, countryIso2);
+    lastProbe = probe;
 
-  const maskedEmail = parsed.maskedEmail || null;
-  const emailOtpEligible = Boolean(parsed.emailOtpEligible) || Boolean(maskedEmail);
+    const existObj = safeJson(probe.existText);
+    const codeObj = safeJson(probe.codeText);
+    const parsed = WADetector.parseDualResponse(payloads.phoneInfo, probe.existText, probe.codeText) || {};
 
-  return {
-    ...parsed,
-    maskedEmail,
-    emailOtpEligible,
-    isBanned: Boolean(parsed.isBanned)
-  };
+    const extracted = extractEmail(existObj, codeObj, parsed);
+    const eligibleFlag = Boolean(
+      parsed.emailOtpEligible ||
+      Number(existObj.email_otp_eligible || codeObj.email_otp_eligible || 0) === 1 ||
+      Number(existObj.email_eligible || codeObj.email_eligible || 0) === 1 ||
+      String(codeObj.method || '').toLowerCase().includes('email') ||
+      String(existObj.recommended_method || '').toLowerCase().includes('email') ||
+      (Array.isArray(existObj.recommended_method) && existObj.recommended_method.some((m) => String(m).toLowerCase().includes('email'))) ||
+      (Array.isArray(codeObj.recommended_method) && codeObj.recommended_method.some((m) => String(m).toLowerCase().includes('email')))
+    );
+
+    const maskedEmail = extracted || parsed.maskedEmail || null;
+    const emailOtpEligible = eligibleFlag || Boolean(maskedEmail);
+    const codeSentEmail = (
+      (codeObj.status === 'sent' || codeObj.status === 'ok') &&
+      String(codeObj.method || codeObj.login_method || '').toLowerCase().includes('email')
+    );
+
+    lastParsed = {
+      ...parsed,
+      maskedEmail,
+      emailOtpEligible: emailOtpEligible || codeSentEmail,
+      emailTriggered: codeSentEmail || emailOtpEligible,
+      isBanned: Boolean(parsed.isBanned),
+      requestMethod: method,
+      rawCodeStatus: codeObj.status || null,
+      rawCodeMethod: codeObj.method || codeObj.login_method || null
+    };
+
+    if (lastParsed.emailOtpEligible || lastParsed.maskedEmail || codeSentEmail) {
+      return lastParsed;
+    }
+
+    await sleep(120);
+  }
+
+  return lastParsed;
 }
 
 module.exports = { checkWhatsAppCooldown, triggerEmailVerification, getHealth };
