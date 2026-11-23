@@ -1030,16 +1030,15 @@ bot.on('text', async (ctx, next) => {
       if (res.isBanned) {
         await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✕ <b>ɴᴏᴍᴏʀ ᴅɪʙᴀɴ</b>\n\n<blockquote>ᴛɪᴅᴀᴋ ᴅᴀᴘᴀᴛ ᴍᴇᴍᴜɴᴄᴜʟᴋᴀɴ ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ.</blockquote>', { parse_mode: 'HTML' });
       } else if (res.maskedEmail || res.emailOtpEligible || res.emailTriggered) {
-        let textResp = '✉ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴠɪᴀ ᴇᴍᴀɪʟ ᴅɪᴀᴋᴛɪғᴋᴀɴ</b>\n──────────────────────\n';
+        let textResp = '✉ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴠɪᴀ ᴇᴍᴀɪʟ ᴅɪᴀᴋᴛɪғᴋᴀɴ</b>\n──────────────────────────────\n';
         textResp += '▸ ɴᴏᴍᴏʀ ⦂ <code>' + target + '</code>\n';
         if (res.maskedEmail) textResp += '▸ ᴇᴍᴀɪʟ ⦂ <b>' + res.maskedEmail + '</b>\n';
         textResp += '▸ sᴛᴀᴛᴜs ⦂ <b>AKTIF</b>\n';
-        if (res.requestMethod) textResp += '▸ ᴍᴇᴛᴏᴅᴇ ⦂ <code>' + res.requestMethod + '</code>\n';
-        textResp += '──────────────────────\n';
-        textResp += '<blockquote>ʙᴜᴋᴀ ᴜʟᴀɴɢ ᴀᴘʟɪᴋᴀsɪ ᴡʜᴀᴛsᴀᴘᴘ → ʟᴀʏᴀʀ ᴠᴇʀɪꜰɪᴋᴀsɪ ɴᴏᴍᴏʀ.\nᴏᴘsɪ ᴇᴍᴀɪʟ sᴇʜᴀʀᴜsɴʏᴀ sᴜᴅᴀʜ ᴍᴜɴᴄᴜʟ.\nᴊɪᴋᴀ ʙᴇʟᴜᴍ, ᴛᴜᴛᴜᴘ ᴀᴘʟɪᴋᴀsɪ sᴇᴘᴇɴᴜʜɴʏᴀ ʟᴀʟᴜ ʙᴜᴋᴀ ʟᴀɢɪ.</blockquote>';
+        textResp += '──────────────────────────────\n';
+        textResp += 'ʙᴜᴋᴀ ᴜʟᴀɴɢ ᴀᴘʟɪᴋᴀsɪ ᴡʜᴀᴛsᴀᴘᴘ → ʟᴀʏᴀʀ ᴠᴇʀɪꜰɪᴋᴀsɪ ɴᴏᴍᴏʀ.\nᴏᴘsɪ ᴇᴍᴀɪʟ sᴇʜᴀʀᴜsɴʏᴀ sᴜᴅᴀʜ ᴍᴜɴᴄᴜʟ.\nᴊɪᴋᴀ ʙᴇʟᴜᴍ, ᴛᴜᴛᴜᴘ ᴀᴘʟɪᴋᴀsɪ sᴇᴘᴇɴᴜʜɴʏᴀ ʟᴀʟᴜ ʙᴜᴋᴀ ʟᴀɢɪ.';
         await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, textResp, { parse_mode: 'HTML' });
       } else {
-        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✦ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ</b>\n\n<blockquote>sɪsᴛᴇᴍ sᴜᴅᴀʜ ᴍᴇɴɢɪʀɪᴍ ᴘᴇʀᴍɪɴᴛᴀᴀɴ email & email_otp.\nsᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ ᴛɪᴅᴀᴋ ᴍᴇɴɢᴇᴍʙᴀʟɪᴋᴀɴ ᴊᴀʟᴜʀ ᴇᴍᴀɪʟ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.\nᴘᴇɴʏᴇʙᴀʙ ᴜᴍᴜᴍ: ᴇᴍᴀɪʟ ʙᴇʟᴜᴍ ᴅɪᴛᴀᴍʙᴀʜᴋᴀɴ ᴅɪ ᴀᴋᴜɴ, ᴀᴛᴀᴜ ᴀᴋᴜɴ ᴛɪᴅᴀᴋ ᴅᴀʟᴀᴍ sᴇsɪ ᴠᴇʀɪꜰɪᴋᴀsɪ.</blockquote>', { parse_mode: 'HTML' });
+        await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, undefined, '✦ <b>ᴠᴇʀɪꜰɪᴋᴀsɪ ᴇᴍᴀɪʟ ᴛɪᴅᴀᴋ ᴛᴇʀsᴇᴅɪᴀ</b>\n──────────────────────────────\nsᴇʀᴠᴇʀ ᴡʜᴀᴛsᴀᴘᴘ ᴛɪᴅᴀᴋ ᴍᴇɴʏᴇᴅɪᴀᴋᴀɴ ᴏᴘsɪ ᴏᴛᴘ ᴇᴍᴀɪʟ ᴜɴᴛᴜᴋ ɴᴏᴍᴏʀ ɪɴɪ.\n\n◈ ᴘᴇɴʏᴇʙᴀʙ ᴜᴍᴜᴍ ⦂\n  ▸ ᴀᴋᴜɴ ʙᴇʟᴜᴍ ᴍᴇɴᴀᴜᴛᴋᴀɴ ᴀʟᴀᴍᴀᴛ ᴇᴍᴀɪʟ.\n  ▸ ᴀᴋᴜɴ ᴛɪᴅᴀᴋ sᴇᴅᴀɴɢ ᴅᴀʟᴀᴍ sᴇsɪ ᴠᴇʀɪꜰɪᴋᴀsɪ.\n──────────────────────────────', { parse_mode: 'HTML' });
       }
     } catch (err) {
       console.error('[email verify]', err);
