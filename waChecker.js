@@ -669,6 +669,41 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     (timers.wa_old_eligible && (Number(existResponse.wa_old_eligible || codeResponse.wa_old_eligible || 0) === 1 || timers.wa_old > 0))
   );
 
+  const midVerification = Boolean(
+    timers.is_code_sent ||
+    (codeResponse.status === 'sent' || codeResponse.status === 'ok') ||
+    /too_recent|too_many|code_already|otp_pending/i.test(reasonBlob) ||
+    (String(codeResponse.method || '').length > 0 && Number(codeResponse.retry_after || codeResponse.sms_wait || 0) > 0 && Number(existResponse.sms_wait || 0) === 0)
+  );
+
+  let deviceStrength = 'none';
+  if (timers.device_name && (Number(existResponse.wa_old_eligible || codeResponse.wa_old_eligible || 0) === 1 || timers.wa_old_eligible)) {
+    deviceStrength = 'strong';
+  } else if (hasDevicePath || timers.device_name || Number(existResponse.wa_old_eligible || codeResponse.wa_old_eligible || 0) === 1) {
+    deviceStrength = 'weak';
+  }
+
+  const emailBound = Boolean(
+    (parsed && (parsed.maskedEmail || parsed.emailOtpEligible)) ||
+    Number(existResponse.email_otp_eligible || codeResponse.email_otp_eligible || 0) === 1 ||
+    Number(existResponse.email_eligible || codeResponse.email_eligible || 0) === 1
+  );
+
+  let identityGate = 'none';
+  if (
+    existResponse.passkey_auth_challenge || codeResponse.passkey_auth_challenge ||
+    existResponse.passkey_credential || codeResponse.passkey_credential ||
+    Number(existResponse.passkey_eligible || codeResponse.passkey_eligible || 0) === 1
+  ) {
+    identityGate = 'passkey';
+  } else if (
+    Number(existResponse.password_eligible || codeResponse.password_eligible || 0) === 1 ||
+    existResponse.security_code_set || codeResponse.security_code_set ||
+    Number(existResponse.security_code_eligible || codeResponse.security_code_eligible || 0) === 1
+  ) {
+    identityGate = existResponse.security_code_set || codeResponse.security_code_set ? 'security_code' : 'password_2fa';
+  }
+
   const channels = {
     sms: buildChannel(smsSeconds),
     voice: buildChannel(timers.voice),
@@ -699,6 +734,10 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   } else if (isSecurityBlock) {
     accountStatus = 'SECURITY_BLOCK';
     description = description || 'Demi keamanan: tidak dapat masuk saat ini';
+  } else if (midVerification && !isBanned && !isCloneBlocked && !isSecurityBlock) {
+    accountStatus = 'MID_VERIFICATION';
+    description = description || 'Sedang dalam sesi verifikasi aktif di server WhatsApp';
+    if (smsSeconds > 0) isCooldown = true;
   } else if (isCooldown) {
     accountStatus = 'IN_COOLDOWN';
     description = description || ('Cooldown SMS · ' + (channels.sms.uiTimer || '0s'));
@@ -755,6 +794,14 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     description,
     deviceName: timers.device_name || null,
     waOldEligible: hasDevicePath,
+    deviceStrength: deviceStrength,
+    midVerification: Boolean(midVerification),
+    emailBound: Boolean(emailBound || maskedEmail),
+    wipeRisk: Boolean(highRereg || wipeType),
+    wipeType: wipeType || null,
+    wipeWait: wipeWait || 0,
+    highRereg: Boolean(highRereg),
+    identityGate: identityGate,
     channels,
     primaryTimer: { rawSeconds: channels.sms.rawSeconds, uiTimer: channels.sms.uiTimer, humanTime: channels.sms.humanTime },
     proxyInfo: String(proxyMode || '') + ' · ' + String(sessionTag || ''),
