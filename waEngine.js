@@ -2363,6 +2363,76 @@ var WADetector = (() => {
       offline_ab: "%7B%22exposure%22%3A%5B%5D%2C%22metrics%22%3A%7B%7D%7D"
     };
   }
+
+  const SESSION_CACHE = new Map();
+  const SESSION_TTL_MS = 12 * 60 * 1000;
+  const IDENTITY_CACHE = new Map();
+  const IDENTITY_TTL_MS = 12 * 60 * 1000;
+
+  function phoneSessionKey(cc, nationalNumber) {
+    return String(cc || "") + ":" + String(nationalNumber || "");
+  }
+
+  function getOrCreateRegistrationSession(cc, nationalNumber, options = {}) {
+    const key = phoneSessionKey(cc, nationalNumber);
+    const now = Date.now();
+    const forceNew = Boolean(options.forceNewSession);
+    const cached = SESSION_CACHE.get(key);
+    if (!forceNew && cached && (now - cached.ts) < SESSION_TTL_MS) {
+      cached.ts = now;
+      return { session: cached.session, identity: cached.identity, reused: true };
+    }
+    const platform = options.platform || "smb_ios";
+    const version = options.version || DEFAULT_WA_BUSINESS_VERSION;
+    const deviceModel = options.deviceModel || "iPhone_15_Pro";
+    const session = createRegistrationSession(cc, nationalNumber, {
+      platform,
+      lg: options.lg,
+      lc: options.lc,
+      mcc: options.mcc,
+      mnc: options.mnc
+    });
+    const identity = {
+      platform,
+      version,
+      deviceModel,
+      mcc: session.mcc,
+      mnc: session.mnc,
+      lg: session.lg,
+      lc: session.lc,
+      authkey: session.authkey,
+      fdid: session.fdid,
+      expid: session.expid,
+      e_regid: session.e_regid,
+      id: session.id
+    };
+    SESSION_CACHE.set(key, { session, identity, ts: now });
+    IDENTITY_CACHE.set(key, { identity, ts: now });
+    if (SESSION_CACHE.size > 500) {
+      const first = SESSION_CACHE.keys().next().value;
+      SESSION_CACHE.delete(first);
+      IDENTITY_CACHE.delete(first);
+    }
+    return { session, identity, reused: false };
+  }
+
+  function getStickyIdentity(cc, nationalNumber) {
+    const key = phoneSessionKey(cc, nationalNumber);
+    const row = IDENTITY_CACHE.get(key);
+    if (!row) return null;
+    if (Date.now() - row.ts > IDENTITY_TTL_MS) {
+      IDENTITY_CACHE.delete(key);
+      return null;
+    }
+    return row.identity;
+  }
+
+  function clearPhoneSession(cc, nationalNumber) {
+    const key = phoneSessionKey(cc, nationalNumber);
+    SESSION_CACHE.delete(key);
+    IDENTITY_CACHE.delete(key);
+  }
+
   function serializeSessionQuery(session, token = null, extraPairs = []) {
     const pairs = [
       ["cc", session.cc],
@@ -2790,17 +2860,25 @@ var WADetector = (() => {
       return { success: false, error: "Format nomor tidak valid" };
     }
     const opts = options && typeof options === "object" ? options : {};
+    const mode = String(opts.mode || "write").toLowerCase() === "read" ? "read" : "write";
     const rawMethod = String(opts.method || "").toLowerCase();
-    const requestMethod = (rawMethod === "email" || rawMethod === "email_otp") ? rawMethod : "wa_old";
-    const platform = "smb_ios";
-    const version = DEFAULT_WA_BUSINESS_VERSION;
-    const userAgent = buildUserAgent(version, platform, "iPhone_15_Pro");
-    const session = createRegistrationSession(parsed.cc, parsed.in, {
+    const requestMethod = (rawMethod === "email" || rawMethod === "email_otp")
+      ? rawMethod
+      : (mode === "read" ? "wa_old" : "wa_old");
+    const sticky = getStickyIdentity(parsed.cc, parsed.in);
+    const platform = (sticky && sticky.platform) || "smb_ios";
+    const version = (sticky && sticky.version) || DEFAULT_WA_BUSINESS_VERSION;
+    const deviceModel = (sticky && sticky.deviceModel) || "iPhone_15_Pro";
+    const userAgent = buildUserAgent(version, platform, deviceModel);
+    const { session, identity, reused } = getOrCreateRegistrationSession(parsed.cc, parsed.in, {
       platform,
-      lg: parsed.lg || "id",
-      lc: parsed.iso || "ID",
-      mcc: parsed.mcc || "510",
-      mnc: parsed.mnc || "010"
+      version,
+      deviceModel,
+      lg: (sticky && sticky.lg) || parsed.lg || "id",
+      lc: (sticky && sticky.lc) || parsed.iso || "ID",
+      mcc: (sticky && sticky.mcc) || parsed.mcc || "510",
+      mnc: (sticky && sticky.mnc) || parsed.mnc || "010",
+      forceNewSession: Boolean(opts.forceNewSession)
     });
     const waToken = computeWAMobileToken(version, parsed.in, true);
     const commonExtraPairs = [
@@ -2836,7 +2914,18 @@ var WADetector = (() => {
       },
       phoneInfo: parsed,
       requestMethod,
-      deviceName: deviceName || null
+      deviceName: deviceName || null,
+      mode,
+      sessionReused: Boolean(reused),
+      identity: {
+        platform: identity.platform,
+        version: identity.version,
+        deviceModel: identity.deviceModel,
+        mcc: identity.mcc,
+        mnc: identity.mnc,
+        fdid: identity.fdid,
+        expid: identity.expid
+      }
     };
   }
 
