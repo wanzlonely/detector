@@ -537,7 +537,7 @@ async function processDetection(ctx, numbers, detectOpts) {
     if (stop) return { cancelled: true };
     const digits = String(raw || '').replace(/\D/g, '');
     const safeNumber = digits ? ('+' + digits) : String(raw || '');
-    const opts = Object.assign({ skipSticky: true, forceRefresh: Boolean(detectOpts.forceRefresh) }, waveOpts || {});
+    const opts = Object.assign({ skipSticky: true, forceRefresh: Boolean(detectOpts.forceRefresh), wave: detectOpts.forceRefresh ? 'exist' : undefined }, waveOpts || {});
     let last = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
       const stop2 = await redis.get('detect:stop:' + userId + ':' + jobId);
