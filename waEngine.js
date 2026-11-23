@@ -2810,10 +2810,15 @@ var WADetector = (() => {
       ["jailbroken", "0"],
       ["cellular_strength", "1"]
     ];
+    const deviceName = opts.deviceName ? String(opts.deviceName).trim().slice(0, 40) : "";
     const codeExtraPairs = [
       ["method", requestMethod],
       ...commonExtraPairs
     ];
+    if (deviceName && requestMethod === "wa_old") {
+      codeExtraPairs.push(["wa_old_device_name", deviceName]);
+      codeExtraPairs.push(["device_name", deviceName]);
+    }
     const plaintextExist = serializeSessionQuery(session, waToken, commonExtraPairs);
     const encExist = await encryptWAQuery(plaintextExist);
     const plaintextCode = serializeSessionQuery(session, waToken, codeExtraPairs);
@@ -2830,7 +2835,8 @@ var WADetector = (() => {
         body: `ENC=${encCode}`
       },
       phoneInfo: parsed,
-      requestMethod
+      requestMethod,
+      deviceName: deviceName || null
     };
   }
 
