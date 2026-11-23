@@ -349,13 +349,13 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const meaningfulCooldown =
     !isBanned && !isCloneBlocked && !isSecurityBlock && !isNotRegistered && hasLiveSms;
 
-  const hasOpenPath = smsAvailable === true && !timers.exist_no_routes && !timers.code_no_routes;
+  const hasOpenPath = smsAvailable === true && routeStatus !== 'NO_ROUTES' && routeStatus !== 'CONFLICT' && !timers.exist_no_routes && !timers.code_no_routes;
 
   // READY means SMS is explicitly eligible now. Device-path, status=sent,
   // HIGH-REREG and other methods are not proof that a fresh SMS OTP can be sent.
   let isReady = false;
   if (!isBanned && !isCloneBlocked && !isSecurityBlock &&
-      !isNotRegistered && smsAvailable === true && !hasLiveSms && routeStatus !== 'NO_ROUTES' && !timers.exist_no_routes && !timers.code_no_routes) {
+      !isNotRegistered && smsAvailable === true && !hasLiveSms && routeStatus !== 'NO_ROUTES' && routeStatus !== 'CONFLICT' && !timers.exist_no_routes && !timers.code_no_routes) {
     isReady = true;
     reasons.push('explicit_sms_eligible');
   }
@@ -366,8 +366,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const anyChannelSignal =
     timers.sms > 0 || timers.voice > 0 || timers.flash > 0 || timers.email > 0 ||
     timers.wa_old > 0 || timers.is_code_sent || hasDevicePathAvailable;
-  const hasNoSmsRoute = routeStatus === 'NO_ROUTES' || timers.exist_no_routes || timers.code_no_routes ||
-    engineState === 'NO_ROUTES' || patternHints.includes('NO_ROUTES');
+  const hasNoSmsRoute = routeStatus === 'NO_ROUTES';
   const smsOptionMissing =
     !isBanned && !isCloneBlocked && !isSecurityBlock && !isNotRegistered &&
     !effectiveCooldown && !isReady && !isPartial &&
@@ -381,6 +380,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone).';
   else if (isSecurityBlock) description = 'Demi keamanan: login sementara tidak tersedia.';
   else if (isNotRegistered) description = 'Nomor tidak terdaftar pada layanan WhatsApp berdasarkan sinyal eksplisit respons.';
+  else if (routeStatus === 'CONFLICT') description = 'Status jalur SMS bertentangan antarrespons; hasil perlu diperiksa ulang.';
   else if (effectiveCooldown) {
     const ch = channels.sms;
     const t = (ch && (ch.humanTime || ch.uiTimer)) || 'aktif';
@@ -403,6 +403,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (isCloneBlocked) accountStatus = 'CLONE_BLOCKED';
   else if (isSecurityBlock) accountStatus = 'SECURITY_BLOCK';
   else if (isNotRegistered) accountStatus = 'NOT_REGISTERED';
+  else if (routeStatus === 'CONFLICT') accountStatus = 'UNKNOWN';
   else if (isReady && hasDevicePath) accountStatus = 'REGISTERED_ON_DEVICE';
   else if (isReady) accountStatus = 'READY';
   else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
@@ -455,12 +456,14 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
 
 function mergeConsensus(results) {
   if (!results || !results.length) return softFallback('', {}, null, null);
-  const score = { ready: 0, cooldown: 0, clone: 0, security: 0, ban: 0, sms: 0 };
+  const score = { ready: 0, cooldown: 0, clone: 0, security: 0, ban: 0, sms: 0, notRegistered: 0, noRoutes: 0 };
   for (const r of results) {
     const weight = Number(r.confidence) || 0.5;
     if (r.isBanned === true || r.accountStatus === 'BANNED') score.ban += weight;
     else if (r.isSecurityBlock === true || r.accountStatus === 'SECURITY_BLOCK') score.security += weight;
     else if (r.isCloneBlocked === true || r.accountStatus === 'CLONE_BLOCKED') score.clone += weight;
+    else if (r.registrationStatus === 'NOT_REGISTERED' || r.accountStatus === 'NOT_REGISTERED') score.notRegistered += weight;
+    else if (r.routeStatus === 'NO_ROUTES' || r.accountStatus === 'NO_ROUTES') score.noRoutes += weight;
     else if (r.anyCooldown) score.cooldown += weight;
     else if (r.smsOptionMissing) score.sms += weight;
     else if (r.isReady) score.ready += weight;
@@ -475,6 +478,8 @@ function mergeConsensus(results) {
     if (best === 'ban') return r.isBanned === true || r.accountStatus === 'BANNED';
     if (best === 'security') return r.isSecurityBlock === true || r.accountStatus === 'SECURITY_BLOCK';
     if (best === 'clone') return r.isCloneBlocked === true || r.accountStatus === 'CLONE_BLOCKED';
+    if (best === 'notRegistered') return r.registrationStatus === 'NOT_REGISTERED' || r.accountStatus === 'NOT_REGISTERED';
+    if (best === 'noRoutes') return r.routeStatus === 'NO_ROUTES' || r.accountStatus === 'NO_ROUTES';
     if (best === 'cooldown') return r.anyCooldown || r.softFallback;
     if (best === 'sms') return r.smsOptionMissing;
     if (best === 'ready') return r.isReady;
@@ -492,6 +497,9 @@ function softFallback(rawNumber, payloads, countryIso2, lastError) {
     formattedNumber: normalizeDisplayNumber(rawNumber, payloads && payloads.phoneInfo, null),
     region: null,
     accountStatus: 'UNKNOWN',
+    registrationStatus: 'UNKNOWN',
+    routeStatus: 'UNKNOWN',
+    deviceStatus: 'UNKNOWN',
     isBanned: false,
     isCloneBlocked: false,
     isSecurityBlock: false,
