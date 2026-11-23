@@ -393,14 +393,13 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const anyChannelSignal =
     timers.sms > 0 || timers.voice > 0 || timers.flash > 0 || timers.email > 0 ||
     timers.wa_old > 0 || timers.is_code_sent || hasDevicePath;
+  const hasNoSmsRoute =
+    timers.exist_no_routes || timers.code_no_routes ||
+    engineState === 'NO_ROUTES' || patternHints.includes('NO_ROUTES');
   const smsOptionMissing =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && !effectiveCooldown && !isReady &&
-    !hasDevicePath && !isPartial && !anyChannelSignal &&
-    (
-      (timers.exist_no_routes && smsAvailable === false) ||
-      (engineState === 'NO_ROUTES' && patternHints.includes('NO_ROUTES') && smsAvailable === false)
-    ) &&
-    !patternHints.includes('HIGH_REREG');
+    !isBanned && !isCloneBlocked && !isSecurityBlock &&
+    !effectiveCooldown && !isReady && !isPartial &&
+    hasNoSmsRoute && smsAvailable !== true;
   if (smsOptionMissing) reasons.push('sms_option_missing');
   if (isReady) reasons.push('ready');
   if (effectiveCooldown) reasons.push('cooldown');
@@ -417,11 +416,13 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     description = hasDevicePath && timers.device_name
       ? 'SMS siap · perangkat terdaftar di ' + timers.device_name
       : (hasDevicePath ? 'SMS siap · perangkat terdaftar' : 'SMS siap menerima OTP.');
+  } else if (smsOptionMissing) {
+    description = 'Jalur SMS tidak tersedia untuk nomor ini (no_routes).';
   } else if (hasDevicePath) {
     description = 'Informasi perangkat tersedia, tetapi kelayakan SMS belum terkonfirmasi.';
   } else if (timers.is_code_sent) {
     description = 'Respons menunjukkan proses verifikasi berjalan; kesiapan SMS baru belum terkonfirmasi.';
-  } else if (smsOptionMissing) description = 'Opsi SMS tidak tersedia untuk nomor ini.';
+  }
   else description = 'Status SMS belum dapat dipastikan dari respons yang tersedia.';
 
   let accountStatus = 'UNKNOWN';
@@ -431,7 +432,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (isReady && (hasDevicePath || timers.wa_old_eligible)) accountStatus = 'REGISTERED_ON_DEVICE';
   else if (isReady) accountStatus = 'READY';
   else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
-  else if (smsOptionMissing) accountStatus = 'SMS_UNAVAILABLE';
+  else if (smsOptionMissing) accountStatus = 'NO_ROUTES';
 
   // Confidence reflects account-response evidence only, never proxy geography
   // or several correlated hints from the same response.
