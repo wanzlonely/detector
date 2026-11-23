@@ -19,6 +19,7 @@
  */
 const WADetector = require('./waEngine');
 const { applyPatternLibrary, detectBanSignals, detectCloneSignals } = require('./lib/statusSignals');
+const { normalize, detectRegistrationStatus, detectRouteStatus, detectDeviceStatus } = require('./lib/registrationSignals');
 const { executeWithProxyRotation, getHealth } = require('./proxyManager');
 
 const REQUEST_TIMEOUT_MS = Number(process.env.WA_CHECK_TIMEOUT_MS || 8000);
@@ -195,8 +196,9 @@ function firstExplicitTimer(source, keys) {
 function extractChannelTimers(existRaw, codeRaw) {
   const exist = existRaw || {};
   const code = codeRaw || {};
-  const existNoRoutes = exist.reason === 'no_routes' || exist.reason === 'no_route';
-  const codeNoRoutes = code.reason === 'no_routes' || code.reason === 'no_route';
+  const noRouteCodes = ['no_routes', 'no_route', 'no_sms_route', 'sms_no_routes'];
+  const existNoRoutes = [exist.reason, exist.status, exist.route_status, exist.sms_route_status].some((value) => noRouteCodes.includes(normalize(value)));
+  const codeNoRoutes = [code.reason, code.status, code.route_status, code.sms_route_status].some((value) => noRouteCodes.includes(normalize(value)));
   // Prefer the first explicit SMS timer field from /exist. Do not take the
   // maximum across distinct fields or let a later /code response overwrite it.
   const existSmsValue = existNoRoutes ? 0 : firstExplicitTimer(exist, ['sms_wait', 'send_sms_wait', 'sms_cooldown']);
@@ -226,14 +228,13 @@ function extractChannelTimers(existRaw, codeRaw) {
   let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
   if (voiceWait >= 240 && existVoice === 0 && isWaOldMethod) voiceWait = 0;
   if (flashWait >= 240 && existFlash === 0 && isWaOldMethod) flashWait = 0;
-  const waOldEligible =
-    Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1 ||
-    Boolean(exist.wa_old_device_name || code.wa_old_device_name);
-  const deviceName = exist.wa_old_device_name || code.wa_old_device_name || exist.device_name || code.device_name || null;
+  const deviceSignal = detectDeviceStatus(exist, code);
+  const waOldEligible = deviceSignal.status === 'ON_DEVICE' || deviceSignal.status === 'DEVICE_PATH';
+  const deviceName = deviceSignal.deviceName;
   return {
     sms: smsSeconds, voice: voiceWait, flash: flashWait, email: emailWait, wa_old: waOldWait,
     retry_after: Math.max(existRetry, codeRetry),
-    wa_old_eligible: waOldEligible, device_name: deviceName, is_wa_old_echo: isWaOldEcho,
+    wa_old_eligible: waOldEligible, device_name: deviceName, device_status: deviceSignal.status, is_wa_old_echo: isWaOldEcho,
     exist_no_routes: existNoRoutes, code_no_routes: codeNoRoutes, is_code_sent: isCodeSent,
     exist_sms: existSms, code_sms: codeSmsRaw
   };
@@ -298,6 +299,9 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const engineState = String((parsed && parsed.state) || '').toUpperCase();
   const patternHints = applyPatternLibrary(existResponse, codeResponse, timers);
   const smsAvailable = resolveSmsAvailability(existResponse, codeResponse);
+  const registrationStatus = detectRegistrationStatus(existResponse, codeResponse);
+  const routeStatus = detectRouteStatus(existResponse, codeResponse);
+  const deviceSignal = detectDeviceStatus(existResponse, codeResponse);
   const channels = {
     sms: buildChannel(timers.sms), voice: buildChannel(timers.voice), flash: buildChannel(timers.flash),
     email: buildChannel(timers.email), wa_old: buildChannel(timers.wa_old)
@@ -336,12 +340,14 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     reasons.push('ban_soft_cleared');
   }
 
-  const hasDevicePath = Boolean(timers.wa_old_eligible || timers.device_name || engineState === 'REGISTERED_ON_DEVICE');
+  const hasDevicePath = deviceSignal.status === 'ON_DEVICE';
+  const hasDevicePathAvailable = hasDevicePath || deviceSignal.status === 'DEVICE_PATH';
+  const isNotRegistered = registrationStatus === 'NOT_REGISTERED';
 
   // Only an explicit SMS timer creates the SMS cooldown category. Voice,
   // email, wa_old and generic retry_after timers remain separate signals.
   const meaningfulCooldown =
-    !isBanned && !isCloneBlocked && !isSecurityBlock && hasLiveSms;
+    !isBanned && !isCloneBlocked && !isSecurityBlock && !isNotRegistered && hasLiveSms;
 
   const hasOpenPath = smsAvailable === true && !timers.exist_no_routes && !timers.code_no_routes;
 
@@ -349,7 +355,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   // HIGH-REREG and other methods are not proof that a fresh SMS OTP can be sent.
   let isReady = false;
   if (!isBanned && !isCloneBlocked && !isSecurityBlock &&
-      smsAvailable === true && !hasLiveSms && !timers.exist_no_routes && !timers.code_no_routes) {
+      !isNotRegistered && smsAvailable === true && !hasLiveSms && routeStatus !== 'NO_ROUTES' && !timers.exist_no_routes && !timers.code_no_routes) {
     isReady = true;
     reasons.push('explicit_sms_eligible');
   }
@@ -359,12 +365,11 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   const isPartial = Boolean(meta && (meta.partial || meta.existOnly));
   const anyChannelSignal =
     timers.sms > 0 || timers.voice > 0 || timers.flash > 0 || timers.email > 0 ||
-    timers.wa_old > 0 || timers.is_code_sent || hasDevicePath;
-  const hasNoSmsRoute =
-    timers.exist_no_routes || timers.code_no_routes ||
+    timers.wa_old > 0 || timers.is_code_sent || hasDevicePathAvailable;
+  const hasNoSmsRoute = routeStatus === 'NO_ROUTES' || timers.exist_no_routes || timers.code_no_routes ||
     engineState === 'NO_ROUTES' || patternHints.includes('NO_ROUTES');
   const smsOptionMissing =
-    !isBanned && !isCloneBlocked && !isSecurityBlock &&
+    !isBanned && !isCloneBlocked && !isSecurityBlock && !isNotRegistered &&
     !effectiveCooldown && !isReady && !isPartial &&
     hasNoSmsRoute && smsAvailable !== true;
   if (smsOptionMissing) reasons.push('sms_option_missing');
@@ -375,6 +380,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   if (isBanned) description = 'Nomor dibatasi / diblokir oleh WhatsApp.';
   else if (isCloneBlocked) description = 'Membutuhkan aplikasi WhatsApp resmi (tidak support clone).';
   else if (isSecurityBlock) description = 'Demi keamanan: login sementara tidak tersedia.';
+  else if (isNotRegistered) description = 'Nomor tidak terdaftar pada layanan WhatsApp berdasarkan sinyal eksplisit respons.';
   else if (effectiveCooldown) {
     const ch = channels.sms;
     const t = (ch && (ch.humanTime || ch.uiTimer)) || 'aktif';
@@ -396,10 +402,11 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   if (isBanned) accountStatus = 'BANNED';
   else if (isCloneBlocked) accountStatus = 'CLONE_BLOCKED';
   else if (isSecurityBlock) accountStatus = 'SECURITY_BLOCK';
-  else if (isReady && (hasDevicePath || timers.wa_old_eligible)) accountStatus = 'REGISTERED_ON_DEVICE';
+  else if (isNotRegistered) accountStatus = 'NOT_REGISTERED';
+  else if (isReady && hasDevicePath) accountStatus = 'REGISTERED_ON_DEVICE';
   else if (isReady) accountStatus = 'READY';
   else if (effectiveCooldown) accountStatus = 'IN_COOLDOWN';
-  else if (smsOptionMissing) accountStatus = 'NO_ROUTES';
+  else if (smsOptionMissing || (hasNoSmsRoute && !isPartial && registrationStatus !== 'NOT_REGISTERED')) accountStatus = 'NO_ROUTES';
 
   // Confidence reflects account-response evidence only, never proxy geography
   // or several correlated hints from the same response.
@@ -409,7 +416,8 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   else if (isCloneBlocked || isSecurityBlock) confidence = 0.88;
   else if (effectiveCooldown && hasLiveSms) confidence = 0.93;
   else if (isReady && smsAvailable === true) confidence = 0.86;
-  else if (smsOptionMissing) confidence = 0.75;
+  else if (isNotRegistered) confidence = 0.9;
+  else if (smsOptionMissing || routeStatus === 'NO_ROUTES') confidence = 0.82;
 
   if (meta && meta.partial) confidence = Math.max(0.4, confidence - 0.08);
   if (meta && meta.existOnly) confidence = Math.min(confidence, 0.88);
@@ -421,7 +429,7 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
 
   let secondaryPath = null;
   let secondarySeconds = 0;
-  if (hasDevicePath) {
+  if (hasDevicePathAvailable) {
     secondaryPath = 'device';
   } else if (hasLiveSms) {
     secondaryPath = 'cooldown';
@@ -433,8 +441,9 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   return {
     formattedNumber: normalizeDisplayNumber(payloads.rawNumber, payloads.phoneInfo, parsed && parsed.phone),
     region: (payloads.phoneInfo && (payloads.phoneInfo.region || payloads.phoneInfo.country)) || null,
-    accountStatus, isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
-    anyCooldown: effectiveCooldown, description, deviceName: timers.device_name || null, waOldEligible: Boolean(timers.wa_old_eligible || hasDevicePath),
+    accountStatus, registrationStatus, routeStatus, deviceStatus: deviceSignal.status,
+    isBanned, isCloneBlocked, isSecurityBlock, isReady, smsAvailable, smsOptionMissing,
+    anyCooldown: effectiveCooldown, description, deviceName: deviceSignal.deviceName, waOldEligible: Boolean(timers.wa_old_eligible),
     channels, primaryTimer: { rawSeconds: primary.rawSeconds, uiTimer: primary.uiTimer, humanTime: primary.humanTime },
     proxyInfo: proxyMode + ' · ' + sessionTag, proxyTag: sessionTag, proxyCountry: countryIso2,
     confidence, existClear, needsRecheck, decisionReasons: reasons, patternHints,
