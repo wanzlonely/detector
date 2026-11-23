@@ -21,6 +21,44 @@ function stickyGet(raw) {
   return hit.result;
 }
 
+const SESSION_REDIS_TTL = 720;
+async function loadSessionRestore(rawNumber) {
+  try {
+    const key = 'wasess:' + String(rawNumber || '').replace(/\D/g, '');
+    if (!key || key === 'wasess:') return null;
+    const snap = await redis.get(key);
+    if (!snap) return null;
+    if (typeof snap === 'string') {
+      try { return JSON.parse(snap); } catch (_) { return null; }
+    }
+    return snap && snap.authkey ? snap : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function saveSessionSnapshot(rawNumber, snapshot) {
+  try {
+    if (!snapshot || !snapshot.authkey) return;
+    const key = 'wasess:' + String(rawNumber || '').replace(/\D/g, '');
+    if (!key || key === 'wasess:') return;
+    await redis.set(key, snapshot, { ex: SESSION_REDIS_TTL });
+  } catch (_) {}
+}
+
+async function buildPayloadsForNumber(rawNumber, extraOpts) {
+  const opts = Object.assign({}, extraOpts || {});
+  if (!opts.sessionRestore) {
+    const restored = await loadSessionRestore(rawNumber);
+    if (restored) opts.sessionRestore = restored;
+  }
+  const payloads = await WADetector.buildDualPayloads(String(rawNumber), opts);
+  if (payloads && payloads.success && payloads.sessionSnapshot) {
+    saveSessionSnapshot(rawNumber, payloads.sessionSnapshot).catch(() => {});
+  }
+  return payloads;
+}
+
 function stickySet(raw, result) {
   const key = String(raw || '').replace(/\D/g, '');
   if (!key || !result || result.softFallback || result.error) return;
@@ -137,9 +175,11 @@ async function postWithTimeout(url, body, headers, dispatcher) {
   }
 }
 
-async function checkProxyHealth(dispatcher) {
+async function checkProxyHealth(dispatcher, opts) {
+  if (opts && opts.skip) return true;
+  if (process.env.PROXY_HEALTH_CHECK === '0') return true;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 3500);
+  const timer = setTimeout(() => controller.abort(), 1800);
   const headers = {
     'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -475,24 +515,26 @@ function detectCloneSignals(exist, code, parsed) {
   return { isCloneBlocked: Boolean(unofficial), isSecurityBlock: Boolean(security) && !unofficial };
 }
 
-async function runExistOnlyProbe(payloads, headers, countryIso2) {
+async function runExistOnlyProbe(payloads, headers, countryIso2, probeOpts) {
+  const skipHealth = Boolean(probeOpts && probeOpts.skipHealth);
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    await checkProxyHealth(proxyCtx.dispatcher);
+    await checkProxyHealth(proxyCtx.dispatcher, { skip: skipHealth });
     const existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
     return { existText, codeText: null, partial: true };
   }, 2, countryIso2);
   return { existText: data.existText || null, codeText: null, partial: true, proxyMode, sessionTag, existOnly: true };
 }
 
-async function runDualProbe(payloads, headers, countryIso2) {
+async function runDualProbe(payloads, headers, countryIso2, probeOpts) {
+  const skipHealth = Boolean(probeOpts && probeOpts.skipHealth);
   const { data, proxyMode, sessionTag } = await executeWithProxyRotation(async (proxyCtx) => {
-    await checkProxyHealth(proxyCtx.dispatcher);
+    await checkProxyHealth(proxyCtx.dispatcher, { skip: skipHealth });
     let existText = null;
     let codeText = null;
     try {
       existText = await postWithTimeout(payloads.exist.url, payloads.exist.body, headers, proxyCtx.dispatcher);
     } catch (_) {}
-    await sleep(25);
+    await sleep(20);
     try {
       codeText = await postWithTimeout(payloads.code.url, payloads.code.body, headers, proxyCtx.dispatcher);
     } catch (_) {}
@@ -830,7 +872,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
     }
   }
 
-  const payloads = await WADetector.buildDualPayloads(String(rawNumber), {
+  const payloads = await buildPayloadsForNumber(rawNumber, {
     mode: 'read',
     forceNewSession: false
   });
@@ -841,7 +883,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
 
   if (opts.forceRefresh || opts.wave === 'exist') {
     try {
-      const probe = await runExistOnlyProbe(payloads, headers, countryIso2);
+      const probe = await runExistOnlyProbe(payloads, headers, countryIso2, { skipHealth: true });
       const result = classifyFromResponses(
         payloads,
         probe.existText,
@@ -964,7 +1006,7 @@ async function triggerEmailVerification(rawNumber) {
   let countryIso2 = null;
   let headers = null;
 
-  sharedPayloads = await WADetector.buildDualPayloads(String(rawNumber), {
+  sharedPayloads = await buildPayloadsForNumber(rawNumber, {
     method: 'email',
     mode: 'write',
     forceNewSession: false
@@ -988,7 +1030,7 @@ async function triggerEmailVerification(rawNumber) {
   );
 
   for (const method of methods) {
-    const payloads = await WADetector.buildDualPayloads(String(rawNumber), {
+    const payloads = await buildPayloadsForNumber(rawNumber, {
       method,
       mode: 'write',
       forceNewSession: false
