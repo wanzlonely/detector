@@ -159,14 +159,18 @@ function extractChannelTimers(existRaw, codeRaw) {
   const code = codeRaw || {};
   const existNoRoutes = exist.reason === 'no_routes' || exist.reason === 'no_route';
   const codeNoRoutes = code.reason === 'no_routes' || code.reason === 'no_route';
+  
+  // Prioritas utama: timer dari exist (UI WhatsApp)
   const existSms = existNoRoutes ? 0 : Math.max(num(exist.sms_wait), num(exist.send_sms_wait), num(exist.sms_cooldown));
   const codeSmsRaw = codeNoRoutes ? 0 : Math.max(num(code.sms_wait), num(code.send_sms_wait), num(code.sms_cooldown));
+  
   const existVoice = Math.max(num(exist.voice_wait), num(exist.voice_cooldown));
   const codeVoice = Math.max(num(code.voice_wait), num(code.voice_cooldown));
   const existFlash = Math.max(num(exist.flash_wait), num(exist.flash_cooldown));
   const codeFlash = Math.max(num(code.flash_wait), num(code.flash_cooldown));
   const existEmail = Math.max(num(exist.email_wait), num(exist.email_cooldown));
   const codeEmail = Math.max(num(code.email_wait), num(code.email_cooldown));
+  
   const waOldWait = Math.max(num(exist.wa_old_wait), num(exist.wa_old_cooldown), num(code.wa_old_wait), num(code.wa_old_cooldown));
   const existRetry = existNoRoutes ? 0 : num(exist.retry_after);
   const codeRetry = codeNoRoutes ? 0 : num(code.retry_after);
@@ -175,23 +179,29 @@ function extractChannelTimers(existRaw, codeRaw) {
   const codeMethod = String(code.method || code.login_method || '').toLowerCase();
   const isWaOldMethod = codeMethod.includes('wa_old');
 
-  let smsSeconds = Math.max(existSms, codeSmsRaw);
-  let voiceWait = existVoice > 0 ? existVoice : codeVoice;
-  let flashWait = existFlash > 0 ? existFlash : codeFlash;
-  let emailWait = existEmail > 0 ? existEmail : codeEmail;
+  // Deteksi false echo dari wa_old (sering mengembalikan 120-300s padahal SMS open)
+  const isWaOldEcho = existSms === 0 && codeSmsRaw > 0 && codeSmsRaw <= 360 && (isCodeSent || isWaOldMethod || true);
+
+  // Tentukan timer SMS final
+  let smsSeconds = existSms;
+  if (smsSeconds === 0 && !isWaOldEcho && !isCodeSent && codeSmsRaw >= 600) {
+    smsSeconds = codeSmsRaw;
+  }
+
+  let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
+  let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
+  let emailWait = existEmail > 0 ? existEmail : (isWaOldEcho ? 0 : codeEmail);
   
   if (voiceWait >= 240 && existVoice === 0 && isWaOldMethod) voiceWait = 0;
   if (flashWait >= 240 && existFlash === 0 && isWaOldMethod) flashWait = 0;
   
   const deviceName = pickDeviceName(exist, code);
-  const waOldEligible =
-    Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1 ||
-    Boolean(deviceName);
+  const waOldEligible = Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1 || Boolean(deviceName);
     
   return {
     sms: smsSeconds, voice: voiceWait, flash: flashWait, email: emailWait, wa_old: waOldWait,
     retry_after: Math.max(existRetry, codeRetry),
-    wa_old_eligible: waOldEligible, device_name: deviceName,
+    wa_old_eligible: waOldEligible, device_name: deviceName, is_wa_old_echo: isWaOldEcho,
     exist_no_routes: existNoRoutes, code_no_routes: codeNoRoutes, is_code_sent: isCodeSent,
     exist_sms: existSms, code_sms: codeSmsRaw
   };
@@ -261,6 +271,7 @@ function applyPatternLibrary(exist, code, timers) {
   const reason = String(exist.reason || code.reason || '').toLowerCase();
   const status = String(exist.status || code.status || '').toLowerCase();
   const hints = [];
+  if (timers.is_wa_old_echo) hints.push('WA_OLD_ECHO');
   if (reason === 'temporarily_unavailable' || status === 'temporarily_unavailable') hints.push('TEMP_LOCK');
   if (reason.includes('too_many') || reason === 'too_recent') hints.push('RATE_LIMIT');
   if (exist.high_sms_rereg_user || code.high_sms_rereg_user) hints.push('HIGH_REREG');
@@ -433,12 +444,14 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
   );
   const existAnswered = Boolean(existText && String(existText).trim());
 
+  // Sumber kebenaran SMS CD: HANYA dari timers.sms (yang sudah difilter di extractChannelTimers)
   let smsSeconds = timers.sms;
   const engineCd = Math.max(0, Number(parsed && parsed.cooldownSeconds) || 0);
   const st = String((parsed && parsed.state) || '').toUpperCase();
 
-  if (parsed && parsed.isCooldown && engineCd > 0) {
-    smsSeconds = Math.max(smsSeconds, engineCd);
+  // Engine CD hanya dipercaya jika >= 10 menit (bukan echo 125s/300s)
+  if (smsSeconds === 0 && engineCd >= 600 && parsed && parsed.isCooldown && !parsed.isReady) {
+    smsSeconds = engineCd;
   }
 
   let isCooldown = false;
@@ -457,22 +470,25 @@ function classifyFromResponses(payloads, existText, codeText, proxyMode, session
     } else if (existAnswered && !existNoRoutes) {
       isReady = true;
       isCooldown = false;
-    } else if (isTempLock && engineCd > 0) {
+    } else if (isTempLock && engineCd >= 600) {
       isCooldown = true;
       isReady = false;
       smsSeconds = engineCd;
     } else if (st === 'IN_COOLDOWN' || st === 'TEMP_LOCKED_COOLDOWN' || st === 'RATE_LIMITED_COOLDOWN') {
-      if (engineCd > 0) {
+      if (engineCd >= 600) {
         isCooldown = true;
         smsSeconds = engineCd;
-      } else if (existAnswered) {
+      } else if (parsed && parsed.isCooldown && engineCd > 0 && timers.exist_sms > 0) {
+        isCooldown = true;
+        smsSeconds = timers.exist_sms;
+      } else if (parsed && parsed.isReady) {
         isReady = true;
       } else {
         isReady = true;
       }
-    } else if (parsed && parsed.isCooldown) {
+    } else if (parsed && parsed.isCooldown && timers.exist_sms > 0) {
       isCooldown = true;
-      smsSeconds = Math.max(timers.exist_sms, engineCd, 60);
+      smsSeconds = timers.exist_sms;
     } else if (existAnswered) {
       isReady = true;
     }
