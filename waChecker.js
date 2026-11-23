@@ -70,14 +70,25 @@ function buildHeaders(userAgent, countryIso2) {
     'Connection': 'keep-alive',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
+    'Origin': 'https://www.whatsapp.com',
+    'Referer': 'https://www.whatsapp.com/',
     'Sec-Fetch-Dest': 'empty',
     'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-origin'
+    'Sec-Fetch-Site': 'same-site',
+    'Sec-Fetch-User': '?1'
   };
   if (isIOS) {
     headers['Sec-CH-UA-Mobile'] = '?1';
     headers['Sec-CH-UA-Platform'] = '"iOS"';
+    headers['Sec-CH-UA'] = '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"';
+    headers['Sec-CH-UA-Platform-Version'] = '"17.0.0"';
   } else if (isAndroid) {
+    headers['Sec-CH-UA-Mobile'] = '?1';
+    headers['Sec-CH-UA-Platform'] = '"Android"';
+    headers['Sec-CH-UA'] = '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"';
+    headers['Sec-CH-UA-Platform-Version'] = '"13.0.0"';
+    headers['Sec-CH-UA-Model'] = '"SM-S918B"';
+  } else {
     headers['Sec-CH-UA-Mobile'] = '?1';
     headers['Sec-CH-UA-Platform'] = '"Android"';
   }
@@ -238,11 +249,19 @@ function extractChannelTimers(existRaw, codeRaw) {
   const isWaOldEcho =
     existSms === 0 &&
     codeSmsRaw > 0 &&
-    codeSmsRaw <= 90 &&
+    codeSmsRaw <= 180 &&
     isWaOldMethod &&
-    !isCodeSent;
+    !isCodeSent &&
+    (
+      (waOldWait > 0 && Math.abs(codeSmsRaw - waOldWait) <= 15) ||
+      codeSmsRaw <= 130 ||
+      String(code.reason || '').toLowerCase() === 'too_recent' ||
+      String(code.reason || '').toLowerCase() === 'too_many'
+    );
 
-  let smsSeconds = Math.max(existSms, isWaOldEcho ? 0 : codeSmsRaw);
+  let smsSeconds = existSms > 0
+    ? existSms
+    : (isWaOldEcho ? 0 : codeSmsRaw);
 
   let voiceWait = existVoice > 0 ? existVoice : (isWaOldEcho ? 0 : codeVoice);
   let flashWait = existFlash > 0 ? existFlash : (isWaOldEcho ? 0 : codeFlash);
@@ -250,6 +269,11 @@ function extractChannelTimers(existRaw, codeRaw) {
 
   if (voiceWait >= 240 && existVoice === 0 && isWaOldMethod) voiceWait = 0;
   if (flashWait >= 240 && existFlash === 0 && isWaOldMethod) flashWait = 0;
+  if (isWaOldEcho && smsSeconds === 0 && existSms === 0) {
+    voiceWait = existVoice;
+    flashWait = existFlash;
+    emailWait = existEmail;
+  }
 
   const deviceName = pickDeviceName(exist, code);
   const explicitEligible = Number(exist.wa_old_eligible ?? code.wa_old_eligible ?? 0) === 1;
@@ -822,10 +846,12 @@ async function checkWhatsAppCooldown(rawNumber, options) {
     try {
       const existProbe = await runExistOnlyProbe(payloads, headers, countryIso2);
       const existResult = classifyFromResponses(payloads, existProbe.existText, null, existProbe.proxyMode, existProbe.sessionTag, countryIso2, { partial: true, existOnly: true });
-      if (existResult.existClear && !existResult.needsRecheck) {
-        const outClear = { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
-        stickySet(rawNumber, outClear);
-        return outClear;
+      if (existResult.existClear && !existResult.needsRecheck && (existResult.isBanned || existResult.isCloneBlocked || existResult.isSecurityBlock || existResult.anyCooldown || existResult.isReady)) {
+        if (!(opts.forceRefresh && existResult.isReady && !existResult.anyCooldown)) {
+          const outClear = { ...existResult, probeMode: 'exist_clear', consensusRounds: 1 };
+          if (!opts.forceRefresh) stickySet(rawNumber, outClear);
+          return outClear;
+        }
       }
     } catch (_) {}
   }
@@ -842,8 +868,52 @@ async function checkWhatsAppCooldown(rawNumber, options) {
             await sleep(100);
             continue;
           }
-          const out = { ...result, probeMode: 'dual', consensusRounds: rounds.length };
-          stickySet(rawNumber, out);
+          let out = { ...result, probeMode: 'dual', consensusRounds: rounds.length };
+          if (result.deviceName && !opts.skipDeviceReplay) {
+            try {
+              const replayPayloads = await WADetector.buildDualPayloads(String(rawNumber), {
+                method: 'wa_old',
+                deviceName: result.deviceName
+              });
+              if (replayPayloads.success) {
+                replayPayloads.rawNumber = String(rawNumber);
+                const replayHeaders = buildHeaders(replayPayloads.userAgent, countryIso2);
+                const replayDual = await runDualProbe(replayPayloads, replayHeaders, countryIso2);
+                const replayResult = classifyFromResponses(
+                  replayPayloads,
+                  replayDual.existText,
+                  replayDual.codeText,
+                  replayDual.proxyMode,
+                  replayDual.sessionTag,
+                  countryIso2,
+                  { partial: replayDual.partial, existOnly: false }
+                );
+                if (replayResult && !replayResult.needsRecheck && replayResult.accountStatus !== 'UNKNOWN') {
+                  replayResult.deviceName = replayResult.deviceName || result.deviceName;
+                  replayResult.waOldEligible = true;
+                  const existSmsKeep = Number(result.secondarySeconds || 0);
+                  const replaySms = Number(replayResult.secondarySeconds || 0);
+                  if (existSmsKeep > 0 && (replaySms === 0 || Math.abs(existSmsKeep - replaySms) > 45)) {
+                    replayResult.anyCooldown = result.anyCooldown;
+                    replayResult.channels = result.channels;
+                    replayResult.primaryTimer = result.primaryTimer;
+                    replayResult.secondarySeconds = result.secondarySeconds;
+                    replayResult.isReady = result.isReady;
+                    replayResult.accountStatus = result.accountStatus;
+                    replayResult.description = result.description;
+                  }
+                  out = { ...replayResult, probeMode: 'dual_device_replay', consensusRounds: rounds.length + 1, deviceReplayed: true };
+                } else {
+                  out.deviceName = result.deviceName;
+                  out.waOldEligible = true;
+                }
+              }
+            } catch (_) {
+              out.deviceName = result.deviceName;
+              out.waOldEligible = Boolean(result.deviceName || result.waOldEligible);
+            }
+          }
+          if (!opts.forceRefresh) stickySet(rawNumber, out);
           return out;
         }
       }
@@ -853,7 +923,7 @@ async function checkWhatsAppCooldown(rawNumber, options) {
       }
       if (rounds.length >= 2) {
         const mc = { ...mergeConsensus(rounds), probeMode: 'consensus' };
-        stickySet(rawNumber, mc);
+        if (!opts.forceRefresh) stickySet(rawNumber, mc);
         return mc;
       }
       return { ...result, probeMode: 'dual', consensusRounds: rounds.length };
