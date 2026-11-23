@@ -322,7 +322,9 @@ function formatCooldownSmallCaps(seconds) {
   // round upward so the displayed wait never understates the remaining time.
   if (sec < 60) return sec + 'ᴅ';
 
-  const totalMinutes = Math.ceil(sec / 60);
+  // Keep longer waits at their displayed whole-minute value (5m20s -> 5m),
+  // but round a near-immediate wait up (1m10s -> 2m).
+  const totalMinutes = sec < 120 ? Math.ceil(sec / 60) : Math.floor(sec / 60);
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
   const parts = [];
