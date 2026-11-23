@@ -120,7 +120,7 @@ async function consumeQuota(telegramId, count = 1) {
   const used = Number((await redis.get(quotaKey)) || 0);
   const bonusKey = 'referral:bonus_quota:' + telegramId;
   const bonus = Number(await redis.get(bonusKey) || 0);
-  
+
   if (bonus >= count) {
     await redis.incrby(bonusKey, -count);
     user.total_checks = Number(user.total_checks || 0) + count;
@@ -129,7 +129,7 @@ async function consumeQuota(telegramId, count = 1) {
     await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
-  
+
   if (bonus > 0 && used + (count - bonus) <= 3) {
     await redis.incrby(bonusKey, -bonus);
     await redis.incrby(quotaKey, count - bonus);
@@ -140,7 +140,7 @@ async function consumeQuota(telegramId, count = 1) {
     await redis.zadd('leaderboard:checks', { score: Number(user.total_checks || 0), member: String(telegramId) });
     return true;
   }
-  
+
   if (used + count <= 3) {
     await redis.incrby(quotaKey, count);
     await redis.expire(quotaKey, 90000);
@@ -154,7 +154,7 @@ async function consumeQuota(telegramId, count = 1) {
   return false;
 }
 
-async function activateVip(telegramId, days, tier = 'STANDARD', planName = null) {
+async function activateVip(telegramId, days, tier = 'PREMIUM', planName = null) {
   const userKey = `user:${telegramId}`;
   let user = await redis.get(userKey);
   if (!user) {
@@ -212,11 +212,22 @@ function normalizePhoneForCache(rawNumber) {
   return String(rawNumber).replace(/\D/g, '');
 }
 
+function ensureEmailFields(result) {
+  if (!result || typeof result !== 'object') return result;
+  if (result.maskedEmail === undefined) result.maskedEmail = null;
+  if (result.emailVerified === undefined) result.emailVerified = Boolean(result.maskedEmail);
+  return result;
+}
+
 async function getCachedCheckResult(rawNumber) {
   if (CHECK_CACHE_TTL_SECONDS <= 0) return null;
   const key = `checkcache:${normalizePhoneForCache(rawNumber)}`;
   const cached = await redis.get(key);
-  return cached || null;
+  if (!cached) return null;
+  if (typeof cached === 'string') {
+    try { return ensureEmailFields(JSON.parse(cached)); } catch (_) { return null; }
+  }
+  return ensureEmailFields(cached);
 }
 
 async function setCachedCheckResult(rawNumber, result) {
@@ -225,9 +236,10 @@ async function setCachedCheckResult(rawNumber, result) {
   if (result.anyCooldown || result.accountStatus === 'IN_COOLDOWN' || result.isBanned) return;
   if (result.accountStatus === 'UNKNOWN') return;
 
+  const normalized = ensureEmailFields({ ...result });
   const key = `checkcache:${normalizePhoneForCache(rawNumber)}`;
   const ttl = Math.min(CHECK_CACHE_TTL_SECONDS, 90);
-  await redis.set(key, result, { ex: ttl });
+  await redis.set(key, normalized, { ex: ttl });
 }
 
 async function clearCachedCheckResult(rawNumber) {
