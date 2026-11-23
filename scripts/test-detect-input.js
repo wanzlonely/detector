@@ -30,4 +30,10 @@ assert.equal(international.valid[0], '+447911123456');
 const empty = parseDetectionInput('  \n , ; ', 30);
 assert.equal(empty.ok, false);
 
+const fractionalLimit = parseDetectionInput('+6281234567890\n+6281234567891', 1.9);
+assert.equal(fractionalLimit.ok, false);
+
+const nonPositiveLimit = parseDetectionInput('+6281234567890', 0);
+assert.equal(nonPositiveLimit.ok, true);
+
 process.stdout.write('detectInput tests passed\n');
