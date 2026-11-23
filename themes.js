@@ -245,14 +245,27 @@ function renderAccountDetail(r) {
   const st = r.accountStatus || '-';
   const dev = r.deviceName || (r.waOldEligible ? 'ᴛᴇʀᴅᴀғᴛᴀʀ' : '-');
   const email = r.maskedEmail || '-';
+
   const methods = [].concat(r.recommendedMethods || [], r.fallbackMethods || []);
   const methodStr = methods.length ? methods.slice(0, 6).join(', ') : '-';
+
   const ch = r.channels || {};
+  const formatSecs = (sec) => {
+    if (!sec || sec <= 0) return 'ᴛᴇʀʙᴜᴋᴀ';
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    const h = Math.floor(sec / 3600);
+    if (h > 0) return h + 'j ' + m + 'm ' + s + 's';
+    if (m > 0) return m + 'm ' + s + 's';
+    return s + 's';
+  };
+
   const chLine = (name, c) => {
     if (!c) return name + ' ⦂ -';
     const sec = Number(c.rawSeconds || 0);
-    return name + ' ⦂ ' + (sec > 0 ? (c.uiTimer || sec + 's') : 'ᴛᴇʀʙᴜᴋᴀ');
+    return name + ' ⦂ ' + formatSecs(sec);
   };
+
   const lines = [
     '◈ <b>ᴅᴇᴛᴀɪʟ ᴀᴋᴜɴ</b>',
     '──────────────────────',
@@ -276,6 +289,7 @@ function renderAccountDetail(r) {
     r.wipeType ? ('▸ ᴡɪᴘᴇ ⦂ <b>' + escapeHtml(String(r.wipeType)) + '</b>') : null,
     '▸ ᴋᴇᴛ ⦂ ' + escapeHtml(String(r.description || '-'))
   ].filter(Boolean);
+  
   return lines.join('\n');
 }
 
